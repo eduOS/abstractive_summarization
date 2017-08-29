@@ -10,12 +10,12 @@ import collections
 # import tensorflow as tf
 # from tensorflow.core.example import example_pb2
 import os.path
+from codecs import open
 import jieba as jb
 from cntk.tokenizer import JiebaTokenizer
 from cntk.constants.punctuation import Punctuation
 import re
 tokenizer = JiebaTokenizer()
-# from codecs import open
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 
@@ -31,7 +31,7 @@ all_test_urls = "url_lists/all_test.txt"
 
 cnn_tokenized_stories_dir = "cnn_stories_tokenized"
 dm_tokenized_stories_dir = "dm_stories_tokenized"
-finished_files_dir = "./finished_files"
+finished_files_dir = "./finished_files/"
 chunks_dir = os.path.join(finished_files_dir, "chunked")
 
 # These are the number of .story files we expect there to be in
@@ -45,7 +45,7 @@ CHUNK_SIZE = 1000  # num examples per chunk, for the chunked data
 
 def read_text_file(text_file):
     lines = []
-    with open(text_file, "r") as f:
+    with open(text_file, "r", 'utf-8') as f:
         for line in f:
             lines.append(line.strip())
     return lines
@@ -75,7 +75,7 @@ def get_pairs_from_lcsts(filePath):
 
     # training set
     # f     = open('./dataset/LCSTS/PART_I/PART_full.txt', 'r')
-    f = open(filePath, 'r')
+    f = open(filePath, 'r', 'utf-8')
 
     line = f.readline().strip()
     lines = 0
@@ -110,8 +110,8 @@ def write_to_txt(
         vocab_counter = collections.Counter()
 
     with open(
-        art_out_file, 'wb') as art_writter, open(
-            abs_out_file, 'wb') as abs_writter:
+        art_out_file, 'wb', 'utf-8') as art_writter, open(
+            abs_out_file, 'wb', 'utf-8') as abs_writter:
         for article, abstract in get_pairs_from_lcsts(source_path):
             # string
 
@@ -153,7 +153,9 @@ def write_to_txt(
     # write vocab to file
     if makevocab:
         print("Writing vocab file...")
-        with open(os.path.join(finished_files_dir, "vocab"), 'w') as writer:
+        with open(
+            os.path.join(finished_files_dir, "vocab"), 'w', 'utf-8'
+        ) as writer:
             for word, count in vocab_counter.most_common(VOCAB_SIZE):
                 writer.write(word + ' ' + str(count) + '\n')
         print("Finished writing vocab file")
@@ -183,11 +185,19 @@ if __name__ == '__main__':
     # Read the tokenized stories, do a little postprocessing then write to bin
     # files
     write_to_txt(
-        source_dir+"PART_III.txt", os.path.join(finished_files_dir, "test.txt"))
+        source_dir+"PART_III.txt",
+        os.path.join(finished_files_dir, "test-art.txt"),
+        os.path.join(finished_files_dir, "test-abs.txt")
+    )
     write_to_txt(
-        source_dir+"PART_II.txt", os.path.join(finished_files_dir, "val.txt"))
+        source_dir+"PART_II.txt",
+        os.path.join(finished_files_dir, "val-art.txt"),
+        os.path.join(finished_files_dir, "val-abs.txt")
+    )
     write_to_txt(
-        source_dir+"PART_I.txt", os.path.join(finished_files_dir, "train.txt"),
+        source_dir+"PART_I.txt",
+        os.path.join(finished_files_dir, "train-art.txt"),
+        os.path.join(finished_files_dir, "train-abs.txt"),
         makevocab=True
     )
 
