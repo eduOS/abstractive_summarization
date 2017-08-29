@@ -414,7 +414,7 @@ def tableLookup(
     scope="tableLookup",
     init_device='/cpu:0',
     reuse_var=False,
-     prefix='tablelookup'):
+    prefix='tablelookup'):
 
     if not scope:
         scope = tf.get_variable_scope()
@@ -443,7 +443,8 @@ def FCLayer(
     scope='ff',
     init_device='/cpu:0',
     prefix='ff',
-     precision='float32'):
+    precision='float32'):
+    # it is kind of like linear
 
     if not scope:
         scope = tf.get_variable_scope()
