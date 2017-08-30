@@ -9,7 +9,7 @@ import cPickle as pkl
 
 # from collections import OrderedDict
 from six.moves import xrange, zip
-from sys import os
+import os
 
 from data_iterator import TextIterator
 # from data_iterator import genTextIterator
@@ -764,17 +764,17 @@ class GenNmt(object):
 
             cellDecoder_s.set_pctx_()
 
-            targettable = tableLookup(
-                self.n_words_trg, self.dim_word, scope='targetTable',
-                reuse_var=reuse_var, prefix='Wemb_dec')
+            # targettable = tableLookup(
+            #     self.n_words_trg, self.dim_word, scope='targetTable',
+            #     reuse_var=reuse_var, prefix='Wemb_dec')
 
-            g_prediction = tensor_array_ops.TensorArray(
-                dtype=tf.float32, size=maxlen,
-                dynamic_size=True, infer_shape=True)
+            # g_prediction = tensor_array_ops.TensorArray(
+            #     dtype=tf.float32, size=maxlen,
+            #     dynamic_size=True, infer_shape=True)
 
-            y_sample = tensor_array_ops.TensorArray(
-                dtype=tf.int64, size=maxlen,
-                dynamic_size=True, infer_shape=True)
+            # y_sample = tensor_array_ops.TensorArray(
+            #     dtype=tf.int64, size=maxlen,
+            #     dynamic_size=True, infer_shape=True)
 
             y0 = tf.zeros([1, self.dim_word])
 
@@ -879,7 +879,8 @@ class GenNmt(object):
         generate_batch=2,
         reuse_var=True,
         optimizer=None,
-     gpu_device='/gpu:0'):
+        gpu_device='/gpu:0'
+    ):
         with tf.device(gpu_device):
 
             n_sample = generate_batch
@@ -1059,7 +1060,7 @@ class GenNmt(object):
 
             # y_sample = tf.cond(tf.less(sample_len, 1), f1, f2)
 
-       ###################  for update the parameters ##########################
+            # ##################  for update the parameters ###################
             g_prediction = tensor_array_ops.TensorArray(
                 dtype=tf.float32, size=maxlen,
                 dynamic_size=True, infer_shape=True)
@@ -1123,11 +1124,11 @@ class GenNmt(object):
 
                 next_y = y_input_array.read(i)
 
-                #next_y = tf.reshape(next_y, [-1])[0]
+                # next_y = tf.reshape(next_y, [-1])[0]
 
                 next_emb = tf.nn.embedding_lookup(targettable, next_y)
 
-                #next_emb = tf.reshape(next_emb, [1, self.dim_word])
+                # next_emb = tf.reshape(next_emb, [1, self.dim_word])
 
                 g_prediction = g_prediction.write(i, next_probs)
 
@@ -1137,7 +1138,7 @@ class GenNmt(object):
             gan_index_i = tf.constant(0, dtype=tf.int32)
             gan_index_j = tf.constant(-1, shape=[n_sample], dtype=tf.int32)
 
-            #y_input_len = tf.shape(y)[0]
+            # y_input_len = tf.shape(y)[0]
 
             gan_i, _, _, _, g_prediction = tf.while_loop(
                 cond=lambda gan_i, j, _2, _3, _4: tf.less(gan_i, maxlen),
@@ -1183,7 +1184,9 @@ class GenNmt(object):
                 gen_optimizer = tf.train.RMSPropOptimizer(0.0001)
                 print('using the rmsprop of the model when build generate')
             else:
-                print('using the default optimizer of the model when build generate')
+                print(
+                    'using the default optimizer of \
+                    the model when build generate')
                 gen_optimizer = self.optimizer
 
             g_grad = gen_optimizer.compute_gradients(g_loss, params)
@@ -1271,7 +1274,8 @@ class GenNmt(object):
         ctx = tf.concat(2, [contextForward, contextBackward[::-1]])
 
         ctx_mean = tf.reduce_sum(
-            tf.mul(ctx, x_mask[:, :, None]), 0) / tf.reduce_sum(x_mask, 0)[:, None]
+            tf.mul(ctx, x_mask[:, :, None]), 0) / tf.reduce_sum(
+                x_mask, 0)[:, None]
 
         init_state = FCLayer(
             ctx_mean,
@@ -1377,8 +1381,8 @@ class GenNmt(object):
 
         def recurrency(i, y, emb_y, give_num, init_state, y_sample):
 
-            #print('the dtype of i is ', i.dtype)
-            #print('the shape of y is ', y.dtype)
+            # print('the dtype of i is ', i.dtype)
+            # print('the shape of y is ', y.dtype)
             with tf.variable_scope('decoder'):
                 proj_y = cellDecoder_s(
                     (emb_y, tf.ones([n_sample, self.dim])),
@@ -1488,9 +1492,9 @@ class GenNmt(object):
         params = [
             param for param in tf.trainable_variables()
             if 'generate' in param.name]
-        #params = [param for param in tf.all_variables()]
+        # params = [param for param in tf.all_variables()]
         if not self.sess.run(tf.is_variable_initialized(params[0])):
-            #init_op = tf.initialize_variables(params)
+            # init_op = tf.initialize_variables(params)
             # this is important here to initialize_all_variables()
             init_op = tf.initialize_all_variables()
             self.sess.run(init_op)
@@ -1554,7 +1558,8 @@ class GenNmt(object):
         y_sample_mask,
         rollnum,
         discriminator,
-     bias_num=None):
+        bias_num=None
+    ):
         rewards = []
         for i in range(rollnum):
             for give_num in numpy.arange(1, self.max_len, dtype='int32'):
@@ -1567,17 +1572,19 @@ class GenNmt(object):
                 output = self.sess.run(self.roll_y_sample, feed_dict=feed)
 
                 output = output * y_sample_mask
-                #print('the shape of the y_sample is ', y_sample.shape)
-                #print('the shape of output is ', output.shape)
+                # print('the shape of the y_sample is ', y_sample.shape)
+                # print('the shape of output is ', output.shape)
                 #
-                #samper_str = print_string('y', y_sample[:,0], self.worddicts_r)
-                #output_str = print_string('y', output[:,0], self.worddicts_r)
+                # samper_str = print_string('y', y_sample[:,0],
+                # self.worddicts_r) output_str = print_string('y', output[:,0],
+                # self.worddicts_r)
                 #
-                #samper_str_2 = print_string('y', y_sample[:,1], self.worddicts_r)
-                #output_str_2 = print_string('y', output[:,1], self.worddicts_r)
-                ##print('i is %d give_num is %d' %(i, give_num))
-                # print samper_str
-                # print output_str
+                # samper_str_2 = print_string('y', y_sample[:,1],
+                # self.worddicts_r) output_str_2 = print_string('y',
+                # output[:,1], self.worddicts_r)
+                # #print('i is %d give_num is %d' %(i, give_num))
+                #  print samper_str
+                #  print output_str
 
                 # print samper_str_2
                 # print output_str_2
@@ -1588,7 +1595,7 @@ class GenNmt(object):
                     discriminator.dis_dropout_keep_prob: 1.0}
                 ypred_for_auc = self.sess.run(
                     discriminator.dis_ypred_for_auc, feed_dict=feed)
-                #print('ypred_for_auc is ', ypred_for_auc)
+                # print('ypred_for_auc is ', ypred_for_auc)
                 # print('\n')
                 ypred = numpy.array([item[1] for item in ypred_for_auc])
                 if i == 0:
@@ -1596,9 +1603,9 @@ class GenNmt(object):
                 else:
                     rewards[give_num - 1] += ypred
 
-            #print('the shape of the y_sample is ', y_sample.shape)
-            #y_sample_len_norm = numpy.zeros((self.max_len, 1)).astype('int32')
-            #y_sample_len_norm[:len(y_sample), 0] = y_sample[:,0]
+            # print('the shape of the y_sample is ', y_sample.shape)
+            # y_sample_len_norm = numpy.zeros((self.max_len, 1)).astype('int32')
+            # y_sample_len_norm[:len(y_sample), 0] = y_sample[:,0]
 
             feed = {
                 discriminator.dis_input_x: y_sample,
@@ -1624,7 +1631,7 @@ class GenNmt(object):
 
             rewards = rewards_minus_bias * y_sample_mask
             rewards = numpy.transpose(rewards) / (1.0 * rollnum)
-        #print('the shape of reward is ', rewards.shape)
+        # print('the shape of reward is ', rewards.shape)
         return rewards
 
     def build_train_model(self):
@@ -1657,7 +1664,8 @@ class GenNmt(object):
         #  for i, gpu_device in enumerate(self.gpu_devices):
         #          if i > 0 :
         #              reuse_var = True
-        #          cost, grad = self.build_model(reuse_var=reuse_var, gpu_device=gpu_device)
+        #          cost, grad = self.build_model(reuse_var=reuse_var,
+        #          gpu_device=gpu_device)
         #          loss += cost
         #          grads.append(grad)
         #
@@ -1690,7 +1698,7 @@ class GenNmt(object):
             # running time log
             if time.time() - TrainStart > 3600 * HourIdx:
                 print(
-                    '-------------------------Hour : %d -------------------------' %
+                    '--------------------Hour : %d -------------------------' %
                     HourIdx)
                 HourIdx += 1
 
@@ -1707,8 +1715,8 @@ class GenNmt(object):
             x_data_list = numpy.split(numpy.array(x), gpu_num)
             y_data_list = numpy.split(numpy.array(y), gpu_num)
 
-            x_sample = 0
-            y_sample = 0
+            # x_sample = 0
+            # y_sample = 0
 
             myFeed_dict = {}
             for i, x, y in zip(range(gpu_num), x_data_list, y_data_list):
@@ -1717,9 +1725,9 @@ class GenNmt(object):
                 x, x_mask, y, y_mask = prepare_data(x, y)
                 word_count += y_mask.sum()
 
-                if i == 0:
-                    x_sample = x
-                    y_sample = y
+                # if i == 0:
+                #     x_sample = x
+                #     y_sample = y
 
                 myFeed_dict[self.x_list[i]] = x
                 myFeed_dict[self.x_mask_list[i]] = x_mask
@@ -1730,8 +1738,9 @@ class GenNmt(object):
                 [self.train_optm, self.train_loss],
                 feed_dict=myFeed_dict)
 
-            # x_variable = [self.sess.run(tf.assign(x, tf.clip_by_value(x, -0.01,
-            # 0.01))) for x in tf.trainable_variables() if 'generate' in x.name]
+            # x_variable = [self.sess.run(tf.assign(x, tf.clip_by_value(x,
+            # -0.01, 0.01))) for x in tf.trainable_variables() if 'generate' in
+            # x.name]
 
             BatchTime = time.time() - BatchStart
             # check and logging
@@ -1744,7 +1753,7 @@ class GenNmt(object):
 
             if numpy.mod(uidx, self.saveFreq) == 0:
                 print(
-                    "----------------------save at epoch %d----------------------" %
+                    "-----------------save at epoch %d----------------------" %
                     epoch)
                 saver.save(self.sess, self.saveto)
 
@@ -1753,20 +1762,25 @@ class GenNmt(object):
 
             history_num = 100
             MovAve = numpy.sum(
-                cost_history[-history_num:])/numpy.sum(word_count_history[-history_num:])
+                cost_history[-history_num:])/numpy.sum(
+                    word_count_history[-history_num:])
 
             # display
             if numpy.mod(uidx, self.dispFreq) == 0:
                 print(
-                    'epoch %d Update in this GPU %d sample %d Cost %f MovAveCost %f BatchTime %f ' %
-                    (epoch, uidx, uidx*gpu_num*self.batch_size, cost, MovAve, BatchTime))
+                    'epoch %d Update in this GPU %d sample %d Cost'
+                    ' %f MovAveCost %f BatchTime %f ' %
+                    (epoch, uidx, uidx*gpu_num*self.batch_size,
+                     cost, MovAve, BatchTime))
 
                 # sample
                 # if numpy.mod(uidx, self.sampleFreq) == 0:
 
                 #    for jj in xrange(numpy.minimum(5, x_sample.shape[1])):
                 #        stochastic = False
-                #        sample, score, _, _ = self.gen_sample(x_sample[:,jj][:,None], k=10, maxlen=30, stochastic=stochastic, argmax=False)
+                #        sample, score, _, _ =
+                #        self.gen_sample(x_sample[:,jj][:,None], k=10,
+                #        maxlen=30, stochastic=stochastic, argmax=False)
 
                 #        print ('score', jj, ' :  ')
                 #        for vv in x_sample[:, jj]:
@@ -1794,7 +1808,8 @@ class GenNmt(object):
                 #        if stochastic:
                 #            ss = sample
                 #        else:
-                #            score = score / numpy.array([len(s) for s in sample])
+                #            score = score / numpy.array([len(s) for s in
+                #            sample])
                 #            ss = sample[score.argmin()]
                 #        for vv in ss:
                 #            if vv == 0:

@@ -1,9 +1,7 @@
 import tensorflow as tf
 import numpy
-# import random
-# import time
 
-from tensorflow.python.ops.rnn_cell import RNNCell
+from tensorflow.contrib.rnn import RNNCell
 from tensorflow.python.ops import math_ops
 # from tensorflow.python.ops import variable_scope
 # from tensorflow.python.framework import ops
@@ -27,7 +25,8 @@ class GRULayer(RNNCell):
         init_device="/cpu:0",
         prefix='gru_layer',
         precision='float32',
-     reuse_var=False):
+        reuse_var=False
+    ):
         if input_size is not None:
             self._num_units = num_units
             self._activation = activation
@@ -143,7 +142,8 @@ class GRUCondLayer(RNNCell):
         init_device="/cpu:0",
         prefix='gru_cond_layer',
         precision='float32',
-     reuse_var=False):
+        reuse_var=False
+    ):
         # logging.warn("%s: The input_size parameter is deprecated.", self)
         self._num_units = num_units
         self._activation = activation
