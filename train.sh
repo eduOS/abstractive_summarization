@@ -1,13 +1,11 @@
 #!/bin/bash
 export CUDA_VISIBLE_DEVICES="8,9,10,11"
       python  tfGan.py --is_decode False \
-                --is_generator_train False \
+        --is_generator_train False \
 				--is_gan_train True \
 				--is_discriminator_train False \
-                --source_dic '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/source_u8.txt.pkl' \
-                --target_dic '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/target_u8.txt.pkl' \
-                --train_data_source '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/source_u8.txt' \
-                --train_data_target '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/target_u8.txt' \
+                --train_data_source './finished_files/train-art.txt'\
+                --train_data_target './finished_files/train-abs.txt'\
                 --clip_c 10.0  \
                 --batch_size 64  \
                 --max_len 50 \
@@ -15,7 +13,7 @@ export CUDA_VISIBLE_DEVICES="8,9,10,11"
                 --dis_saveto 'disCnn-180w-multi-generator' \
                 --dis_max_len 50 \
                 --gpu_device 'gpu-0' \
-                --dis_gpu_device 'gpu-0-1-2-3' \
+                --dis_gpu_device 'gpu-0' \
                 --dis_batch_size 40 \
                 --gan_gen_batch_size 100 \
                 --dis_dispFreq 1 \
@@ -31,10 +29,19 @@ export CUDA_VISIBLE_DEVICES="8,9,10,11"
                 --roll_num 20 \
                 --generate_num 5000 \
                 --bias_num 0.5 \
-                --gan_gen_source_data '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/gan_gen_source_u8.txt' \
-                --gan_dis_source_data '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/gan_dis_source_u8.txt' \
-                --gan_dis_negative_data '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/gan_dis_negative_u8.txt' \
-                --gan_dis_positive_data '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/gan_dis_positive_u8.txt' \
-                --dis_dev_negative_data '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/dev_negative_u8.txt' \
-                --dis_dev_positive_data '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/dev_positive_u8.txt' \
-                --dis_dev_source_data '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/dev_source_u8.txt'
+                # --gan_gen_source_data '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/gan_gen_source_u8.txt' \
+                # --gan_dis_negative_data '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/gan_dis_negative_u8.txt' \
+                --gan_dis_negative_data './data_for_multi_gan_train/gan_dis_negative.txt' \
+                # --gan_dis_positive_data '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/gan_dis_positive_u8.txt' \
+                --gan_dis_positive_data './data_for_multi_gan_train/gan_dis_positive.txt' \
+                # --dis_dev_negative_data '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/dev_negative_u8.txt' \
+                --dis_dev_negative_data './data_for_multi_gan_train/dev_negative.txt' \
+                # --dis_dev_positive_data '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/dev_positive_u8.txt' \
+                --dis_dev_positive_data './data_for_multi_gan_train/dev_positive_u8.txt' \
+                # --dis_dev_source_data '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/dev_source_u8.txt'
+                --dis_dev_source_data './data_for_multi_gan_train/dev_source.txt'
+
+                # --source_dic '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/source_u8.txt.pkl' \
+                # --target_dic '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/target_u8.txt.pkl' \
+                # --train_data_source '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/source_u8.txt' \
+                # --train_data_target '/data/zhyang/dl4mt/corpus/data_gan_180w_zxw/data_for_multi_gan_train/target_u8.txt' \

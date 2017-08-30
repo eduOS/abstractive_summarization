@@ -143,8 +143,6 @@ class DisCNN(object):
         dim_word,
         filter_sizes,
         num_filters,
-        source_dict,
-        target_dict,
         gpu_device,
         positive_data,
         negative_data,

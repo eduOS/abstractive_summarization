@@ -1,13 +1,13 @@
 import tensorflow as tf
 import numpy
-import random
-import time
+# import random
+# import time
 
 from tensorflow.python.ops.rnn_cell import RNNCell
 from tensorflow.python.ops import math_ops
-from tensorflow.python.ops import variable_scope
-from tensorflow.python.framework import ops
-from tensorflow.python.ops.rnn_cell import GRUCell
+# from tensorflow.python.ops import variable_scope
+# from tensorflow.python.framework import ops
+# from tensorflow.python.ops.rnn_cell import GRUCell
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops import array_ops
 
@@ -40,9 +40,8 @@ class GRULayer(RNNCell):
                         embDim = self._input_size
                         dim = self._num_units
                         W = numpy.concatenate(
-                            [norm_weight(embDim, dim),
-                             norm_weight(embDim, dim)],
-                            axis=1)
+                            [norm_weight(embDim, dim), norm_weight(embDim, dim)
+                             ], axis=1)
                         W = tf.get_variable('W', initializer=tf.constant(W))
                         b = numpy.zeros((2 * dim,)).astype(self._precision)
                         b = tf.get_variable('b', initializer=tf.constant(b))
@@ -216,11 +215,13 @@ class GRUCondLayer(RNNCell):
 
                     W_comb_att = norm_weight(dim, dim * 2)
                     W_comb_att = tf.get_variable(
-                        'W_comb_att', initializer=tf.constant(W_comb_att), trainable=True)
+                        'W_comb_att', initializer=tf.constant(W_comb_att),
+                        trainable=True)
 
                     Wc_att = norm_weight(dim * 2)
                     Wc_att = tf.get_variable(
-                        'Wc_att', initializer=tf.constant(Wc_att), trainable=True)
+                        'Wc_att', initializer=tf.constant(Wc_att),
+                        trainable=True)
 
                     b_att = numpy.zeros((dim * 2,)).astype(self._precision)
                     b_att = tf.get_variable(
@@ -283,8 +284,8 @@ class GRUCondLayer(RNNCell):
         Wc = tf.get_variable('Wc', dtype=self._precision)
         Wcx = tf.get_variable('Wcx', dtype=self._precision)
         W_comb_att = tf.get_variable('W_comb_att', dtype=self._precision)
-        Wc_att = tf.get_variable('Wc_att', dtype=self._precision)
-        b_att = tf.get_variable('b_att', dtype=self._precision)
+        # Wc_att = tf.get_variable('Wc_att', dtype=self._precision)
+        # b_att = tf.get_variable('b_att', dtype=self._precision)
         U_att = tf.get_variable('U_att', dtype=self._precision)
         c_tt = tf.get_variable('c_tt', dtype=self._precision)
 

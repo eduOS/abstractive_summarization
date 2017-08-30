@@ -7,6 +7,15 @@ from data_iterator import disTextIterator
 from data_iterator import genTextIterator
 from data_iterator import TextIterator
 
+PAD_TOKEN = '[PAD]'
+# This has a vocab id, which is used to represent out-of-vocabulary words
+UNKNOWN_TOKEN = '[UNK]'
+# This has a vocab id, which is used at the start of every decoder input
+# sequence
+START_DECODING = '[START]'
+# This has a vocab id, which is used at the end of untruncated target sequences
+STOP_DECODING = '[STOP]'
+
 
 def prepare_gan_dis_data(
     train_data_source,
@@ -14,7 +23,8 @@ def prepare_gan_dis_data(
     gan_dis_source_data,
     gan_dis_positive_data,
     num=None,
-     reshuf=True):
+    reshuf=True
+):
 
     source = open(train_data_source, 'r')
     sourceLists = source.readlines()
@@ -70,7 +80,8 @@ def prepare_three_gan_dis_dev_data(
     dev_dis_positive_data,
     dev_dis_negative_data,
     dev_dis_source_data,
-     num):
+    num
+):
     gan_dis = open(gan_dis_positive_data, 'r')
     disLists = gan_dis.readlines()
 
@@ -107,7 +118,8 @@ def prepare_gan_dis_dev_data(
     gan_dis_negative_data,
     dev_dis_positive_data,
     dev_dis_negative_data,
-     num):
+    num
+):
 
     gan_dis = open(gan_dis_positive_data, 'r')
     disLists = gan_dis.readlines()
@@ -169,16 +181,15 @@ def dis_train_iter(
     dictionary,
     n_words_trg,
     batch_size,
-     maxlen):
+    maxlen
+):
     iter = 0
     while True:
         if reshuffle:
             os.popen(
-                'python shuffle.py ' +
-                dis_positive_data +
-                ' ' +
-                dis_positive_data)
-            os.popen('mv ' + dis_negative_data + '.shuf ' + dis_negtive_data)
+                'python shuffle.py ' + dis_positive_data +
+                ' ' + dis_positive_data)
+            os.popen('mv ' + dis_negative_data + '.shuf ' + dis_negative_data)
             os.popen('mv ' + dis_negative_data + '.shuf ' + dis_negative_data)
         disTrain = disTextIterator(
             dis_positive_data,
@@ -186,19 +197,13 @@ def dis_train_iter(
             dictionary,
             batch_size,
             maxlen,
-            n_words_trg)
+            n_words_trg
+        )
         iter += 1
         ExampleNum = 0
-        iterStart = time.time()
         for x, y in disTrain:
             ExampleNum += len(x)
             yield x, y, iter
-        TimeCost = time.time() - EpochStart
-    print(
-        'Seen ',
-        ExampleNum,
-        ' examples for discriminator. Time cost : ',
-     TimeCost)
 
 
 def gen_train_iter(
@@ -241,7 +246,8 @@ def gen_force_train_iter(
     batch_size,
     maxlen,
     n_words_src,
-     n_words_trg):
+    n_words_trg
+):
     iter = 0
     while True:
         if reshuffle:
@@ -409,17 +415,17 @@ def norm_weight(nin, nout=None, scale=0.01, ortho=True, precision='float32'):
 
 
 def tableLookup(
-    vocab_size,
-    embedding_size,
-    scope="tableLookup",
-    init_device='/cpu:0',
-    reuse_var=False,
-    prefix='tablelookup'):
+        vocab_size,
+        embedding_size,
+        scope="tableLookup",
+        init_device='/cpu:0',
+        reuse_var=False,
+        prefix='tablelookup'):
 
     if not scope:
         scope = tf.get_variable_scope()
 
-    with tf.variable_scope(scope) as vs:
+    with tf.variable_scope(scope):
         if not reuse_var:
             with tf.device(init_device):
                 embeddings_init = norm_weight(vocab_size, embedding_size)
@@ -433,17 +439,17 @@ def tableLookup(
 
 
 def FCLayer(
-    state_below,
-    input_size,
-    output_size,
-    is_3d=True,
-    reuse_var=False,
-    use_bias=True,
-    activation=None,
-    scope='ff',
-    init_device='/cpu:0',
-    prefix='ff',
-    precision='float32'):
+        state_below,
+        input_size,
+        output_size,
+        is_3d=True,
+        reuse_var=False,
+        use_bias=True,
+        activation=None,
+        scope='ff',
+        init_device='/cpu:0',
+        prefix='ff',
+        precision='float32'):
     # it is kind of like linear
 
     if not scope:
@@ -508,7 +514,7 @@ def average_clip_gradient(tower_grads, clip_c):
         grad, global_norm = tf.clip_by_global_norm(grad, clip_c)
         average_grads = zip(grad, value)
 
-    #self.average_grads = average_grads
+    # self.average_grads = average_grads
 
     return average_grads
 
@@ -538,6 +544,80 @@ def average_clip_gradient_by_value(tower_grads, clip_min, clip_max):
         grad = [tf.clip_by_value(x, clip_min, clip_max) for x in grad]
         average_grads = zip(grad, value)
 
-    #self.average_grads = average_grads
-
     return average_grads
+
+
+class Vocab(object):
+    """Vocabulary class for mapping between words and ids (integers)"""
+
+    def __init__(self, vocab_file, max_size=200000):
+        """Creates a vocab of up to max_size words, reading from the vocab_file.
+        If max_size is 0, reads the entire vocab file.
+
+        Args:
+          vocab_file: path to the vocab file, which is assumed to contain
+          "<word> <frequency>" on each line, sorted with most frequent word
+          first. This code doesn't actually use the frequencies, though.
+          max_size: integer. The maximum size of the resulting Vocabulary."""
+        self._word_to_id = {}
+        self._id_to_word = {}
+        self._count = 0
+
+        for w in [UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING]:
+            self._word_to_id[w] = self._count
+            self._id_to_word[self._count] = w
+            self._count += 1
+
+        # Read the vocab file and add words up to max_size
+        with open(vocab_file, 'r') as vocab_f:
+            for line in vocab_f:
+                pieces = line.split()
+                if len(pieces) != 2:
+                    print(
+                        'Warning: incorrectly formatted line in vocabulary file:\
+                        %s\n' % line)
+                    continue
+                w = pieces[0]
+                if w in [
+                    UNKNOWN_TOKEN,
+                    PAD_TOKEN,
+                    START_DECODING,
+                    STOP_DECODING
+                ]:
+                    raise Exception(
+                        '<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t\
+                        be in the vocab file, but %s is' % w)
+                if w in self._word_to_id:
+                    raise Exception(
+                        'Duplicated word in vocabulary file: %s' % w)
+                self._word_to_id[w] = self._count
+                self._id_to_word[self._count] = w
+                self._count += 1
+                if max_size != 0 and self._count >= max_size:
+                    print(
+                        "max_size of vocab was specified as %i; we now have %i\
+                        words. Stopping reading." %
+                        (max_size, self._count))
+                    break
+
+        print(
+            "Finished constructing vocabulary of %i total words. Last word\
+            added: %s" % (
+                self._count, self._id_to_word[self._count - 1]))
+
+    def word2id(self, word):
+        """Returns the id (integer) of a word (string). Returns [UNK] id if word
+        is OOV."""
+        if word not in self._word_to_id:
+            return self._word_to_id[UNKNOWN_TOKEN]
+        return self._word_to_id[word]
+
+    def id2word(self, word_id):
+        """Returns the word (string) corresponding to an id (integer)."""
+        if word_id not in self._id_to_word:
+            raise ValueError('Id not found in vocab: %d' % word_id)
+        return self._id_to_word[word_id]
+
+    def size(self):
+        """Returns the total size of the vocabulary"""
+        return self._count

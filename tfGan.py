@@ -96,6 +96,8 @@ tf.app.flags.DEFINE_integer(
 tf.app.flags.DEFINE_integer(
     'dis_devFreq', 100,
     'train for this many minibatches for displaying discriminator')
+tf.app.flags.DEFINE_integer(
+    'vocab_size', 30000, 'the size of the target vocabulary')
 
 tf.app.flags.DEFINE_integer(
     'validFreq', 1000, 'train for this many minibatches for validation')
@@ -108,11 +110,6 @@ tf.app.flags.DEFINE_float('l2_r', 0.0001, 'L2 regularization penalty')
 tf.app.flags.DEFINE_float('lr', 0.0001, 'learning rate')
 tf.app.flags.DEFINE_float('alpha_c', 0.0, 'alignment regularization')
 tf.app.flags.DEFINE_float('clip_c', 5, 'gradient clipping threshold')
-
-tf.app.flags.DEFINE_integer(
-    'n_words_src', 30000, 'the size of the source vocabulary')
-tf.app.flags.DEFINE_integer(
-    'n_words_trg', 30000, 'the size of the target vocabulary')
 
 tf.app.flags.DEFINE_integer(
     'max_len', 80, 'the max length of the training sentence')
@@ -193,8 +190,7 @@ tf.app.flags.DEFINE_string(
     'the valid data set of the target side')
 
 tf.app.flags.DEFINE_string(
-    'dictionary', './data_1000w_golden/source_u8.txt.shuf.pkl',
-    'the source vocabulary')
+    'dictionary', './vocab')
 # tf.app.flags.DEFINE_string(
 #     'target_dict', './data_1000w_golden/target_u8.txt.shuf.pkl',
 #     'the target vocabulary')
@@ -287,14 +283,11 @@ def main(argv):
 
     # -----------  pretraining  the generator -----------
         batch_size = FLAGS.batch_size
-        source_dict = FLAGS.source_dict
-        target_dict = FLAGS.target_dict
         train_data_source = FLAGS.train_data_source
         train_data_target = FLAGS.train_data_target
-        n_words_src = FLAGS.n_words_src
-        n_words_trg = FLAGS.n_words_trg
         gpu_device = FLAGS.gpu_device
         dim_word = FLAGS.dim_word
+        vocab_size = FLAGS.vocab_size
         dim = FLAGS.dim
         max_len = FLAGS.max_len
         optimizer = FLAGS.optimizer
@@ -315,12 +308,9 @@ def main(argv):
             generator = GenNmt(
                 sess=sess,
                 batch_size=batch_size,
-                source_dict=source_dict,
-                target_dict=target_dict,
                 train_data_source=train_data_source,
                 train_data_target=train_data_target,
-                n_words_src=n_words_src,
-                n_words_trg=n_words_trg,
+                vocab_size=vocab_size,
                 gpu_device=gpu_device,
                 dim_word=dim_word,
                 dim=dim,
@@ -402,13 +392,11 @@ def main(argv):
                 sess=sess,
                 max_len=dis_max_len,
                 num_classes=2,
-                vocab_size=n_words_trg,
+                vocab_size=vocab_size,
                 batch_size=dis_batch_size,
                 dim_word=dim_word,
                 filter_sizes=dis_filter_sizes,
                 num_filters=dis_num_filters,
-                source_dict=source_dict,
-                target_dict=target_dict,
                 gpu_device=dis_gpu_device,
                 positive_data=dis_positive_data,
                 negative_data=dis_negative_data,
@@ -470,10 +458,15 @@ def main(argv):
                     # generator.dictionaries[0], n_words_src,
                     # gan_gen_batch_size, max_len)
                     gen_train_it = gen_force_train_iter(
-                        gan_dis_source_data, gan_dis_positive_data,
-                        gan_gen_reshuffle, generator.dictionaries[0],
-                        generator.dictionaries[1], gan_gen_batch_size,
-                        max_len, n_words_src, n_words_trg)
+                        gan_dis_source_data,
+                        gan_dis_positive_data,
+                        gan_gen_reshuffle,
+                        generator.dictionaries[0],
+                        generator.dictionaries[1],
+                        gan_gen_batch_size,
+                        max_len,
+                        vocab_size,
+                    )
 
                     print('finetune the generator begin...')
                     for gen_iter in range(gan_gen_iter_num):
@@ -484,8 +477,10 @@ def main(argv):
                         # x, x_mask = prepare_multiple_sentence(x,
                         # maxlen=max_len)
                         x, x_mask, y_ground, y_ground_mask = prepare_data(
-                            x, y_ground, maxlen=50, n_words_src=n_words_src,
-                            n_words=n_words_trg)
+                            x,
+                            y_ground,
+                            maxlen=50,
+                            n_words=vocab_size)
                         y_sample_out = generator.generate_step(x, x_mask)
 
                         # for debug to print these generated sentence

@@ -36,6 +36,7 @@ from share_function import gen_train_iter
 # from share_function import gen_force_train_iter
 from share_function import print_string
 from share_function import deal_generated_y_sentence
+from share_function import Vocab
 
 from tensorflow.python.platform import tf_logging as logging
 from tensorflow.python.ops import variable_scope as vs
@@ -64,12 +65,10 @@ class GenNmt(object):
         self,
         sess,
         batch_size,
-        source_dict,
-        target_dict,
+        dict_path,
         train_data_source,
         train_data_target,
-        n_words_src,
-        n_words_trg,
+        vocab_size,
         gpu_device,
         dim_word=512,
         dim=1024,
@@ -91,22 +90,8 @@ class GenNmt(object):
         self.batch_size = batch_size
 
         logging.info('Load dictionary ')
-        # load dictionaries and invert them
-        dictionaries = []
-        dictionaries.append(source_dict)
-        dictionaries.append(target_dict)
-        worddicts = [None] * len(dictionaries)
-        worddicts_r = [None] * len(dictionaries)
-        for ii, dd in enumerate(dictionaries):
-            with open(dd, 'rb') as f:
-                worddicts[ii] = pkl.load(f)
-                worddicts_r[ii] = dict()
-                for kk, vv in worddicts[ii].iteritems():
-                    worddicts_r[ii][vv] = kk
 
-        self.dictionaries = dictionaries
-        self.worddicts = worddicts
-        self.worddicts_r = worddicts_r
+        self.vocab = Vocab(dict_path)
         logging.info('done ')
 
         logging.info('Parser traing params')
@@ -128,8 +113,6 @@ class GenNmt(object):
 
         self.train_data_source = train_data_source
         self.train_data_target = train_data_target
-        self.n_words_src = n_words_src
-        self.n_words_trg = n_words_trg
         self.max_len = max_len
         self.dim_word = dim_word
         self.dim = dim
@@ -206,12 +189,11 @@ class GenNmt(object):
             train = TextIterator(
                 self.train_data_source,
                 self.train_data_target,
-                self.dictionaries[0],
-                self.dictionaries[1],
-                n_words_source=self.n_words_src,
-                n_words_target=self.n_words_trg,
+                self.vocab,
+                vocab_size=self.vocab_size,
                 batch_size=self.batch_size * self.gpu_num,
-                maxlen=self.max_len)
+                maxlen=self.max_len
+            )
             ExamplesNum = 0
             print('Epoch : ', Epoch)
             EpochStart = time.time()
@@ -280,7 +262,7 @@ class GenNmt(object):
             # ------------------ Embedding -----------------
             # embedding
             sourcetable = tableLookup(
-                self.n_words_src,
+                self.vocab_size,
                 self.dim_word,
                 scope='sourceTable',
                 reuse_var=reuse_var,
@@ -333,18 +315,19 @@ class GenNmt(object):
 
             # ------------------ Decoder -----------------
             targettable = tableLookup(
-                self.n_words_trg, self.dim_word, scope='targetTable',
+                self.vocab_size, self.dim_word, scope='targetTable',
                 reuse_var=reuse_var, prefix='Wemb_dec'
             )
             emb_y = tf.nn.embedding_lookup(targettable, y_flat)
             emb_y = tf.reshape(emb_y, [-1, n_samples, self.dim_word])
             n_timesteps_trg = tf.shape(emb_y)[0]
             emb_y = tf.concat(
-                0, [tf.zeros([1, n_samples, self.dim_word]),
-                    tf.slice(emb_y, [0, 0, 0], [
-                        n_timesteps_trg-1, n_samples, self.dim_word
-                    ])
-                    ]
+                0, [
+                    tf.zeros([1, n_samples, self.dim_word]),
+                    tf.slice(
+                        emb_y, [0, 0, 0],
+                        [n_timesteps_trg-1, n_samples, self.dim_word]
+                    )]
             )
 
             cellDecoder = GRUCondLayer(
