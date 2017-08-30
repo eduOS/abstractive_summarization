@@ -190,7 +190,7 @@ tf.app.flags.DEFINE_string(
     'the valid data set of the target side')
 
 tf.app.flags.DEFINE_string(
-    'dictionary', './vocab')
+    'dictionary', './vocab', "the vocabulary")
 # tf.app.flags.DEFINE_string(
 #     'target_dict', './data_1000w_golden/target_u8.txt.shuf.pkl',
 #     'the target vocabulary')
