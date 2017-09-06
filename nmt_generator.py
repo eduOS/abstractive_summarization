@@ -72,7 +72,8 @@ class GenNmt(object):
         gpu_device,
         dim_word=512,
         dim=1024,
-        max_len=30,
+        max_len=50,
+        dis_max_len=15,
         clip_c=1.0,
         max_epoches=10,
         reshuffle=False,
@@ -88,6 +89,7 @@ class GenNmt(object):
         self.sess = sess
 
         self.batch_size = batch_size
+        self.vocab_size = vocab_size
 
         logging.info('Load dictionary ')
 
@@ -114,6 +116,7 @@ class GenNmt(object):
         self.train_data_source = train_data_source
         self.train_data_target = train_data_target
         self.max_len = max_len
+        self.dis_max_len = dis_max_len
         self.dim_word = dim_word
         self.dim = dim
         self.precision = precision
@@ -192,7 +195,8 @@ class GenNmt(object):
                 self.vocab,
                 vocab_size=self.vocab_size,
                 batch_size=self.batch_size * self.gpu_num,
-                maxlen=self.max_len
+                max_len=self.max_len,
+                dis_max_len=self.dis_max_len,
             )
             ExamplesNum = 0
             print('Epoch : ', Epoch)
@@ -202,6 +206,7 @@ class GenNmt(object):
                     # what is this?
                     continue
                 ExamplesNum += len(x)
+                print('yield a sample')
                 yield x, y, Epoch
             TimeCost = time.time() - EpochStart
             Epoch += 1
@@ -299,9 +304,9 @@ class GenNmt(object):
             contextBackward = projr[0]
 
             # get init state for decoder
-            ctx = tf.concat(2, [contextForward, contextBackward[::-1]])
+            ctx = tf.concat([contextForward, contextBackward[::-1]], 2)
             ctx_mean = tf.reduce_sum(
-                tf.mul(ctx, x_mask[:, :, None]), 0
+                tf.multiply(ctx, x_mask[:, :, None]), 0
             ) / tf.reduce_sum(x_mask, 0)[:, None]
             init_state = FCLayer(
                 ctx_mean,
@@ -322,12 +327,12 @@ class GenNmt(object):
             emb_y = tf.reshape(emb_y, [-1, n_samples, self.dim_word])
             n_timesteps_trg = tf.shape(emb_y)[0]
             emb_y = tf.concat(
-                0, [
+                [
                     tf.zeros([1, n_samples, self.dim_word]),
                     tf.slice(
                         emb_y, [0, 0, 0],
                         [n_timesteps_trg-1, n_samples, self.dim_word]
-                    )]
+                    )], 0
             )
 
             cellDecoder = GRUCondLayer(
@@ -380,13 +385,14 @@ class GenNmt(object):
             logit = FCLayer(
                 logit,
                 self.dim_word,
-                self.n_words_trg,
+                self.vocab_size,
                 reuse_var=reuse_var,
                 scope='ff_logit',
                 prefix='ff_logit',
                 precision=self.precision)
             logit = tf.reshape(logit, [-1, tf.shape(logit)[2]])
-            cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logit, y_flat)
+            cost = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                logits=logit, labels=y_flat)
             cost = tf.reshape(cost, [-1, n_samples])
 
             cost = tf.reduce_sum(cost * y_mask, 0)
@@ -435,7 +441,7 @@ class GenNmt(object):
             xr_mask_tile = tf.tile(xr_mask[:, :, None], [1, 1, self.dim])
 
             sourcetable = tableLookup(
-                self.n_words_src,
+                self.vocab_size,
                 self.dim_word,
                 scope='sourceTable',
                 reuse_var=reuse_var,
@@ -475,7 +481,7 @@ class GenNmt(object):
             contextBackward = projr[0]
 
             # get init state for decoder
-            ctx = tf.concat(2, [contextForward, contextBackward[::-1]])
+            ctx = tf.concat([contextForward, contextBackward[::-1]], 2)
             ctx_mean = tf.reduce_mean(ctx, 0)
             init_state = FCLayer(
                 ctx_mean,
@@ -494,7 +500,7 @@ class GenNmt(object):
             self.y = tf.placeholder(tf.int32, [None])
 
             targettable = tableLookup(
-                self.n_words_trg,
+                self.vocab_size,
                 self.dim_word,
                 scope='targetTable',
                 reuse_var=reuse_var,
@@ -554,7 +560,7 @@ class GenNmt(object):
             logit = FCLayer(
                 logit,
                 self.dim_word,
-                self.n_words_trg,
+                self.vocab_size,
                 is_3d=False,
                 reuse_var=reuse_var,
                 scope='ff_logit',
@@ -582,11 +588,15 @@ class GenNmt(object):
             saver = tf.train.Saver(tf.all_variables())
             self.sess.run(init_op)
             self.sess.run(init_local_op)
-            saver.restore(self.sess, './'+self.saveto)
+            saver.restore(self.sess, self.saveto)
             DecodeStart = time.time()
-            with open(decode_file) as f, open(decode_result_file, 'w') as fo:
+            with open(
+                decode_file
+            ) as f, open(decode_result_file, 'w') as fr:
                 for idx, line in enumerate(f):
-                    print('Sentence num: ', idx)
+                    if idx != 0 and idx % 200000 == 0:
+                        fr.flush()
+                        return 0
                     sample = []
                     sample_score = []
 
@@ -599,11 +609,9 @@ class GenNmt(object):
 
                     # get initial state of decoder rnn and encoder context
 
-                    words = line.strip().split()
-                    words = [
-                        self.worddicts[0][w]
-                        if w in self.worddicts[0] else 1 for w in words]
-                    words = [w if w < self.n_words_src else 1 for w in words]
+                    orig_words = line.strip().split()
+                    words = [self.vocab.word2id(w) for w in orig_words]
+                    words = [w if w < self.vocab_size else 1 for w in words]
                     words = numpy.array(words + [0], dtype='int32')[:, None]
                     next_state, ctx0 = self.sess.run(
                         [init_state, self.ctx],
@@ -616,9 +624,12 @@ class GenNmt(object):
                         ctx = numpy.tile(ctx0, [live_k, 1])
                         next_p, next_state = self.sess.run(
                             [self.next_p, self.next_state],
-                            feed_dict={self.state: next_state,
-                                       self.context: ctx, self.y: next_w,
-                                       x: words})
+                            feed_dict={
+                                self.state: next_state,
+                                self.context: ctx,
+                                self.y: next_w,
+                                x: words
+                            })
                         # pdb.set_trace();
 
                         cand_scores = hyp_scores[:, None] - numpy.log(next_p)
@@ -676,10 +687,10 @@ class GenNmt(object):
                             sample_score.append(hyp_scores[idx])
                     sample_best = sample[numpy.array(sample_score).argmin()]
                     sample_str = print_string(
-                        'y', sample_best, self.worddicts_r)
+                        sample_best, self.vocab)
                     if is_print:
                         print(sample_str)
-                    fo.write(sample_str+'\n')
+                    fr.write(sample_str+'\n')
                     # pdb.set_trace();
                     # return sample, sample_score
             print('All Decode Time : ', time.time() - DecodeStart)
@@ -703,7 +714,7 @@ class GenNmt(object):
             xr_mask_tile = tf.tile(xr_mask[:, :, None], [1, 1, self.dim])
 
             sourcetable = tableLookup(
-                self.n_words_src,
+                self.vocab_size,
                 self.dim_word,
                 scope='sourceTable',
                 reuse_var=reuse_var,
@@ -742,7 +753,7 @@ class GenNmt(object):
 
             contextBackward = projr[0]
 
-            ctx = tf.concat(2, [contextForward, contextBackward[::-1]])
+            ctx = tf.concat([contextForward, contextBackward[::-1]], 2)
 
             ctx_mean = tf.reduce_mean(ctx, 0)
 
@@ -765,7 +776,7 @@ class GenNmt(object):
             cellDecoder_s.set_pctx_()
 
             # targettable = tableLookup(
-            #     self.n_words_trg, self.dim_word, scope='targetTable',
+            #     self.vocab_size, self.dim_word, scope='targetTable',
             #     reuse_var=reuse_var, prefix='Wemb_dec')
 
             # g_prediction = tensor_array_ops.TensorArray(
@@ -813,12 +824,12 @@ class GenNmt(object):
             logit = FCLayer(
                 logit,
                 self.dim_word,
-                self.n_words_trg,
+                self.vocab_size,
                 is_3d=False,
                 reuse_var=reuse_var,
                 scope='ff_logit',
                 prefix='ff_logit')
-            logit = tf.reshape(logit, [-1, self.n_words_trg])
+            logit = tf.reshape(logit, [-1, self.vocab_size])
 
             next_probs = tf.nn.softmax(logit)
             # print('the shape of the next_probs ', next_probs.get_shape())
@@ -857,7 +868,7 @@ class GenNmt(object):
             line = line.strip().split()
 
             ll = [gen_dict[w] if w in gen_dict else 1 for w in line]
-            ll = [w if w < self.n_words_src else 1 for w in ll]
+            ll = [w if w < self.vocab_size else 1 for w in ll]
 
             if len(ll) > self.max_len:
                 continue
@@ -902,7 +913,7 @@ class GenNmt(object):
             xr_mask_tile = tf.tile(xr_mask[:, :, None], [1, 1, self.dim])
 
             sourcetable = tableLookup(
-                self.n_words_src,
+                self.vocab_size,
                 self.dim_word,
                 scope='sourceTable',
                 reuse_var=reuse_var,
@@ -941,10 +952,10 @@ class GenNmt(object):
 
             contextBackward = projr[0]
 
-            ctx = tf.concat(2, [contextForward, contextBackward[::-1]])
+            ctx = tf.concat([contextForward, contextBackward[::-1]], 2)
 
             ctx_mean = tf.reduce_sum(
-                tf.mul(ctx, x_mask[:, :, None]), 0
+                tf.multiply(ctx, x_mask[:, :, None]), 0
             ) / tf.reduce_sum(x_mask, 0)[:, None]
 
             init_state = FCLayer(
@@ -966,7 +977,7 @@ class GenNmt(object):
             cellDecoder_s.set_pctx_()
 
             targettable = tableLookup(
-                self.n_words_trg,
+                self.vocab_size,
                 self.dim_word,
                 scope='targetTable',
                 reuse_var=reuse_var,
@@ -1017,12 +1028,12 @@ class GenNmt(object):
                 logit = FCLayer(
                     logit,
                     self.dim_word,
-                    self.n_words_trg,
+                    self.vocab_size,
                     is_3d=False,
                     reuse_var=reuse_var,
                     scope='ff_logit',
                     prefix='ff_logit')
-                logit = tf.reshape(logit, [-1, self.n_words_trg])
+                logit = tf.reshape(logit, [-1, self.vocab_size])
 
                 next_probs = tf.nn.softmax(logit)
 
@@ -1039,15 +1050,19 @@ class GenNmt(object):
             index_j = tf.constant(-1, shape=[n_sample], dtype=tf.int64)
 
             i, _, _, _, y_sample = tf.while_loop(
-                cond=lambda i, j, _2, _3, _4: i < maxlen, body=recurrency,
+                cond=lambda i, j, _2, _3, _4: i < maxlen,
+                body=recurrency,
                 loop_vars=(index_i, index_j, y0, init_state, y_sample),
-                shape_invariants=(index_i.get_shape(),
-                                  index_j.get_shape(),
-                                  y0.get_shape(),
-                                  tf.TensorShape([None, self.dim]),
-                                  tf.TensorShape([])))
+                shape_invariants=(
+                    index_i.get_shape(),
+                    index_j.get_shape(),
+                    y0.get_shape(),
+                    tf.TensorShape([None, self.dim]),
+                    tf.TensorShape(None)
+                )
+            )
 
-            y_sample = y_sample.pack()
+            y_sample = y_sample.stack()
             y_sample = tf.transpose(y_sample, perm=[1, 0])
 
             # if the sample len is less than 1, make it as 'eos1'
@@ -1069,7 +1084,7 @@ class GenNmt(object):
                 dtype=tf.int32, size=maxlen,
                 dynamic_size=True, infer_shape=True)
 
-            y_input_array = y_input_array.unpack(y)
+            y_input_array = y_input_array.unstack(y)
 
             def gan_recurrency(i, next_y, emb_y, init_state, g_prediction):
 
@@ -1080,9 +1095,9 @@ class GenNmt(object):
 
                 next_state = tf.slice(proj_y[0], [0, 0], [n_sample, self.dim])
                 ctxs = tf.slice(
-                    proj_y[0], [
-                        0, self.dim], [
-                        n_sample, self.dim * 2])
+                    proj_y[0],
+                    [0, self.dim],
+                    [n_sample, self.dim * 2])
 
                 logit_rnn = FCLayer(
                     next_state,
@@ -1113,12 +1128,12 @@ class GenNmt(object):
                 logit = FCLayer(
                     logit,
                     self.dim_word,
-                    self.n_words_trg,
+                    self.vocab_size,
                     is_3d=False,
                     reuse_var=reuse_var,
                     scope='ff_logit',
                     prefix='ff_logit')
-                logit = tf.reshape(logit, [-1, self.n_words_trg])
+                logit = tf.reshape(logit, [-1, self.vocab_size])
 
                 next_probs = tf.nn.softmax(logit)
 
@@ -1149,11 +1164,11 @@ class GenNmt(object):
                                   gan_index_j.get_shape(),
                                   gan_y0.get_shape(),
                                   tf.TensorShape([None, self.dim]),
-                                  tf.TensorShape([])))
+                                  tf.TensorShape(None)))
 
             # gan_indices = tf.range(y_input_len)
             # g_predictions = g_prediction.gather(gan_indices)
-            g_predictions = g_prediction.pack()
+            g_predictions = g_prediction.stack()
             g_predictions = tf.transpose(g_predictions, perm=[1, 0, 2])
 
             y_transpose = tf.transpose(y, perm=[1, 0])
@@ -1162,8 +1177,8 @@ class GenNmt(object):
                 tf.reduce_sum(
                     tf.one_hot(
                         tf.to_int32(tf.reshape(y_transpose, [-1])),
-                        self.n_words_trg, 1.0, 0.0) * tf.reshape(
-                        g_predictions, [-1, self.n_words_trg]),
+                        self.vocab_size, 1.0, 0.0) * tf.reshape(
+                        g_predictions, [-1, self.vocab_size]),
                     1) * tf.reshape(reward, [-1]),
                 0) / n_sample  # log is removed for WGAN
 
@@ -1231,7 +1246,7 @@ class GenNmt(object):
         xr_mask_tile = tf.tile(xr_mask[:, :, None], [1, 1, self.dim])
 
         sourcetable = tableLookup(
-            self.n_words_src,
+            self.vocab_size,
             self.dim_word,
             scope='sourceTable',
             reuse_var=reuse_var,
@@ -1271,10 +1286,10 @@ class GenNmt(object):
 
         contextBackward = projr[0]
 
-        ctx = tf.concat(2, [contextForward, contextBackward[::-1]])
+        ctx = tf.concat([contextForward, contextBackward[::-1]], 2)
 
         ctx_mean = tf.reduce_sum(
-            tf.mul(ctx, x_mask[:, :, None]), 0) / tf.reduce_sum(
+            tf.multiply(ctx, x_mask[:, :, None]), 0) / tf.reduce_sum(
                 x_mask, 0)[:, None]
 
         init_state = FCLayer(
@@ -1301,7 +1316,7 @@ class GenNmt(object):
         cellDecoder_s.set_pctx_()
 
         targettable = tableLookup(
-            self.n_words_trg,
+            self.vocab_size,
             self.dim_word,
             scope='targetTable',
             reuse_var=reuse_var,
@@ -1321,13 +1336,12 @@ class GenNmt(object):
             dynamic_size=True,
             infer_shape=True)
 
-        y_index = y_index.unpack(y)
+        y_index = y_index.unstack(y)
 
         def recurrency_given(i, y, emb_y, given_num, init_state, y_sample):
             with tf.variable_scope('decoder'):
                 proj_y = cellDecoder_s(
-                    (emb_y, tf.ones([n_sample, self.dim])),
-                    init_state)
+                    (emb_y, tf.ones([n_sample, self.dim])), init_state)
 
             next_state = tf.slice(proj_y[0], [0, 0], [n_sample, self.dim])
             ctxs = tf.slice(proj_y[0], [0, self.dim], [n_sample, self.dim * 2])
@@ -1364,13 +1378,13 @@ class GenNmt(object):
             logit = FCLayer(
                 logit,
                 self.dim_word,
-                self.n_words_trg,
+                self.vocab_size,
                 is_3d=False,
                 reuse_var=reuse_var,
                 scope='ff_logit',
                 prefix='ff_logit',
                 precision=self.precision)
-            logit = tf.reshape(logit, [-1, self.n_words_trg])
+            logit = tf.reshape(logit, [-1, self.vocab_size])
 
             next_y = y_index.read(i)
             next_y_e = next_y[:, None]
@@ -1422,13 +1436,13 @@ class GenNmt(object):
             logit = FCLayer(
                 logit,
                 self.dim_word,
-                self.n_words_trg,
+                self.vocab_size,
                 is_3d=False,
                 reuse_var=reuse_var,
                 scope='ff_logit',
                 prefix='ff_logit',
                 precision=self.precision)
-            logit = tf.reshape(logit, [-1, self.n_words_trg])
+            logit = tf.reshape(logit, [-1, self.vocab_size])
 
             next_probs = tf.nn.softmax(logit)
             log_probs = tf.log(next_probs)
@@ -1455,12 +1469,12 @@ class GenNmt(object):
                            -1, shape=[n_sample, 1],
                            dtype=tf.int32),
                        y0, give_num, init_state, y_sample),
-            shape_invariants=(tf.TensorShape([]),
+            shape_invariants=(tf.TensorShape(None),
                               tf.TensorShape([n_sample, 1]),
                               y0.get_shape(),
                               give_num.get_shape(),
                               tf.TensorShape([None, self.dim]),
-                              tf.TensorShape([])))
+                              tf.TensorShape(None)))
 
         _, _, _, _, _, y_sample = tf.while_loop(
             cond=lambda i, _1, _2, _3, _4, _5: i < self.max_len,
@@ -1471,9 +1485,9 @@ class GenNmt(object):
                               emb_y.get_shape(),
                               give_num.get_shape(),
                               tf.TensorShape([None, self.dim]),
-                              tf.TensorShape([])))
+                              tf.TensorShape(None)))
 
-        y_sample = y_sample.pack()
+        y_sample = y_sample.stack()
 
         self.roll_x = x
         self.roll_x_mask = x_mask
@@ -1496,7 +1510,7 @@ class GenNmt(object):
         if not self.sess.run(tf.is_variable_initialized(params[0])):
             # init_op = tf.initialize_variables(params)
             # this is important here to initialize_all_variables()
-            init_op = tf.initialize_all_variables()
+            init_op = tf.global_variables_initializer()
             self.sess.run(init_op)
 
         saver = tf.train.Saver(params)
@@ -1504,7 +1518,7 @@ class GenNmt(object):
 
         if self.gen_reload:  # here must be true
             print('reloading params from %s ' % self.saveto)
-            self.saver.restore(self.sess, './'+self.saveto)
+            self.saver.restore(self.sess, self.saveto)
             print('reloading params done')
         else:
             print('error, reload must be true!!')
@@ -1534,7 +1548,7 @@ class GenNmt(object):
     def generate_and_save(self, infile, outfile, generate_batch=2):
         gen_train_it = gen_train_iter(
             infile, None, self.dictionaries[0],
-            self.n_words_src, generate_batch, self.max_len)
+            self.vocab_size, generate_batch, self.max_len)
         epoch = 0
         outfile = fopen(outfile, 'w')
         while epoch < 1:
@@ -1542,11 +1556,11 @@ class GenNmt(object):
             x, x_mask = prepare_multiple_sentence(x)
             feed = {self.generate_x: x, self.generate_x_mask: x_mask}
             y_out = self.sess.run(self.generate_y_sample, feed_dict=feed)
-            y_out_dealed, _ = deal_generated_y_sentence(y_out, self.worddicts)
+            y_out_dealed, _ = deal_generated_y_sentence(y_out, self.vocab)
             y_out = numpy.transpose(y_out_dealed)
 
             for id, y in enumerate(y_out):
-                y_str = print_string('y', y, self.worddicts_r)
+                y_str = print_string(y, self.vocab)
                 outfile.write(y_str+'\n')
 
     def get_reward(
@@ -1682,7 +1696,7 @@ class GenNmt(object):
 
         if self.gen_reload:
             print('reloading params from %s' % self.saveto)
-            saver.restore(self.sess, './'+self.saveto)
+            saver.restore(self.sess, self.saveto)
             print('params reload done')
 
         # time log

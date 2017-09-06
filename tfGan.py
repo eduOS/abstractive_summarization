@@ -59,8 +59,6 @@ from tensorflow.python.platform import tf_logging as logging
 # from tensorflow.python.ops.rnn_cell import RNNCell
 # from tensorflow.python.ops.rnn import dynamic_rnn
 
-tf.app.flags.DEFINE_float(
-    'train_len', 1, 'train for this many minibatch for synchoronizing')
 tf.app.flags.DEFINE_integer(
     'dim_word', 512, 'the dimension of the word embedding')
 tf.app.flags.DEFINE_integer(
@@ -69,8 +67,8 @@ tf.app.flags.DEFINE_integer(
     'patience', 10, 'the patience for early stop')
 
 tf.app.flags.DEFINE_integer(
-    'max_epoches', 10000, 'the max epoches for training')
-tf.app.flags.DEFINE_integer('dis_epoches', 10, 'the max epoches for training')
+    'max_epoches', 4, 'the max epoches for training')
+tf.app.flags.DEFINE_integer('dis_epoches', 2, 'the max epoches for training')
 
 tf.app.flags.DEFINE_integer(
     'gan_total_iter_num', 1, 'the max epoches for training')
@@ -137,9 +135,9 @@ tf.app.flags.DEFINE_integer(
 tf.app.flags.DEFINE_string('optimizer', 'adadelta', 'the optimizing method')
 
 tf.app.flags.DEFINE_string(
-    'saveto', 'nmt1000w', 'the file name used to store the model')
+    'saveto', './gen_model/lcsts', 'the file name used to store the model')
 tf.app.flags.DEFINE_string(
-    'dis_saveto', 'disriminator',
+    'dis_saveto', './dis_model/lcsts',
     'the file name used to store the model of the discriminator')
 
 tf.app.flags.DEFINE_string(
@@ -150,13 +148,13 @@ tf.app.flags.DEFINE_string(
     'the train data set of the target side')
 
 tf.app.flags.DEFINE_string(
-    'dis_positive_data', './data_test1000/positive_u8.txt.shuf',
+    'dis_positive_data', './data_test1000/positive.txt.shuf',
     'the positive train data set for the discriminator')
 tf.app.flags.DEFINE_string(
-    'dis_negative_data', './data_test1000/negative_u8.txt.shuf',
+    'dis_negative_data', './data_test1000/negative.txt.shuf',
     'the negative train data set for the discriminator')
 tf.app.flags.DEFINE_string(
-    'dis_source_data', './data_test1000/source_u8.txt.shuf',
+    'dis_source_data', './data_test1000/source.txt.shuf',
     'the negative train data set for the discriminator')
 
 tf.app.flags.DEFINE_string(
@@ -190,7 +188,7 @@ tf.app.flags.DEFINE_string(
     'the valid data set of the target side')
 
 tf.app.flags.DEFINE_string(
-    'dictionary', './vocab', "the vocabulary")
+    'dict_path', './vocab', "the vocabulary")
 # tf.app.flags.DEFINE_string(
 #     'target_dict', './data_1000w_golden/target_u8.txt.shuf.pkl',
 #     'the target vocabulary')
@@ -243,7 +241,7 @@ tf.app.flags.DEFINE_boolean(
 tf.app.flags.DEFINE_boolean(
     'is_gan_train', False, 'whether to do generative adversarial train')
 tf.app.flags.DEFINE_boolean(
-    'is_generator_train', False, 'whether to do generative adversarial train')
+    'is_generator_train', True, 'whether to do generative adversarial train')
 tf.app.flags.DEFINE_boolean(
     'is_discriminator_train', False,
     'whether to do generative adversarial train')
@@ -255,10 +253,10 @@ tf.app.flags.DEFINE_string(
     'decode_gpu', '/gpu:0', 'the device used to decode')
 
 tf.app.flags.DEFINE_string(
-    'decode_file', './result/source.txt',
+    'decode_file', '/home/lerner/data/LCSTS/finished_files/test-art.txt',
     'the file to be decoded')
 tf.app.flags.DEFINE_string(
-    'decode_result_file', './result/result.txt',
+    'decode_result_file', './data_test/negative.txt',
     'the file to save the decode results')
 
 FLAGS = tf.app.flags.FLAGS
@@ -271,316 +269,321 @@ logging.set_verbosity(logging.INFO)
 def main(argv):
     # -----------   create the session  -----------
 
-        config = tf.ConfigProto()
-        config.gpu_options.allow_growth = True
-        config.gpu_options.per_process_gpu_memory_fraction = 1.0
-        config.allow_soft_placement = True
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    config.gpu_options.per_process_gpu_memory_fraction = 1.0
+    config.allow_soft_placement = True
 
-        is_gan_train = FLAGS.is_gan_train
-        is_decode = FLAGS.is_decode
-        is_generator_train = FLAGS.is_generator_train
-        is_discriminator_train = FLAGS.is_discriminator_train
+    is_gan_train = FLAGS.is_gan_train
+    is_decode = FLAGS.is_decode
+    is_generator_train = FLAGS.is_generator_train
+    is_discriminator_train = FLAGS.is_discriminator_train
 
     # -----------  pretraining  the generator -----------
-        batch_size = FLAGS.batch_size
-        train_data_source = FLAGS.train_data_source
-        train_data_target = FLAGS.train_data_target
-        gpu_device = FLAGS.gpu_device
-        dim_word = FLAGS.dim_word
-        vocab_size = FLAGS.vocab_size
-        dim = FLAGS.dim
-        max_len = FLAGS.max_len
-        optimizer = FLAGS.optimizer
-        precision = FLAGS.precision
-        clip_c = FLAGS.clip_c
-        max_epoches = FLAGS.max_epoches
-        reshuffle = FLAGS.reshuffle
-        saveto = FLAGS.saveto
-        saveFreq = FLAGS.saveFreq
-        dispFreq = FLAGS.dispFreq
-        sampleFreq = FLAGS.sampleFreq
-        gen_reload = FLAGS.gen_reload
+    dict_path = FLAGS.dict_path
+    batch_size = FLAGS.batch_size
+    train_data_source = FLAGS.train_data_source
+    train_data_target = FLAGS.train_data_target
+    gpu_device = FLAGS.gpu_device
+    dim_word = FLAGS.dim_word
+    vocab_size = FLAGS.vocab_size
+    dim = FLAGS.dim
+    max_len = FLAGS.max_len
+    dis_max_len = FLAGS.dis_max_len
+    optimizer = FLAGS.optimizer
+    precision = FLAGS.precision
+    clip_c = FLAGS.clip_c
+    max_epoches = FLAGS.max_epoches
+    reshuffle = FLAGS.reshuffle
+    saveto = FLAGS.saveto
+    saveFreq = FLAGS.saveFreq
+    dispFreq = FLAGS.dispFreq
+    sampleFreq = FLAGS.sampleFreq
+    gen_reload = FLAGS.gen_reload
 
-        gan_gen_batch_size = FLAGS.gan_gen_batch_size
+    gan_gen_batch_size = FLAGS.gan_gen_batch_size
 
-        sess = tf.Session(config=config)
-        with tf.variable_scope('second_generate'):
-            generator = GenNmt(
-                sess=sess,
-                batch_size=batch_size,
-                train_data_source=train_data_source,
-                train_data_target=train_data_target,
-                vocab_size=vocab_size,
-                gpu_device=gpu_device,
-                dim_word=dim_word,
-                dim=dim,
-                max_len=max_len,
-                clip_c=clip_c,
-                max_epoches=max_epoches,
-                reshuffle=reshuffle,
-                saveto=saveto,
-                saveFreq=saveFreq,
-                dispFreq=dispFreq,
-                sampleFreq=sampleFreq,
-                optimizer=optimizer,
-                precision=precision,
-                gen_reload=gen_reload)
+    sess = tf.Session(config=config)
+    with tf.variable_scope('second_generate'):
+        generator = GenNmt(
+            sess=sess,
+            batch_size=batch_size,
+            dict_path=dict_path,
+            train_data_source=train_data_source,
+            train_data_target=train_data_target,
+            vocab_size=vocab_size,
+            gpu_device=gpu_device,
+            dim_word=dim_word,
+            dim=dim,
+            max_len=max_len,
+            dis_max_len=dis_max_len,
+            clip_c=clip_c,
+            max_epoches=max_epoches,
+            reshuffle=reshuffle,
+            saveto=saveto,
+            saveFreq=saveFreq,
+            dispFreq=dispFreq,
+            sampleFreq=sampleFreq,
+            optimizer=optimizer,
+            precision=precision,
+            gen_reload=gen_reload)
 
-            if is_decode:
-                decode_file = FLAGS.decode_file
-                decode_result_file = FLAGS.decode_result_file
-                decode_gpu = FLAGS.decode_gpu
-                decode_is_print = FLAGS.decode_is_print
-                print(
-                    'decoding the file %s on %s' % (
-                        decode_file, decode_gpu))
-                generator.gen_sample(
-                    decode_file, decode_result_file, 10,
-                    is_print=decode_is_print, gpu_device=decode_gpu)
+        if is_decode:
+            decode_file = FLAGS.decode_file
+            decode_result_file = FLAGS.decode_result_file
+            decode_gpu = FLAGS.decode_gpu
+            decode_is_print = FLAGS.decode_is_print
+            print(
+                'decoding the file %s on %s' % (
+                    decode_file, decode_gpu))
+            generator.gen_sample(
+                decode_file, decode_result_file, 10,
+                is_print=decode_is_print, gpu_device=decode_gpu)
 
-                return 0
+            return 0
 
-            elif is_generator_train:
-                print('train the model and build the generate')
-                generator.build_train_model()
-                generator.gen_train()
-                generator.build_generate(
-                    maxlen=max_len, generate_batch=gan_gen_batch_size,
-                    optimizer='rmsprop')
-                generator.rollout_generate(generate_batch=gan_gen_batch_size)
-                print('done')
+        elif is_generator_train:
+            print('train the model and build the generate')
+            generator.build_train_model()
+            generator.gen_train()
+            generator.build_generate(
+                maxlen=max_len, generate_batch=gan_gen_batch_size,
+                optimizer='rmsprop')
+            generator.rollout_generate(generate_batch=gan_gen_batch_size)
+            print('done')
 
-            else:
-                print('build the generate without training')
-                generator.build_train_model()
-                generator.build_generate(
-                    maxlen=max_len,
-                    generate_batch=gan_gen_batch_size,
-                    optimizer='rmsprop')
-                generator.rollout_generate(generate_batch=gan_gen_batch_size)
-                generator.init_and_reload()
+        else:
+            print('build the generate without training')
+            generator.build_train_model()
+            generator.build_generate(
+                maxlen=max_len,
+                generate_batch=gan_gen_batch_size,
+                optimizer='rmsprop')
+            generator.rollout_generate(generate_batch=gan_gen_batch_size)
+            generator.init_and_reload()
 
-                # print('building testing ')
-                # generator.build_test()
-                # print('done')
+            # print('building testing ')
+            # generator.build_test()
+            # print('done')
 
-    # ----------- pretraining the discriminator -----------
+# ----------- pretraining the discriminator -----------
 
-        if is_discriminator_train or is_gan_train:
+    if is_discriminator_train or is_gan_train:
 
-            dis_max_epoches = FLAGS.dis_epoches
-            dis_dispFreq = FLAGS.dis_dispFreq
-            dis_saveFreq = FLAGS.dis_saveFreq
-            dis_devFreq = FLAGS.dis_devFreq
-            dis_batch_size = FLAGS.dis_batch_size
-            dis_saveto = FLAGS.dis_saveto
-            dis_reshuffle = FLAGS.dis_reshuffle
-            dis_gpu_device = FLAGS.dis_gpu_device
-            dis_max_len = FLAGS.dis_max_len
-            dis_positive_data = FLAGS.dis_positive_data
-            dis_negative_data = FLAGS.dis_negative_data
-            dis_source_data = FLAGS.dis_source_data
-            dis_dev_positive_data = FLAGS.dis_dev_positive_data
-            dis_dev_negative_data = FLAGS.dis_dev_negative_data
-            dis_dev_source_data = FLAGS.dis_dev_source_data
-            dis_reload = FLAGS.dis_reload
+        dis_max_epoches = FLAGS.dis_epoches
+        dis_dispFreq = FLAGS.dis_dispFreq
+        dis_saveFreq = FLAGS.dis_saveFreq
+        dis_devFreq = FLAGS.dis_devFreq
+        dis_batch_size = FLAGS.dis_batch_size
+        dis_saveto = FLAGS.dis_saveto
+        dis_reshuffle = FLAGS.dis_reshuffle
+        dis_gpu_device = FLAGS.dis_gpu_device
+        dis_max_len = FLAGS.dis_max_len
+        dis_positive_data = FLAGS.dis_positive_data
+        dis_negative_data = FLAGS.dis_negative_data
+        dis_source_data = FLAGS.dis_source_data
+        dis_dev_positive_data = FLAGS.dis_dev_positive_data
+        dis_dev_negative_data = FLAGS.dis_dev_negative_data
+        dis_dev_source_data = FLAGS.dis_dev_source_data
+        dis_reload = FLAGS.dis_reload
 
-            dis_filter_sizes = [i for i in range(1, dis_max_len, 4)]
-            dis_num_filters = [(100 + i*10) for i in range(1, dis_max_len, 4)]
+        dis_filter_sizes = [i for i in range(1, dis_max_len, 4)]
+        dis_num_filters = [(100 + i*10) for i in range(1, dis_max_len, 4)]
 
-            discriminator = DisCNN(
-                sess=sess,
-                max_len=dis_max_len,
-                num_classes=2,
-                vocab_size=vocab_size,
-                batch_size=dis_batch_size,
-                dim_word=dim_word,
-                filter_sizes=dis_filter_sizes,
-                num_filters=dis_num_filters,
-                gpu_device=dis_gpu_device,
-                positive_data=dis_positive_data,
-                negative_data=dis_negative_data,
-                source_data=dis_source_data,
-                dev_positive_data=dis_dev_positive_data,
-                dev_negative_data=dis_dev_negative_data,
-                dev_source_data=dis_dev_source_data,
-                max_epoches=dis_max_epoches,
-                dispFreq=dis_dispFreq,
-                saveFreq=dis_saveFreq,
-                devFreq=dis_devFreq,
-                saveto=dis_saveto,
-                reload=dis_reload,
-                clip_c=clip_c,
-                optimizer='rmsprop',
-                reshuffle=dis_reshuffle,
-                scope='discnn')
+        discriminator = DisCNN(
+            sess=sess,
+            max_len=dis_max_len,
+            num_classes=2,
+            dict_path=dict_path,
+            vocab_size=vocab_size,
+            batch_size=dis_batch_size,
+            dim_word=dim_word,
+            filter_sizes=dis_filter_sizes,
+            num_filters=dis_num_filters,
+            gpu_device=dis_gpu_device,
+            positive_data=dis_positive_data,
+            negative_data=dis_negative_data,
+            source_data=dis_source_data,
+            dev_positive_data=dis_dev_positive_data,
+            dev_negative_data=dis_dev_negative_data,
+            dev_source_data=dis_dev_source_data,
+            max_epoches=dis_max_epoches,
+            dispFreq=dis_dispFreq,
+            saveFreq=dis_saveFreq,
+            devFreq=dis_devFreq,
+            saveto=dis_saveto,
+            reload_mod=dis_reload,
+            clip_c=clip_c,
+            optimizer='rmsprop',
+            reshuffle=dis_reshuffle,
+            scope='discnn')
 
-            if is_discriminator_train:
-                print('train the discriminator')
-                discriminator.train()
-                print('done')
+        if is_discriminator_train:
+            print('train the discriminator')
+            discriminator.train()
+            print('done')
 
-            else:
-                print('building the discriminator without training done')
-                print('done')
+        else:
+            print('building the discriminator without training done')
+            print('done')
 
-        #   ----------- Start Reinforcement Training -----------
-            if is_gan_train:
+    #   ----------- Start Reinforcement Training -----------
+        if is_gan_train:
 
-                gan_total_iter_num = FLAGS.gan_total_iter_num
-                gan_gen_iter_num = FLAGS.gan_gen_iter_num
-                gan_dis_iter_num = FLAGS.gan_dis_iter_num
+            gan_total_iter_num = FLAGS.gan_total_iter_num
+            gan_gen_iter_num = FLAGS.gan_gen_iter_num
+            gan_dis_iter_num = FLAGS.gan_dis_iter_num
 
-                gan_gen_reshuffle = FLAGS.gan_gen_reshuffle
-                # gan_gen_source_data = FLAGS.gan_gen_source_data
+            gan_gen_reshuffle = FLAGS.gan_gen_reshuffle
+            # gan_gen_source_data = FLAGS.gan_gen_source_data
 
-                gan_dis_source_data = FLAGS.gan_dis_source_data
-                gan_dis_positive_data = FLAGS.gan_dis_positive_data
-                gan_dis_negative_data = FLAGS.gan_dis_negative_data
-                # gan_dis_reshuffle = FLAGS.gan_dis_reshuffle
-                # gan_dis_batch_size = FLAGS.gan_dis_batch_size
-                gan_dispFreq = FLAGS.gan_dispFreq
-                gan_saveFreq = FLAGS.gan_saveFreq
-                roll_num = FLAGS.rollnum
-                generate_num = FLAGS.generate_num
-                bias_num = FLAGS.bias_num
-                teacher_forcing = FLAGS.teacher_forcing
+            gan_dis_source_data = FLAGS.gan_dis_source_data
+            gan_dis_positive_data = FLAGS.gan_dis_positive_data
+            gan_dis_negative_data = FLAGS.gan_dis_negative_data
+            # gan_dis_reshuffle = FLAGS.gan_dis_reshuffle
+            # gan_dis_batch_size = FLAGS.gan_dis_batch_size
+            gan_dispFreq = FLAGS.gan_dispFreq
+            gan_saveFreq = FLAGS.gan_saveFreq
+            roll_num = FLAGS.rollnum
+            generate_num = FLAGS.generate_num
+            bias_num = FLAGS.bias_num
+            teacher_forcing = FLAGS.teacher_forcing
 
-                print('reinforcement training begin...')
+            print('reinforcement training begin...')
 
-                for gan_iter in range(gan_total_iter_num):
+            for gan_iter in range(gan_total_iter_num):
 
-                    print('reinforcement training for %d epoch' % gan_iter)
-                    # gen_train_it = gen_train_iter(gan_gen_source_data,
-                    # gan_gen_reshuffle, generator.dictionaries[0], n_words_src,
-                    # gan_gen_batch_size, max_len) gen_train_it =
-                    # gen_train_iter(gan_dis_source_data, gan_gen_reshuffle,
-                    # generator.dictionaries[0], n_words_src,
-                    # gan_gen_batch_size, max_len)
-                    gen_train_it = gen_force_train_iter(
-                        gan_dis_source_data,
-                        gan_dis_positive_data,
-                        gan_gen_reshuffle,
-                        generator.dictionaries[0],
-                        generator.dictionaries[1],
-                        gan_gen_batch_size,
-                        max_len,
-                        vocab_size,
+                print('reinforcement training for %d epoch' % gan_iter)
+                # gen_train_it = gen_train_iter(gan_gen_source_data,
+                # gan_gen_reshuffle, generator.dictionaries[0], n_words_src,
+                # gan_gen_batch_size, max_len) gen_train_it =
+                # gen_train_iter(gan_dis_source_data, gan_gen_reshuffle,
+                # generator.dictionaries[0], n_words_src,
+                # gan_gen_batch_size, max_len)
+                gen_train_it = gen_force_train_iter(
+                    gan_dis_source_data,
+                    gan_dis_positive_data,
+                    gan_gen_reshuffle,
+                    generator.vocab,
+                    vocab_size,
+                    gan_gen_batch_size,
+                    max_len,
+                    dis_max_len
+                )
+
+                print('finetune the generator begin...')
+                for gen_iter in range(gan_gen_iter_num):
+
+                    x, y_ground, _ = next(gen_train_it)
+                    x_to_maxlen = prepare_sentence_to_maxlen(x)
+
+                    # x, x_mask = prepare_multiple_sentence(x,
+                    # maxlen=max_len)
+                    x, x_mask, y_ground, y_ground_mask = prepare_data(
+                        x, y_ground, max_len=max_len,
+                        dis_max_len=dis_max_len, vocab_size=vocab_size
                     )
+                    y_sample_out = generator.generate_step(x, x_mask)
 
-                    print('finetune the generator begin...')
-                    for gen_iter in range(gan_gen_iter_num):
+                    # for debug to print these generated sentence
+                    # y_out, _ = deal_generated_y_sentence(y_sample_out,
+                    # generator.worddicts)
+                    # y_out = numpy.transpose(y_out)
 
-                        x, y_ground, _ = next(gen_train_it)
-                        x_to_maxlen = prepare_sentence_to_maxlen(x)
+                    # for id, y in enumerate(y_out):
+                    #    y_str = print_string('y', y, generator.worddicts_r)
+                    #    print y_str+'\n'
 
-                        # x, x_mask = prepare_multiple_sentence(x,
-                        # maxlen=max_len)
-                        x, x_mask, y_ground, y_ground_mask = prepare_data(
-                            x,
-                            y_ground,
-                            maxlen=50,
-                            n_words=vocab_size)
-                        y_sample_out = generator.generate_step(x, x_mask)
+                    y_input, y_input_mask = deal_generated_y_sentence(
+                        y_sample_out, generator.vocab, precision=precision)
+                    rewards = generator.get_reward(
+                        x, x_mask, x_to_maxlen, y_input, y_input_mask,
+                        roll_num, discriminator, bias_num=bias_num)
+                    print('the reward is ', rewards)
+                    loss = generator.generate_step_and_update(
+                        x, x_mask, y_input, rewards)
+                    if gen_iter % gan_dispFreq == 0:
+                        print(
+                            'the %d iter, seen %d examples, loss is %f ' % (
+                                gen_iter, (
+                                    (gan_iter) * gan_gen_iter_num + gen_iter + 1
+                                ), loss)
+                        )
+                    if gen_iter % gan_saveFreq == 0:
+                        generator.saver.save(
+                            generator.sess, generator.saveto)
+                        print(
+                            'save the parameters when seen %d examples ' % (
+                                (gan_iter) * gan_gen_iter_num + gan_iter + 1
+                            ))
 
-                        # for debug to print these generated sentence
-                        # y_out, _ = deal_generated_y_sentence(y_sample_out,
-                        # generator.worddicts)
-                        # y_out = numpy.transpose(y_out)
-
-                        # for id, y in enumerate(y_out):
-                        #    y_str = print_string('y', y, generator.worddicts_r)
-                        #    print y_str+'\n'
-
-                        y_input, y_input_mask = deal_generated_y_sentence(
-                            y_sample_out, generator.worddicts,
+                    # teacher force training
+                    if teacher_forcing:
+                        y_ground = prepare_sentence_to_maxlen(
+                            numpy.transpose(y_ground), maxlen=dis_max_len,
                             precision=precision)
-                        rewards = generator.get_reward(
-                            x, x_mask, x_to_maxlen, y_input, y_input_mask,
-                            roll_num, discriminator, bias_num=bias_num)
-                        print('the reward is ', rewards)
+                        y_ground_mask = prepare_sentence_to_maxlen(
+                            numpy.transpose(y_ground_mask), maxlen=dis_max_len,
+                            precision=precision)
+                        rewards_ground = numpy.ones_like(y_ground)
+                        rewards_ground = rewards_ground * y_ground_mask
+                        rewards_ground = numpy.transpose(rewards_ground)
+                        print(
+                            'the reward for ground in teacher forcing is ',
+                            rewards_ground)
                         loss = generator.generate_step_and_update(
-                            x, x_mask, y_input, rewards)
+                            x, x_mask, y_ground, rewards_ground)
                         if gen_iter % gan_dispFreq == 0:
                             print(
-                                'the %d iter, seen %d examples, loss is %f ' % (
-                                    gen_iter, ((gan_iter) * gan_gen_iter_num +
-                                               gen_iter + 1), loss))
-                        if gen_iter % gan_saveFreq == 0:
-                            generator.saver.save(
-                                generator.sess, generator.saveto)
-                            print(
-                                'save the parameters when seen %d examples ' % (
-                                    (gan_iter) * gan_gen_iter_num + gan_iter + 1
-                                ))
+                                'the %d iter, seen %d ground examples,\
+                                loss is %f ' % (gen_iter, (
+                                    (gan_iter) * gan_gen_iter_num +
+                                    gen_iter + 1), loss))
 
-                        # teacher force training
-                        if teacher_forcing:
-                            y_ground = prepare_sentence_to_maxlen(
-                                numpy.transpose(y_ground), maxlen=50,
-                                precision=precision)
-                            y_ground_mask = prepare_sentence_to_maxlen(
-                                numpy.transpose(y_ground_mask), maxlen=50,
-                                precision=precision)
-                            rewards_ground = numpy.ones_like(y_ground)
-                            rewards_ground = rewards_ground * y_ground_mask
-                            rewards_ground = numpy.transpose(rewards_ground)
-                            print(
-                                'the reward for ground in teacher forcing is ',
-                                rewards_ground)
-                            loss = generator.generate_step_and_update(
-                                x, x_mask, y_ground, rewards_ground)
-                            if gen_iter % gan_dispFreq == 0:
-                                print(
-                                    'the %d iter, seen %d ground examples,\
-                                    loss is %f ' % (gen_iter, (
-                                        (gan_iter) * gan_gen_iter_num +
-                                        gen_iter + 1), loss))
+                generator.saver.save(generator.sess, generator.saveto)
+                print('finetune the generator done!')
 
-                    generator.saver.save(generator.sess, generator.saveto)
-                    print('finetune the generator done!')
+                # print('self testing')
+                # generator.self_test(gan_dis_source_data,
+                # gan_dis_negative_data)
+                # print('self testing done!')
 
-                    # print('self testing')
-                    # generator.self_test(gan_dis_source_data,
-                    # gan_dis_negative_data)
-                    # print('self testing done!')
+                print('prepare the gan_dis_data begin ')
+                data_num = prepare_gan_dis_data(
+                    train_data_source, train_data_target,
+                    gan_dis_source_data, gan_dis_positive_data,
+                    num=generate_num, reshuf=True)
+                print(
+                    'prepare the gan_dis_data done, \
+                    the num of the gan_dis_data is %d' % data_num)
 
-                    print('prepare the gan_dis_data begin ')
-                    data_num = prepare_gan_dis_data(
-                        train_data_source, train_data_target,
-                        gan_dis_source_data, gan_dis_positive_data,
-                        num=generate_num, reshuf=True)
-                    print(
-                        'prepare the gan_dis_data done, \
-                        the num of the gan_dis_data is %d' % data_num)
+                print(
+                    'generator generate and save to %s'
+                    % gan_dis_negative_data)
+                generator.generate_and_save(
+                    gan_dis_source_data, gan_dis_negative_data,
+                    generate_batch=gan_gen_batch_size
+                )
+                print('done!')
 
-                    print(
-                        'generator generate and save to %s'
-                        % gan_dis_negative_data)
-                    generator.generate_and_save(
-                        gan_dis_source_data, gan_dis_negative_data,
-                        generate_batch=gan_gen_batch_size
-                    )
-                    print('done!')
+                print('prepare the dis_dev sets')
+                # dev_num = prepare_three_gan_dis_dev_data(
+                #     gan_dis_positive_data, gan_dis_negative_data,
+                #     gan_dis_source_data, dis_dev_positive_data,
+                #     dis_dev_negative_data, dis_dev_source_data, 200)
+                print('done!')
 
-                    print('prepare the dis_dev sets')
-                    # dev_num = prepare_three_gan_dis_dev_data(
-                    #     gan_dis_positive_data, gan_dis_negative_data,
-                    #     gan_dis_source_data, dis_dev_positive_data,
-                    #     dis_dev_negative_data, dis_dev_source_data, 200)
-                    print('done!')
+                print('finetune the discriminator begin...')
+                discriminator.train(
+                    max_epoch=gan_dis_iter_num,
+                    positive_data=gan_dis_positive_data,
+                    negative_data=gan_dis_negative_data,
+                    source_data=gan_dis_source_data)
+                discriminator.saver.save(
+                    discriminator.sess, discriminator.saveto)
+                print('finetune the discriminator done!')
 
-                    print('finetune the discriminator begin...')
-                    discriminator.train(
-                        max_epoch=gan_dis_iter_num,
-                        positive_data=gan_dis_positive_data,
-                        negative_data=gan_dis_negative_data,
-                        source_data=gan_dis_source_data)
-                    discriminator.saver.save(
-                        discriminator.sess, discriminator.saveto)
-                    print('finetune the discriminator done!')
-
-                print('reinforcement training done')
+            print('reinforcement training done')
 
 
 if __name__ == '__main__':

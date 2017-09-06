@@ -67,10 +67,6 @@ def get_pairs_from_lcsts(filePath):
     """
     both should be segmented
     """
-    word2idx = dict()
-    word2idx['<eol>'] = 0
-    word2idx['<unk>'] = 1
-
     segment = False  # True
 
     # training set
@@ -82,6 +78,7 @@ def get_pairs_from_lcsts(filePath):
     while line:
         if line == '<summary>':
             summary = f.readline().strip()
+            summary = fix_missing_period(summary)
             if segment:
                 summary = [w for w in jb.cut(summary)]
 
@@ -136,8 +133,8 @@ def write_to_txt(
                 for abst in abstract if len(abst.strip()) > 0]
 
             # Write to file
-            art_writter.write(" ".join(art_tokens))
-            abs_writter.write(" ".join(abs_tokens))
+            art_writter.write(" ".join(art_tokens)+"\n")
+            abs_writter.write(" ".join(abs_tokens)+"\n")
 
             # Write the vocab to file, if applicable
             if makevocab:

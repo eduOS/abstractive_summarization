@@ -145,14 +145,11 @@ def prepare_gan_dis_dev_data(
     return num
 
 
-def print_string(src_or_trg, indexs, worddicts_r):
+def print_string(indexs, vocab):
     sample_str = ''
     for index in indexs:
         if index > 0:
-            if src_or_trg == 'y':
-                word_str = worddicts_r[1][index]
-            else:
-                word_str = worddicts_r[0][index]
+            word_str = vocab.id2word(index)
             sample_str = sample_str + word_str + ' '
     return sample_str
 
@@ -212,7 +209,8 @@ def gen_train_iter(
     dictionary,
     n_words,
     batch_size,
-     maxlen):
+    maxlen
+):
     iter = 0
     while True:
         if reshuffle:
@@ -241,14 +239,13 @@ def gen_force_train_iter(
     source_data,
     target_data,
     reshuffle,
-    source_dict,
-    target_dict,
+    vocab,
+    vocab_size,
     batch_size,
-    maxlen,
-    n_words_src,
-    n_words_trg
+    max_len,
+    dis_max_len,
 ):
-    iter = 0
+    iter_num = 0
     while True:
         if reshuffle:
             os.popen('python shuffle.py ' + source_data + ' ' + target_data)
@@ -257,43 +254,46 @@ def gen_force_train_iter(
         gen_force_train = TextIterator(
             source_data,
             target_data,
-            source_dict,
-            target_dict,
+            vocab,
+            vocab_size,
             batch_size,
-            maxlen,
-            n_words_src,
-            n_words_trg)
+            max_len,
+            dis_max_len)
         ExampleNum = 0
         EpochStart = time.time()
         for x, y in gen_force_train:
             if len(x) < batch_size and len(y) < batch_size:
                 continue
             ExampleNum += len(x)
-            yield x, y, iter
+            yield x, y, iter_num
         TimeCost = time.time() - EpochStart
-        iter += 1
+        iter_num += 1
         print('Seen', ExampleNum, 'generator samples. Time cost is ', TimeCost)
 
 
-def prepare_data(seqs_x, seqs_y, maxlen=None, n_words_src=30000,
-                 n_words=30000, precision='float32'):
+def prepare_data(seqs_x, seqs_y, max_len=None, dis_max_len=None,
+                 vocab_size=30000, precision='float32'):
     # x: a list of sentences
     lengths_x = [len(s) for s in seqs_x]
     lengths_y = [len(s) for s in seqs_y]
 
-    if maxlen is not None:
+    if max_len is not None:
         new_seqs_x = []
-        new_seqs_y = []
         new_lengths_x = []
-        new_lengths_y = []
-        for l_x, s_x, l_y, s_y in zip(lengths_x, seqs_x, lengths_y, seqs_y):
-            if l_x < maxlen and l_y < maxlen:
+        for l_x, s_x in zip(lengths_x, seqs_x):
+            if l_x < max_len:
                 new_seqs_x.append(s_x)
                 new_lengths_x.append(l_x)
-                new_seqs_y.append(s_y)
-                new_lengths_y.append(l_y)
         lengths_x = new_lengths_x
         seqs_x = new_seqs_x
+
+    if dis_max_len is not None:
+        new_seqs_y = []
+        new_lengths_y = []
+        for l_y, s_y in zip(lengths_y, seqs_y):
+            if l_y < dis_max_len:
+                new_seqs_y.append(s_y)
+                new_lengths_y.append(l_y)
         lengths_y = new_lengths_y
         seqs_y = new_seqs_y
 
@@ -376,12 +376,12 @@ def prepare_sentence_to_maxlen(seqs_x, maxlen=50, precision='float32'):
     return x
 
 
-def deal_generated_y_sentence(seqs_y, worddicts, precision='float32'):
+def deal_generated_y_sentence(seqs_y, vocab, precision='float32'):
     n_samples = len(seqs_y)
     lens_y = [len(seq) for seq in seqs_y]
     maxlen_y = numpy.max(lens_y)
-    eosTag = '<EOS2>'
-    eosIndex = worddicts[1][eosTag]
+    eosTag = '[STOP]'
+    eosIndex = vocab.word2id(eosTag)
 
     y = numpy.zeros((maxlen_y, n_samples)).astype('int32')
     y_mask = numpy.zeros((maxlen_y, n_samples)).astype(precision)
@@ -501,7 +501,7 @@ def average_clip_gradient(tower_grads, clip_c):
             # Append on a 'tower' dimension which we will average over below.
             grads.append(expanded_g)
             # Average over the 'tower' dimension.
-        grad = tf.concat(0, grads)
+        grad = tf.concat(grads, 0)
         grad = tf.reduce_mean(grad, 0)
         # Keep in mind that the Variables are redundant because they are shared
         #  across towers. So .. we will just return the first tower's pointer to
@@ -531,7 +531,7 @@ def average_clip_gradient_by_value(tower_grads, clip_min, clip_max):
             # Append on a 'tower' dimension which we will average over below.
             grads.append(expanded_g)
             # Average over the 'tower' dimension.
-        grad = tf.concat(0, grads)
+        grad = tf.concat(grads, 0)
         grad = tf.reduce_mean(grad, 0)
         # Keep in mind that the Variables are redundant because they are shared
         #  across towers. So .. we will just return the first tower's pointer to
@@ -563,7 +563,7 @@ class Vocab(object):
         self._id_to_word = {}
         self._count = 0
 
-        for w in [UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING]:
+        for w in [UNKNOWN_TOKEN, START_DECODING, STOP_DECODING]:
             self._word_to_id[w] = self._count
             self._id_to_word[self._count] = w
             self._count += 1
@@ -580,7 +580,6 @@ class Vocab(object):
                 w = pieces[0]
                 if w in [
                     UNKNOWN_TOKEN,
-                    PAD_TOKEN,
                     START_DECODING,
                     STOP_DECODING
                 ]:
@@ -621,3 +620,55 @@ class Vocab(object):
     def size(self):
         """Returns the total size of the vocabulary"""
         return self._count
+
+
+def linear(args, output_size, bias, bias_start=0.0, scope=None):
+    """Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
+
+    Args:
+      args: a 2D Tensor or a list of 2D, batch x n, Tensors.
+      output_size: int, second dimension of W[i].
+      bias: boolean, whether to add a bias term or not.
+      bias_start: starting value to initialize the bias; 0 by default.
+      scope: VariableScope for the created subgraph; defaults to "Linear".
+
+    Returns:
+      A 2D Tensor with shape [batch x output_size] equal to
+      sum_i(args[i] * W[i]), where W[i]s are newly created matrices.
+
+    Raises:
+      ValueError: if some of the arguments has unspecified or wrong shape.
+    """
+    if args is None or (isinstance(args, (list, tuple)) and not args):
+        raise ValueError("`args` must be specified")
+    if not isinstance(args, (list, tuple)):
+        args = [args]
+
+    # Calculate the total size of arguments on dimension 1.
+    total_arg_size = 0
+    shapes = [a.get_shape().as_list() for a in args]
+    for shape in shapes:
+        if len(shape) != 2:
+            raise ValueError(
+                "Linear is expecting 2D arguments: %s" %
+                str(shapes))
+        if not shape[1]:
+            raise ValueError(
+                "Linear expects shape[1] of arguments: %s" %
+                str(shapes))
+        else:
+            total_arg_size += shape[1]
+
+    # Now the computation.
+    with tf.variable_scope(scope or "Linear"):
+        matrix = tf.get_variable("Matrix", [total_arg_size, output_size])
+        if len(args) == 1:
+            res = tf.matmul(args[0], matrix)
+        else:
+            res = tf.matmul(tf.concat(axis=1, values=args), matrix)
+        if not bias:
+            return res
+        bias_term = tf.get_variable(
+            "Bias", [output_size],
+            initializer=tf.constant_initializer(bias_start))
+    return res + bias_term

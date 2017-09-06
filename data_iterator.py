@@ -13,23 +13,17 @@ class disThreeTextIterator:
 
     def __init__(
         self, positive_data, negative_data, source_data,
-        dic_target, dic_source, batch=1, maxlen=50,
-        n_words_target=-1, n_words_source=-1
+        vocab, vocab_size, batch=1, maxlen=50,
     ):
         self.positive = fopen(positive_data, 'r')
         self.negative = fopen(negative_data, 'r')
         self.source = fopen(source_data, 'r')
-
-        with open(dic_target) as f_trg:
-            self.dic_target = pkl.load(f_trg)
-        with open(dic_source) as s_trg:
-            self.dic_source = pkl.load(s_trg)
+        self.vocab = vocab
+        self.vocab_size = vocab_size
 
         self.batch_size = batch
         assert self.batch_size % 2 == 0
         self.maxlen = maxlen
-        self.n_words_trg = n_words_target
-        self.n_words_src = n_words_source
         self.end_of_data = False
 
     def __iter__(self):
@@ -59,31 +53,25 @@ class disThreeTextIterator:
                 if ss == "":
                     raise IOError
                 ss = ss.strip().split()
-                ss = [
-                    self.dic_target[w] if w in self.dic_target else 1
-                    for w in ss]
-                if self.n_words_trg > 0:
-                    ss = [w if w < self.n_words_trg else 1 for w in ss]
+                ss = [self.vocab.word2id(w) for w in ss]
+                if self.vocab_size > 0:
+                    ss = [w if w < self.vocab_size else 1 for w in ss]
 
                 tt = self.negative.readline()
                 if tt == "":
                     raise IOError
                 tt = tt.strip().split()
-                tt = [
-                    self.dic_target[w] if w in self.dic_target else 1
-                    for w in tt]
-                if self.n_words_trg > 0:
-                    tt = [w if w < self.n_words_trg else 1 for w in tt]
+                tt = [self.vocab.word2id(w) for w in tt]
+                if self.vocab_size > 0:
+                    tt = [w if w < self.vocab_size else 1 for w in tt]
 
                 ll = self.source.readline()
                 if ll == "":
                     raise IOError
                 ll = ll.strip().split()
-                ll = [
-                    self.dic_source[w] if w in self.dic_source else 1
-                    for w in ll]
-                if self.n_words_src > 0:
-                    ll = [w if w < self.n_words_src else 1 for w in ll]
+                ll = [self.vocab.word2id(w) for w in ll]
+                if self.vocab_size > 0:
+                    ll = [w if w < self.vocab_size else 1 for w in ll]
 
                 if (
                     len(ss) > self.maxlen or
@@ -143,7 +131,8 @@ class disTextIterator:
         dis_dict,
         batch=1,
         maxlen=30,
-     n_words_target=-1):
+        n_words_target=-1
+    ):
         self.positive = fopen(positive_data, 'r')
         self.negative = fopen(negative_data, 'r')
         # what is the positive and negative data?
@@ -294,12 +283,14 @@ class TextIterator:
     """Simple Bitext iterator."""
 
     def __init__(
-        self, source, target, vocab, vocab_size, batch_size=128, maxlen=100,
+        self, source, target, vocab,
+        vocab_size, batch_size=128, max_len=50, dis_max_len=15,
     ):
         self.source = fopen(source, 'r')
         self.target = fopen(target, 'r')
         self.batch_size = batch_size
-        self.maxlen = maxlen
+        self.max_len = max_len
+        self.dis_max_len = dis_max_len
         self.vocab = vocab
         self.vocab_size = vocab_size
         self.end_of_data = False
@@ -343,7 +334,7 @@ class TextIterator:
                 if self.vocab_size > 0:
                     tt = [w if w < self.vocab_size else 1 for w in tt]
 
-                if len(ss) > self.maxlen and len(tt) > self.maxlen:
+                if len(ss) > self.max_len and len(tt) > self.dis_max_len:
                     continue
 
                 source.append(ss)

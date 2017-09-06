@@ -112,7 +112,7 @@ class GRULayer(RNNCell):
         preAct = math_ops.matmul(state, U)
         preAct += emb2gates
         preAct = math_ops.sigmoid(preAct)
-        r, u = array_ops.split(1, 2, preAct)
+        r, u = array_ops.split(preAct, 2, 1)
 
         # hidden input for first gru layer
         preActx = math_ops.matmul(state, Ux)
@@ -305,7 +305,7 @@ class GRUCondLayer(RNNCell):
         preAct1 = math_ops.matmul(state, U)
         preAct1 += emb2gates
         preAct1 = math_ops.sigmoid(preAct1)
-        r1, u1 = array_ops.split(1, 2, preAct1)
+        r1, u1 = array_ops.split(preAct1, 2, 1)
 
         # hidden input for first gru layer
         preActx1 = math_ops.matmul(state, Ux)
@@ -337,7 +337,7 @@ class GRUCondLayer(RNNCell):
         preAct2 += math_ops.matmul(ctx_, Wc)
         preAct2 = math_ops.sigmoid(preAct2)
 
-        r2, u2 = array_ops.split(1, 2, preAct2)
+        r2, u2 = array_ops.split(preAct2, 2, 1)
 
         preActx2 = math_ops.matmul(h1, Ux_nl)+bx_nl
         preActx2 *= r2
@@ -348,7 +348,7 @@ class GRUCondLayer(RNNCell):
         h2 = u2 * h1 + (1. - u2) * h2
         h2 = mask_slice * h2 + (1. - mask_slice) * h1
 
-        output = tf.concat(1, [h2, ctx_])
+        output = tf.concat([h2, ctx_], 1)
         # if FLAGS.DebugMode:
         #        tensorPrint={}
         #        tensorPrint['emb2hidden'] = emb2hidden
