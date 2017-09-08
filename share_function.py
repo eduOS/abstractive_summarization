@@ -564,7 +564,7 @@ class Vocab(object):
         self._count = 0
 
         for w in [
-            UNKNOWN_TOKEN, "sholdbedeleted", START_DECODING, STOP_DECODING
+            UNKNOWN_TOKEN, START_DECODING, STOP_DECODING
         ]:
             self._word_to_id[w] = self._count
             self._id_to_word[self._count] = w
