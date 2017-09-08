@@ -242,8 +242,8 @@ def gen_force_train_iter(
     vocab,
     vocab_size,
     batch_size,
-    max_len,
-    dis_max_len,
+    max_len_s,
+    max_leng,
 ):
     iter_num = 0
     while True:
@@ -257,8 +257,8 @@ def gen_force_train_iter(
             vocab,
             vocab_size,
             batch_size,
-            max_len,
-            dis_max_len)
+            max_len_s,
+            max_leng)
         ExampleNum = 0
         EpochStart = time.time()
         for x, y in gen_force_train:
@@ -271,27 +271,27 @@ def gen_force_train_iter(
         print('Seen', ExampleNum, 'generator samples. Time cost is ', TimeCost)
 
 
-def prepare_data(seqs_x, seqs_y, max_len=None, dis_max_len=None,
+def prepare_data(seqs_x, seqs_y, max_len_s=None, max_leng=None,
                  vocab_size=30000, precision='float32'):
     # x: a list of sentences
     lengths_x = [len(s) for s in seqs_x]
     lengths_y = [len(s) for s in seqs_y]
 
-    if max_len is not None:
+    if max_len_s is not None:
         new_seqs_x = []
         new_lengths_x = []
         for l_x, s_x in zip(lengths_x, seqs_x):
-            if l_x < max_len:
+            if l_x < max_len_s:
                 new_seqs_x.append(s_x)
                 new_lengths_x.append(l_x)
         lengths_x = new_lengths_x
         seqs_x = new_seqs_x
 
-    if dis_max_len is not None:
+    if max_leng is not None:
         new_seqs_y = []
         new_lengths_y = []
         for l_y, s_y in zip(lengths_y, seqs_y):
-            if l_y < dis_max_len:
+            if l_y < max_leng:
                 new_seqs_y.append(s_y)
                 new_lengths_y.append(l_y)
         lengths_y = new_lengths_y
@@ -317,9 +317,9 @@ def prepare_data(seqs_x, seqs_y, max_len=None, dis_max_len=None,
     return x, x_mask, y, y_mask
 
 
-def dis_three_length_prepare(seqs_x, seqs_y, seqs_xs, maxlen=50):
+def dis_three_length_prepare(seqs_x, seqs_y, seqs_xs, maxlen=50, dismaxlen=15):
     n_samples = len(seqs_x)
-    x = numpy.zeros((maxlen, n_samples)).astype('int32')
+    x = numpy.zeros((dismaxlen, n_samples)).astype('int32')
     y = numpy.zeros((2, n_samples)).astype('int32')
     xs = numpy.zeros((maxlen, n_samples)).astype('int32')
 
@@ -563,7 +563,9 @@ class Vocab(object):
         self._id_to_word = {}
         self._count = 0
 
-        for w in [UNKNOWN_TOKEN, START_DECODING, STOP_DECODING]:
+        for w in [
+            UNKNOWN_TOKEN, "sholdbedeleted", START_DECODING, STOP_DECODING
+        ]:
             self._word_to_id[w] = self._count
             self._id_to_word[self._count] = w
             self._count += 1
@@ -579,9 +581,7 @@ class Vocab(object):
                     continue
                 w = pieces[0]
                 if w in [
-                    UNKNOWN_TOKEN,
-                    START_DECODING,
-                    STOP_DECODING
+                    UNKNOWN_TOKEN, START_DECODING, STOP_DECODING
                 ]:
                     raise Exception(
                         '<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t\

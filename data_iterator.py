@@ -13,7 +13,7 @@ class disThreeTextIterator:
 
     def __init__(
         self, positive_data, negative_data, source_data,
-        vocab, vocab_size, batch=1, maxlen=50,
+        vocab, vocab_size, batch=1, maxlen=80, dismaxlen=15
     ):
         self.positive = fopen(positive_data, 'r')
         self.negative = fopen(negative_data, 'r')
@@ -24,6 +24,7 @@ class disThreeTextIterator:
         self.batch_size = batch
         assert self.batch_size % 2 == 0
         self.maxlen = maxlen
+        self.dismaxlen = dismaxlen
         self.end_of_data = False
 
     def __iter__(self):
@@ -55,15 +56,16 @@ class disThreeTextIterator:
                 ss = ss.strip().split()
                 ss = [self.vocab.word2id(w) for w in ss]
                 if self.vocab_size > 0:
-                    ss = [w if w < self.vocab_size else 1 for w in ss]
+                    ss = [w if w < self.vocab_size else 0 for w in ss]
 
                 tt = self.negative.readline()
                 if tt == "":
-                    raise IOError
+                    # raise IOError
+                    continue
                 tt = tt.strip().split()
                 tt = [self.vocab.word2id(w) for w in tt]
                 if self.vocab_size > 0:
-                    tt = [w if w < self.vocab_size else 1 for w in tt]
+                    tt = [w if w < self.vocab_size else 0 for w in tt]
 
                 ll = self.source.readline()
                 if ll == "":
@@ -71,11 +73,11 @@ class disThreeTextIterator:
                 ll = ll.strip().split()
                 ll = [self.vocab.word2id(w) for w in ll]
                 if self.vocab_size > 0:
-                    ll = [w if w < self.vocab_size else 1 for w in ll]
+                    ll = [w if w < self.vocab_size else 0 for w in ll]
 
                 if (
-                    len(ss) > self.maxlen or
-                    len(tt) > self.maxlen or
+                    len(ss) > self.dismaxlen or
+                    len(tt) > self.dismaxlen or
                     len(ll) > self.maxlen
                 ):
                     continue
@@ -131,7 +133,7 @@ class disTextIterator:
         dis_dict,
         batch=1,
         maxlen=30,
-        n_words_target=-1
+        dismaxlen=-1
     ):
         self.positive = fopen(positive_data, 'r')
         self.negative = fopen(negative_data, 'r')
@@ -144,7 +146,7 @@ class disTextIterator:
             'the batch size of disTextIterator is not an even number'
 
         self.maxlen = maxlen
-        self.n_words_target = n_words_target
+        self.dismaxlen = dismaxlen
         self.end_of_data = False
 
     def __iter__(self):
@@ -171,16 +173,16 @@ class disTextIterator:
                     raise IOError
                 ss = ss.strip().split()
                 ss = [self.dis_dict[w] if w in self.dis_dict else 1 for w in ss]
-                if self.n_words_target > 0:
-                    ss = [w if w < self.n_words_target else 1 for w in ss]
+                if self.dismaxlen > 0:
+                    ss = [w if w < self.dismaxlen else 1 for w in ss]
 
                 tt = self.negative.readline()
                 if tt == "":
                     raise IOError
                 tt = tt.strip().split()
                 tt = [self.dis_dict[w] if w in self.dis_dict else 1 for w in tt]
-                if self.n_words_target > 0:
-                    tt = [w if w < self.n_words_target else 1 for w in tt]
+                if self.dismaxlen > 0:
+                    tt = [w if w < self.dismaxlen else 1 for w in tt]
 
                 if len(ss) > self.maxlen or len(tt) > self.maxlen:
                     continue
@@ -223,7 +225,7 @@ class genTextIterator:
         source_dict,
         batch_size=1,
         maxlen=30,
-        n_words_source=-1
+        dismaxlen=-1
     ):
         self.source = fopen(train_data, 'r')
 
@@ -233,7 +235,7 @@ class genTextIterator:
         self.batch_size = batch_size
         self.maxlen = maxlen
 
-        self.n_words_source = n_words_source
+        self.dismaxlen = dismaxlen
         self.end_of_data = False
 
     def __iter__(self):
@@ -258,8 +260,8 @@ class genTextIterator:
                 ss = [
                     self.source_dict[w]
                     if w in self.source_dict else 1 for w in ss]
-                if self.n_words_source > 0:
-                    ss = [w if w < self.n_words_source else 1 for w in ss]
+                if self.dismaxlen > 0:
+                    ss = [w if w < self.dismaxlen else 1 for w in ss]
 
                 if len(ss) > self.maxlen:
                     continue
@@ -284,13 +286,13 @@ class TextIterator:
 
     def __init__(
         self, source, target, vocab,
-        vocab_size, batch_size=128, max_len=50, dis_max_len=15,
+        vocab_size, batch_size=128, max_len_s=50, max_leng=15,
     ):
         self.source = fopen(source, 'r')
         self.target = fopen(target, 'r')
         self.batch_size = batch_size
-        self.max_len = max_len
-        self.dis_max_len = dis_max_len
+        self.max_len_s = max_len_s
+        self.max_leng = max_leng
         self.vocab = vocab
         self.vocab_size = vocab_size
         self.end_of_data = False
@@ -323,7 +325,7 @@ class TextIterator:
                 ss = ss.strip().split()
                 ss = [self.vocab.word2id(w) for w in ss]
                 if self.vocab_size > 0:
-                    ss = [w if w < self.vocab_size else 1 for w in ss]
+                    ss = [w if w < self.vocab_size else 0 for w in ss]
 
                 # read from source file and map to word index
                 tt = self.target.readline()
@@ -332,9 +334,9 @@ class TextIterator:
                 tt = tt.strip().split()
                 tt = [self.vocab.word2id(w) for w in tt]
                 if self.vocab_size > 0:
-                    tt = [w if w < self.vocab_size else 1 for w in tt]
+                    tt = [w if w < self.vocab_size else 0 for w in tt]
 
-                if len(ss) > self.max_len and len(tt) > self.dis_max_len:
+                if len(ss) > self.max_len_s and len(tt) > self.max_leng:
                     continue
 
                 source.append(ss)

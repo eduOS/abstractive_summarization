@@ -72,8 +72,8 @@ class GenNmt(object):
         gpu_device,
         dim_word=512,
         dim=1024,
-        max_len=50,
-        dis_max_len=15,
+        max_len_s=50,
+        max_leng=15,
         clip_c=1.0,
         max_epoches=10,
         reshuffle=False,
@@ -115,8 +115,8 @@ class GenNmt(object):
 
         self.train_data_source = train_data_source
         self.train_data_target = train_data_target
-        self.max_len = max_len
-        self.dis_max_len = dis_max_len
+        self.max_len_s = max_len_s
+        self.max_leng = max_leng
         self.dim_word = dim_word
         self.dim = dim
         self.precision = precision
@@ -195,8 +195,8 @@ class GenNmt(object):
                 self.vocab,
                 vocab_size=self.vocab_size,
                 batch_size=self.batch_size * self.gpu_num,
-                max_len=self.max_len,
-                dis_max_len=self.dis_max_len,
+                max_len_s=self.max_len_s,
+                max_leng=self.max_leng,
             )
             ExamplesNum = 0
             print('Epoch : ', Epoch)
@@ -206,7 +206,6 @@ class GenNmt(object):
                     # what is this?
                     continue
                 ExamplesNum += len(x)
-                print('yield a sample')
                 yield x, y, Epoch
             TimeCost = time.time() - EpochStart
             Epoch += 1
@@ -266,16 +265,16 @@ class GenNmt(object):
 
             # ------------------ Embedding -----------------
             # embedding
-            sourcetable = tableLookup(
+            vocabtable = tableLookup(
                 self.vocab_size,
                 self.dim_word,
-                scope='sourceTable',
+                scope='vocabtable',
                 reuse_var=reuse_var,
                 prefix='Wemb')
-            emb = tf.nn.embedding_lookup(sourcetable, x_flat)
+            emb = tf.nn.embedding_lookup(vocabtable, x_flat)
             emb = tf.reshape(emb, [-1, n_samples, self.dim_word])
 
-            embr = tf.nn.embedding_lookup(sourcetable, xr_flat)
+            embr = tf.nn.embedding_lookup(vocabtable, xr_flat)
             embr = tf.reshape(embr, [-1, n_samples, self.dim_word])
 
             # ------------------- Encoder ------------------
@@ -319,11 +318,7 @@ class GenNmt(object):
                 precision=self.precision)
 
             # ------------------ Decoder -----------------
-            targettable = tableLookup(
-                self.vocab_size, self.dim_word, scope='targetTable',
-                reuse_var=reuse_var, prefix='Wemb_dec'
-            )
-            emb_y = tf.nn.embedding_lookup(targettable, y_flat)
+            emb_y = tf.nn.embedding_lookup(vocabtable, y_flat)
             emb_y = tf.reshape(emb_y, [-1, n_samples, self.dim_word])
             n_timesteps_trg = tf.shape(emb_y)[0]
             emb_y = tf.concat(
@@ -401,8 +396,7 @@ class GenNmt(object):
 
             grad = self.optimizer.compute_gradients(cost)
 
-            self.sourcetable = sourcetable
-            self.targettable = targettable
+            self.vocabtable = vocabtable
             self.cellForward = cellForward
             self.cellBackward = cellBackward
             self.cellDecoder = cellDecoder
@@ -440,16 +434,16 @@ class GenNmt(object):
             x_mask_tile = tf.tile(x_mask[:, :, None], [1, 1, self.dim])
             xr_mask_tile = tf.tile(xr_mask[:, :, None], [1, 1, self.dim])
 
-            sourcetable = tableLookup(
+            vocabtable = tableLookup(
                 self.vocab_size,
                 self.dim_word,
-                scope='sourceTable',
+                scope='vocabtable',
                 reuse_var=reuse_var,
                 prefix='Wemb')
-            emb = tf.nn.embedding_lookup(sourcetable, x_flat)
+            emb = tf.nn.embedding_lookup(vocabtable, x_flat)
             emb = tf.reshape(emb, [-1, 1, self.dim_word])
 
-            embr = tf.nn.embedding_lookup(sourcetable, xr_flat)
+            embr = tf.nn.embedding_lookup(vocabtable, xr_flat)
             embr = tf.reshape(embr, [-1, 1, self.dim_word])
             # emb can be directly got from x and xr
 
@@ -499,16 +493,9 @@ class GenNmt(object):
                 self.precision, [None, None, self.dim * 2])
             self.y = tf.placeholder(tf.int32, [None])
 
-            targettable = tableLookup(
-                self.vocab_size,
-                self.dim_word,
-                scope='targetTable',
-                reuse_var=reuse_var,
-                prefix='Wemb_dec')
-
             def f1(): return tf.zeros([1, self.dim_word])
 
-            def f2(): return tf.nn.embedding_lookup(targettable, self.y)
+            def f2(): return tf.nn.embedding_lookup(vocabtable, self.y)
             emb_y = control_flow_ops.cond(tf.less(self.y[0], 0), f1, f2)
             emb_y = tf.reshape(emb_y, [-1, self.dim_word])
             n_beam = tf.shape(emb_y)[0]
@@ -620,7 +607,7 @@ class GenNmt(object):
                     # bos indicator
                     next_w = -1 * numpy.ones((1,)).astype('int32')
 
-                    for ii in xrange(self.max_len):
+                    for ii in xrange(self.max_len_s):
                         ctx = numpy.tile(ctx0, [live_k, 1])
                         next_p, next_state = self.sess.run(
                             [self.next_p, self.next_state],
@@ -713,17 +700,17 @@ class GenNmt(object):
             x_mask_tile = tf.tile(x_mask[:, :, None], [1, 1, self.dim])
             xr_mask_tile = tf.tile(xr_mask[:, :, None], [1, 1, self.dim])
 
-            sourcetable = tableLookup(
+            vocabtable = tableLookup(
                 self.vocab_size,
                 self.dim_word,
-                scope='sourceTable',
+                scope='vocabtable',
                 reuse_var=reuse_var,
                 prefix='Wemb')
 
-            emb = tf.nn.embedding_lookup(sourcetable, x_flat)
+            emb = tf.nn.embedding_lookup(vocabtable, x_flat)
             emb = tf.reshape(emb, [-1, n_sample, self.dim_word])
 
-            embr = tf.nn.embedding_lookup(sourcetable, xr_flat)
+            embr = tf.nn.embedding_lookup(vocabtable, xr_flat)
             embr = tf.reshape(embr, [-1, n_sample, self.dim_word])
 
             cellForward = GRULayer(
@@ -870,7 +857,7 @@ class GenNmt(object):
             ll = [gen_dict[w] if w in gen_dict else 1 for w in line]
             ll = [w if w < self.vocab_size else 1 for w in ll]
 
-            if len(ll) > self.max_len:
+            if len(ll) > self.max_len_s:
                 continue
 
             source.append(ll)
@@ -912,17 +899,17 @@ class GenNmt(object):
             x_mask_tile = tf.tile(x_mask[:, :, None], [1, 1, self.dim])
             xr_mask_tile = tf.tile(xr_mask[:, :, None], [1, 1, self.dim])
 
-            sourcetable = tableLookup(
+            vocabtable = tableLookup(
                 self.vocab_size,
                 self.dim_word,
-                scope='sourceTable',
+                scope='vocabtable',
                 reuse_var=reuse_var,
                 prefix='Wemb')
 
-            emb = tf.nn.embedding_lookup(sourcetable, x_flat)
+            emb = tf.nn.embedding_lookup(vocabtable, x_flat)
             emb = tf.reshape(emb, [-1, n_sample, self.dim_word])
 
-            embr = tf.nn.embedding_lookup(sourcetable, xr_flat)
+            embr = tf.nn.embedding_lookup(vocabtable, xr_flat)
             embr = tf.reshape(embr, [-1, n_sample, self.dim_word])
 
             cellForward = GRULayer(
@@ -975,13 +962,6 @@ class GenNmt(object):
                 precision=self.precision, reuse_var=reuse_var)
 
             cellDecoder_s.set_pctx_()
-
-            targettable = tableLookup(
-                self.vocab_size,
-                self.dim_word,
-                scope='targetTable',
-                reuse_var=reuse_var,
-                prefix='Wemb_dec')
 
             y_sample = tensor_array_ops.TensorArray(
                 dtype=tf.int64, size=maxlen,
@@ -1040,7 +1020,7 @@ class GenNmt(object):
                 next_sample = tf.argmax(next_probs, 1)
 
                 y_sample = y_sample.write(i, next_sample)
-                next_emb = tf.nn.embedding_lookup(targettable, next_sample)
+                next_emb = tf.nn.embedding_lookup(vocabtable, next_sample)
 
                 return i+1, next_sample, next_emb, next_state, y_sample
 
@@ -1141,7 +1121,7 @@ class GenNmt(object):
 
                 # next_y = tf.reshape(next_y, [-1])[0]
 
-                next_emb = tf.nn.embedding_lookup(targettable, next_y)
+                next_emb = tf.nn.embedding_lookup(vocabtable, next_y)
 
                 # next_emb = tf.reshape(next_emb, [1, self.dim_word])
 
@@ -1245,17 +1225,17 @@ class GenNmt(object):
         x_mask_tile = tf.tile(x_mask[:, :, None], [1, 1, self.dim])
         xr_mask_tile = tf.tile(xr_mask[:, :, None], [1, 1, self.dim])
 
-        sourcetable = tableLookup(
+        vocabtable = tableLookup(
             self.vocab_size,
             self.dim_word,
-            scope='sourceTable',
+            scope='vocabtable',
             reuse_var=reuse_var,
             prefix='Wemb')
 
-        emb = tf.nn.embedding_lookup(sourcetable, x_flat)
+        emb = tf.nn.embedding_lookup(vocabtable, x_flat)
         emb = tf.reshape(emb, [-1, n_sample, self.dim_word])
 
-        embr = tf.nn.embedding_lookup(sourcetable, xr_flat)
+        embr = tf.nn.embedding_lookup(vocabtable, xr_flat)
         embr = tf.reshape(embr, [-1, n_sample, self.dim_word])
 
         cellForward = GRULayer(
@@ -1315,14 +1295,7 @@ class GenNmt(object):
 
         cellDecoder_s.set_pctx_()
 
-        targettable = tableLookup(
-            self.vocab_size,
-            self.dim_word,
-            scope='targetTable',
-            reuse_var=reuse_var,
-            prefix='Wemb_dec')
-
-        sample_len = self.max_len
+        sample_len = self.max_len_s
 
         y_sample = tensor_array_ops.TensorArray(
             dtype=tf.int32,
@@ -1388,7 +1361,7 @@ class GenNmt(object):
 
             next_y = y_index.read(i)
             next_y_e = next_y[:, None]
-            next_emb = tf.nn.embedding_lookup(targettable, next_y)
+            next_emb = tf.nn.embedding_lookup(vocabtable, next_y)
             y_sample = y_sample.write(i, next_y)
 
             return i+1, next_y_e, next_emb, give_num, next_state, y_sample
@@ -1454,7 +1427,7 @@ class GenNmt(object):
 
             y_sample = y_sample.write(i, next_sample_squeeze)
             next_emb = tf.nn.embedding_lookup(
-                self.targettable, next_sample_squeeze)
+                self.vocabtable, next_sample_squeeze)
 
             return (
                 i+1, next_sample_flat, next_emb, give_num, next_state, y_sample)
@@ -1477,7 +1450,7 @@ class GenNmt(object):
                               tf.TensorShape(None)))
 
         _, _, _, _, _, y_sample = tf.while_loop(
-            cond=lambda i, _1, _2, _3, _4, _5: i < self.max_len,
+            cond=lambda i, _1, _2, _3, _4, _5: i < self.max_len_s,
             body=recurrency,
             loop_vars=(i, y_out, emb_y, give_num_out, init_state, y_sample),
             shape_invariants=(i.get_shape(),
@@ -1548,7 +1521,7 @@ class GenNmt(object):
     def generate_and_save(self, infile, outfile, generate_batch=2):
         gen_train_it = gen_train_iter(
             infile, None, self.dictionaries[0],
-            self.vocab_size, generate_batch, self.max_len)
+            self.vocab_size, generate_batch, self.max_len_s)
         epoch = 0
         outfile = fopen(outfile, 'w')
         while epoch < 1:
@@ -1576,7 +1549,7 @@ class GenNmt(object):
     ):
         rewards = []
         for i in range(rollnum):
-            for give_num in numpy.arange(1, self.max_len, dtype='int32'):
+            for give_num in numpy.arange(1, self.max_len_s, dtype='int32'):
 
                 feed = {
                     self.roll_x: x,
@@ -1618,7 +1591,7 @@ class GenNmt(object):
                     rewards[give_num - 1] += ypred
 
             # print('the shape of the y_sample is ', y_sample.shape)
-            # y_sample_len_norm = numpy.zeros((self.max_len, 1)).astype('int32')
+            # y_sample_len_norm = numpy.zeros((self.max_len_s, 1)).astype('int32')
             # y_sample_len_norm[:len(y_sample), 0] = y_sample[:,0]
 
             feed = {
@@ -1632,7 +1605,7 @@ class GenNmt(object):
             if i == 0:
                 rewards.append(ypred)
             else:
-                rewards[self.max_len-1] += ypred
+                rewards[self.max_len_s-1] += ypred
 
         if bias_num is None:
             rewards = rewards * y_sample_mask

@@ -110,9 +110,9 @@ tf.app.flags.DEFINE_float('alpha_c', 0.0, 'alignment regularization')
 tf.app.flags.DEFINE_float('clip_c', 5, 'gradient clipping threshold')
 
 tf.app.flags.DEFINE_integer(
-    'max_len', 80, 'the max length of the training sentence')
+    'max_len_s', 80, 'the max length of the training sentence')
 tf.app.flags.DEFINE_integer(
-    'dis_max_len', 15,
+    'max_leng', 15,
     'the max length of the training sentence for discriminator')
 
 tf.app.flags.DEFINE_integer(
@@ -288,8 +288,8 @@ def main(argv):
     dim_word = FLAGS.dim_word
     vocab_size = FLAGS.vocab_size
     dim = FLAGS.dim
-    max_len = FLAGS.max_len
-    dis_max_len = FLAGS.dis_max_len
+    max_len_s = FLAGS.max_len_s
+    max_leng = FLAGS.max_leng
     optimizer = FLAGS.optimizer
     precision = FLAGS.precision
     clip_c = FLAGS.clip_c
@@ -315,8 +315,8 @@ def main(argv):
             gpu_device=gpu_device,
             dim_word=dim_word,
             dim=dim,
-            max_len=max_len,
-            dis_max_len=dis_max_len,
+            max_len_s=max_len_s,
+            max_leng=max_leng,
             clip_c=clip_c,
             max_epoches=max_epoches,
             reshuffle=reshuffle,
@@ -347,7 +347,7 @@ def main(argv):
             generator.build_train_model()
             generator.gen_train()
             generator.build_generate(
-                maxlen=max_len, generate_batch=gan_gen_batch_size,
+                maxlen=max_len_s, generate_batch=gan_gen_batch_size,
                 optimizer='rmsprop')
             generator.rollout_generate(generate_batch=gan_gen_batch_size)
             print('done')
@@ -356,7 +356,7 @@ def main(argv):
             print('build the generate without training')
             generator.build_train_model()
             generator.build_generate(
-                maxlen=max_len,
+                maxlen=max_len_s,
                 generate_batch=gan_gen_batch_size,
                 optimizer='rmsprop')
             generator.rollout_generate(generate_batch=gan_gen_batch_size)
@@ -378,7 +378,7 @@ def main(argv):
         dis_saveto = FLAGS.dis_saveto
         dis_reshuffle = FLAGS.dis_reshuffle
         dis_gpu_device = FLAGS.dis_gpu_device
-        dis_max_len = FLAGS.dis_max_len
+        max_leng = FLAGS.max_leng
         dis_positive_data = FLAGS.dis_positive_data
         dis_negative_data = FLAGS.dis_negative_data
         dis_source_data = FLAGS.dis_source_data
@@ -387,12 +387,16 @@ def main(argv):
         dis_dev_source_data = FLAGS.dis_dev_source_data
         dis_reload = FLAGS.dis_reload
 
-        dis_filter_sizes = [i for i in range(1, dis_max_len, 4)]
-        dis_num_filters = [(100 + i*10) for i in range(1, dis_max_len, 4)]
+        filter_sizes_s = [i for i in range(1, max_len_s, 4)]
+        num_filters_s = [(100 + i*10) for i in range(1, max_len_s, 4)]
+
+        dis_filter_sizes = [i for i in range(1, max_leng, 4)]
+        dis_num_filters = [(100 + i*10) for i in range(1, max_leng, 4)]
 
         discriminator = DisCNN(
             sess=sess,
-            max_len=dis_max_len,
+            max_len_s=max_len_s,
+            max_leng=max_leng,
             num_classes=2,
             dict_path=dict_path,
             vocab_size=vocab_size,
@@ -400,6 +404,8 @@ def main(argv):
             dim_word=dim_word,
             filter_sizes=dis_filter_sizes,
             num_filters=dis_num_filters,
+            filter_sizes_s=filter_sizes_s,
+            num_filters_s=num_filters_s,
             gpu_device=dis_gpu_device,
             positive_data=dis_positive_data,
             negative_data=dis_negative_data,
@@ -456,10 +462,10 @@ def main(argv):
                 print('reinforcement training for %d epoch' % gan_iter)
                 # gen_train_it = gen_train_iter(gan_gen_source_data,
                 # gan_gen_reshuffle, generator.dictionaries[0], n_words_src,
-                # gan_gen_batch_size, max_len) gen_train_it =
+                # gan_gen_batch_size, max_len_s) gen_train_it =
                 # gen_train_iter(gan_dis_source_data, gan_gen_reshuffle,
                 # generator.dictionaries[0], n_words_src,
-                # gan_gen_batch_size, max_len)
+                # gan_gen_batch_size, max_len_s)
                 gen_train_it = gen_force_train_iter(
                     gan_dis_source_data,
                     gan_dis_positive_data,
@@ -467,21 +473,21 @@ def main(argv):
                     generator.vocab,
                     vocab_size,
                     gan_gen_batch_size,
-                    max_len,
-                    dis_max_len
+                    max_len_s,
+                    max_leng
                 )
 
                 print('finetune the generator begin...')
                 for gen_iter in range(gan_gen_iter_num):
 
                     x, y_ground, _ = next(gen_train_it)
-                    x_to_maxlen = prepare_sentence_to_maxlen(x)
+                    x_to_maxlen = prepare_sentence_to_maxlen(x, max_len_s)
 
                     # x, x_mask = prepare_multiple_sentence(x,
-                    # maxlen=max_len)
+                    # maxlen=max_len_s)
                     x, x_mask, y_ground, y_ground_mask = prepare_data(
-                        x, y_ground, max_len=max_len,
-                        dis_max_len=dis_max_len, vocab_size=vocab_size
+                        x, y_ground, max_len_s=max_len_s,
+                        max_leng=max_leng, vocab_size=vocab_size
                     )
                     y_sample_out = generator.generate_step(x, x_mask)
 
@@ -520,10 +526,10 @@ def main(argv):
                     # teacher force training
                     if teacher_forcing:
                         y_ground = prepare_sentence_to_maxlen(
-                            numpy.transpose(y_ground), maxlen=dis_max_len,
+                            numpy.transpose(y_ground), maxlen=max_leng,
                             precision=precision)
                         y_ground_mask = prepare_sentence_to_maxlen(
-                            numpy.transpose(y_ground_mask), maxlen=dis_max_len,
+                            numpy.transpose(y_ground_mask), maxlen=max_leng,
                             precision=precision)
                         rewards_ground = numpy.ones_like(y_ground)
                         rewards_ground = rewards_ground * y_ground_mask
