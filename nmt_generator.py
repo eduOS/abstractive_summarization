@@ -1295,7 +1295,7 @@ class GenNmt(object):
 
         cellDecoder_s.set_pctx_()
 
-        sample_len = self.max_len_s
+        sample_len = self.max_leng
 
         y_sample = tensor_array_ops.TensorArray(
             dtype=tf.int32,
@@ -1448,6 +1448,7 @@ class GenNmt(object):
                               give_num.get_shape(),
                               tf.TensorShape([None, self.dim]),
                               tf.TensorShape(None)))
+        print(i)
 
         _, _, _, _, _, y_sample = tf.while_loop(
             cond=lambda i, _1, _2, _3, _4, _5: i < self.max_len_s,
@@ -1591,7 +1592,8 @@ class GenNmt(object):
                     rewards[give_num - 1] += ypred
 
             # print('the shape of the y_sample is ', y_sample.shape)
-            # y_sample_len_norm = numpy.zeros((self.max_len_s, 1)).astype('int32')
+            # y_sample_len_norm = numpy.zeros((self.max_len_s,
+            # 1)).astype('int32')
             # y_sample_len_norm[:len(y_sample), 0] = y_sample[:,0]
 
             feed = {

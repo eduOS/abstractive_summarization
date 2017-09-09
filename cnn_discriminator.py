@@ -303,6 +303,7 @@ class DisCNN(object):
     def get_inputs(self, gpu_device):
         try:
             gpu_id = self.gpu_devices.index(gpu_device)
+            print('get inputs')
         except:
             raise ValueError('get inputs error!')
         return (
@@ -313,7 +314,8 @@ class DisCNN(object):
     def build_model(self, reuse_var=False, gpu_device='0'):
         with tf.variable_scope(self.scope):
             with tf.device('/gpu:%d' % int(gpu_device)):
-                # self.input_x = tf.placeholder(tf.int32, [self.max_len_s, None],
+                # self.input_x = tf.placeholder(tf.int32, [self.max_len_s,
+                # None],
                 # name='input_x') self.input_y = tf.placeholder(tf.float32,
                 # [self.num_classes, None], name='input_y')
 
@@ -592,6 +594,7 @@ class DisCNN(object):
             if i > 0:
                 reuse_var = True
             # print('reuse_var is ', reuse_var)
+            print('before build model')
             (
                 _, _, _, ypred_for_auc, predictions, losses,
                 correct_predictions, accuracy, grads_and_vars
@@ -674,11 +677,11 @@ class DisCNN(object):
                 TimeCost = time.time() - EpochStart
 
                 Epoch += 1
-            print(
-                'Seen ',
-                ExampleNum,
-                ' examples for discriminator. Time Cost : ',
-                TimeCost)
+                print(
+                    'Seen ',
+                    ExampleNum,
+                    ' examples for discriminator. Time Cost : ',
+                    TimeCost)
 
         train_it = train_iter()
 
@@ -723,11 +726,15 @@ class DisCNN(object):
                 myFeed_dict[self.xs_list[i]] = xs
                 myFeed_dict[self.drop_list[i]] = drop_prob
 
+            print("start running session")
+            stt = time.time()
             _, loss_out, accuracy_out, grads_out = self.sess.run(
                 [self.train_optm, self.train_loss,
                  self.train_accuracy, self.train_grads_and_vars],
                 feed_dict=myFeed_dict)
-            print(3)
+            print(
+                'finished running session, costing %s s' % (stt - time.time())
+            )
 
             if uidx == 1:
                 x_variable = [
@@ -740,7 +747,7 @@ class DisCNN(object):
             # print('ypred_for_auc is ', ypred_out)
             BatchTime = time.time()-BatchStart
 
-            if numpy.mod(uidx, self.dis_dispFreq) == 0:
+            if numpy.mod(uidx, self.dispFreq) == 0:
                 print(
                     "epoch %d, samples %d, loss %f, accuracy %f BatchTime %f, \
                     for discriminator pretraining " %

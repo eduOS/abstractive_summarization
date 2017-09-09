@@ -269,7 +269,7 @@ logging.set_verbosity(logging.INFO)
 def main(argv):
     # -----------   create the session  -----------
 
-    config = tf.ConfigProto()
+    config = tf.ConfigProto(operation_timeout_in_ms=20000)
     config.gpu_options.allow_growth = True
     config.gpu_options.per_process_gpu_memory_fraction = 1.0
     config.allow_soft_placement = True

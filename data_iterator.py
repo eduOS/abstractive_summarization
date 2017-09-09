@@ -59,9 +59,10 @@ class disThreeTextIterator:
                     ss = [w if w < self.vocab_size else 0 for w in ss]
 
                 tt = self.negative.readline()
+                should_continue = False
                 if tt == "":
                     # raise IOError
-                    continue
+                    should_continue = True
                 tt = tt.strip().split()
                 tt = [self.vocab.word2id(w) for w in tt]
                 if self.vocab_size > 0:
@@ -78,7 +79,8 @@ class disThreeTextIterator:
                 if (
                     len(ss) > self.dismaxlen or
                     len(tt) > self.dismaxlen or
-                    len(ll) > self.maxlen
+                    len(ll) > self.maxlen or
+                    should_continue
                 ):
                     continue
 
@@ -114,6 +116,8 @@ class disThreeTextIterator:
                 ):
                     break
         except IOError:
+            print("IOError")
+            raise
             self.end_of_data = True
 
         if len(positive) <= 0 or len(negative) <= 0:
@@ -336,8 +340,10 @@ class TextIterator:
                 if self.vocab_size > 0:
                     tt = [w if w < self.vocab_size else 0 for w in tt]
 
-                if len(ss) > self.max_len_s and len(tt) > self.max_leng:
-                    continue
+                if len(ss) > self.max_len_s:
+                    ss = ss[:self.max_len_s-1]
+                if len(tt) > self.max_leng:
+                    tt = tt[:self.max_leng-1]
 
                 source.append(ss)
                 target.append(tt)
