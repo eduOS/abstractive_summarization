@@ -8,6 +8,7 @@ from data_iterator import genTextIterator
 from data_iterator import TextIterator
 
 PAD_TOKEN = '[PAD]'
+EOS_TOKEN = '[eos]'
 # This has a vocab id, which is used to represent out-of-vocabulary words
 UNKNOWN_TOKEN = '[UNK]'
 # This has a vocab id, which is used at the start of every decoder input
@@ -563,9 +564,7 @@ class Vocab(object):
         self._id_to_word = {}
         self._count = 0
 
-        for w in [
-            UNKNOWN_TOKEN, START_DECODING, STOP_DECODING
-        ]:
+        for w in [EOS_TOKEN, UNKNOWN_TOKEN]:
             self._word_to_id[w] = self._count
             self._id_to_word[self._count] = w
             self._count += 1
@@ -581,9 +580,7 @@ class Vocab(object):
                     continue
                 w = pieces[0]
                 # should I add the end of sentence?
-                if w in [
-                    UNKNOWN_TOKEN, START_DECODING, STOP_DECODING
-                ]:
+                if w in [EOS_TOKEN, UNKNOWN_TOKEN]:
                     raise Exception(
                         '<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t\
                         be in the vocab file, but %s is' % w)

@@ -56,7 +56,7 @@ class disThreeTextIterator:
                 ss = ss.strip().split()
                 ss = [self.vocab.word2id(w) for w in ss]
                 if self.vocab_size > 0:
-                    ss = [w if w < self.vocab_size else 0 for w in ss]
+                    ss = [w if w < self.vocab_size else 1 for w in ss]
 
                 tt = self.negative.readline()
                 should_continue = False
@@ -66,7 +66,7 @@ class disThreeTextIterator:
                 tt = tt.strip().split()
                 tt = [self.vocab.word2id(w) for w in tt]
                 if self.vocab_size > 0:
-                    tt = [w if w < self.vocab_size else 0 for w in tt]
+                    tt = [w if w < self.vocab_size else 1 for w in tt]
 
                 ll = self.source.readline()
                 if ll == "":
@@ -74,7 +74,7 @@ class disThreeTextIterator:
                 ll = ll.strip().split()
                 ll = [self.vocab.word2id(w) for w in ll]
                 if self.vocab_size > 0:
-                    ll = [w if w < self.vocab_size else 0 for w in ll]
+                    ll = [w if w < self.vocab_size else 1 for w in ll]
 
                 if (
                     len(ss) > self.dismaxlen or
@@ -329,7 +329,7 @@ class TextIterator:
                 ss = ss.strip().split()
                 ss = [self.vocab.word2id(w) for w in ss]
                 if self.vocab_size > 0:
-                    ss = [w if w < self.vocab_size else 0 for w in ss]
+                    ss = [w if w < self.vocab_size else 1 for w in ss]
 
                 # read from source file and map to word index
                 tt = self.target.readline()
@@ -338,7 +338,7 @@ class TextIterator:
                 tt = tt.strip().split()
                 tt = [self.vocab.word2id(w) for w in tt]
                 if self.vocab_size > 0:
-                    tt = [w if w < self.vocab_size else 0 for w in tt]
+                    tt = [w if w < self.vocab_size else 1 for w in tt]
 
                 if len(ss) > self.max_len_s:
                     ss = ss[:self.max_len_s-1]

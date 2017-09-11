@@ -67,7 +67,7 @@ tf.app.flags.DEFINE_integer(
     'patience', 10, 'the patience for early stop')
 
 tf.app.flags.DEFINE_integer(
-    'max_epoches', 4, 'the max epoches for training')
+    'max_epoches', 1, 'the max epoches for training')
 tf.app.flags.DEFINE_integer('dis_epoches', 2, 'the max epoches for training')
 
 tf.app.flags.DEFINE_integer(
@@ -95,7 +95,7 @@ tf.app.flags.DEFINE_integer(
     'dis_devFreq', 100,
     'train for this many minibatches for displaying discriminator')
 tf.app.flags.DEFINE_integer(
-    'vocab_size', 30000, 'the size of the target vocabulary')
+    'vocab_size', 80000, 'the size of the target vocabulary')
 
 tf.app.flags.DEFINE_integer(
     'validFreq', 1000, 'train for this many minibatches for validation')
@@ -347,7 +347,7 @@ def main(argv):
             generator.build_train_model()
             generator.gen_train()
             generator.build_generate(
-                maxlen=max_len_s, generate_batch=gan_gen_batch_size,
+                maxlen=max_leng, generate_batch=gan_gen_batch_size,
                 optimizer='rmsprop')
             generator.rollout_generate(generate_batch=gan_gen_batch_size)
             print('done')

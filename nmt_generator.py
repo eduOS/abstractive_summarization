@@ -596,7 +596,7 @@ class GenNmt(object):
 
                     orig_words = line.strip().split()
                     words = [self.vocab.word2id(w) for w in orig_words]
-                    words = [w if w < self.vocab_size else 0 for w in words]
+                    words = [w if w < self.vocab_size else 1 for w in words]
                     words = numpy.array(words + [2], dtype='int32')[:, None]
                     next_state, ctx0 = self.sess.run(
                         [init_state, self.ctx],
@@ -1727,6 +1727,9 @@ class GenNmt(object):
             _, cost = self.sess.run(
                 [self.train_optm, self.train_loss],
                 feed_dict=myFeed_dict)
+
+            # add an early stop trigger
+            # losshistory
 
             # x_variable = [self.sess.run(tf.assign(x, tf.clip_by_value(x,
             # -0.01, 0.01))) for x in tf.trainable_variables() if 'generate' in
