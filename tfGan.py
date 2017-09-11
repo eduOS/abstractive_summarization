@@ -269,15 +269,15 @@ logging.set_verbosity(logging.INFO)
 def main(argv):
     # -----------   create the session  -----------
 
-    config = tf.ConfigProto(operation_timeout_in_ms=20000)
+    config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
-    config.gpu_options.per_process_gpu_memory_fraction = 1.0
+    config.gpu_options.per_process_gpu_memory_fraction = 0.9
     config.allow_soft_placement = True
 
-    is_gan_train = FLAGS.is_gan_train
-    is_decode = FLAGS.is_decode
     is_generator_train = FLAGS.is_generator_train
+    is_decode = FLAGS.is_decode
     is_discriminator_train = FLAGS.is_discriminator_train
+    is_gan_train = FLAGS.is_gan_train
 
     # -----------  pretraining  the generator -----------
     dict_path = FLAGS.dict_path

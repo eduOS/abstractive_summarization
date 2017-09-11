@@ -45,7 +45,7 @@ from tensorflow.python.ops import variable_scope as vs
 # from tensorflow.python.framework import dtypes
 # from tensorflow.python.framework import ops
 # from tensorflow.python.ops import array_ops
-from tensorflow.python.ops import control_flow_ops
+# from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import tensor_array_ops
 # from tensorflow.python.ops import embedding_ops
 from tensorflow.python.ops import math_ops
@@ -496,7 +496,7 @@ class GenNmt(object):
             def f1(): return tf.zeros([1, self.dim_word])
 
             def f2(): return tf.nn.embedding_lookup(vocabtable, self.y)
-            emb_y = control_flow_ops.cond(tf.less(self.y[0], 0), f1, f2)
+            emb_y = tf.cond(tf.less(self.y[0], 0), f1, f2)
             emb_y = tf.reshape(emb_y, [-1, self.dim_word])
             n_beam = tf.shape(emb_y)[0]
 
@@ -515,6 +515,7 @@ class GenNmt(object):
                     self.state)
 
             next_state = tf.slice(proj[0], [0, 0], [n_beam, self.dim])
+            # it is just proj[1] why bother slicing
             ctxs = tf.slice(proj[0], [0, self.dim], [n_beam, self.dim * 2])
 
             # ------------ Logit & Softmax & Cost -------------
@@ -570,9 +571,9 @@ class GenNmt(object):
         with tf.device(gpu_device):
             x, init_state = self.build_sampler(gpu_device)
 
-            init_op = tf.initialize_all_variables()
-            init_local_op = tf.initialize_local_variables()
-            saver = tf.train.Saver(tf.all_variables())
+            init_op = tf.global_variables_initializer()
+            init_local_op = tf.local_variables_initializer()
+            saver = tf.train.Saver(tf.global_variables())
             self.sess.run(init_op)
             self.sess.run(init_local_op)
             saver.restore(self.sess, self.saveto)
@@ -581,9 +582,6 @@ class GenNmt(object):
                 decode_file
             ) as f, open(decode_result_file, 'w') as fr:
                 for idx, line in enumerate(f):
-                    if idx != 0 and idx % 200000 == 0:
-                        fr.flush()
-                        return 0
                     sample = []
                     sample_score = []
 
@@ -598,8 +596,8 @@ class GenNmt(object):
 
                     orig_words = line.strip().split()
                     words = [self.vocab.word2id(w) for w in orig_words]
-                    words = [w if w < self.vocab_size else 1 for w in words]
-                    words = numpy.array(words + [0], dtype='int32')[:, None]
+                    words = [w if w < self.vocab_size else 0 for w in words]
+                    words = numpy.array(words + [2], dtype='int32')[:, None]
                     next_state, ctx0 = self.sess.run(
                         [init_state, self.ctx],
                         feed_dict={x: words})
@@ -607,7 +605,7 @@ class GenNmt(object):
                     # bos indicator
                     next_w = -1 * numpy.ones((1,)).astype('int32')
 
-                    for ii in xrange(self.max_len_s):
+                    for ii in xrange(self.max_leng):
                         ctx = numpy.tile(ctx0, [live_k, 1])
                         next_p, next_state = self.sess.run(
                             [self.next_p, self.next_state],
@@ -678,6 +676,8 @@ class GenNmt(object):
                     if is_print:
                         print(sample_str)
                     fr.write(sample_str+'\n')
+                    if idx % 2000 == 0:
+                        fr.flush()
                     # pdb.set_trace();
                     # return sample, sample_score
             print('All Decode Time : ', time.time() - DecodeStart)
@@ -838,6 +838,7 @@ class GenNmt(object):
             self.test_log_sample = next_log_sample
 
     def self_test(self, infile, outfile):
+        # should be modified
         infile = fopen(infile, 'r')
         outfile = fopen(outfile, 'w')
 
@@ -1451,7 +1452,7 @@ class GenNmt(object):
         print(i)
 
         _, _, _, _, _, y_sample = tf.while_loop(
-            cond=lambda i, _1, _2, _3, _4, _5: i < self.max_len_s,
+            cond=lambda i, _1, _2, _3, _4, _5: i < self.max_leng,
             body=recurrency,
             loop_vars=(i, y_out, emb_y, give_num_out, init_state, y_sample),
             shape_invariants=(i.get_shape(),
@@ -1550,7 +1551,7 @@ class GenNmt(object):
     ):
         rewards = []
         for i in range(rollnum):
-            for give_num in numpy.arange(1, self.max_len_s, dtype='int32'):
+            for give_num in numpy.arange(1, self.max_leng, dtype='int32'):
 
                 feed = {
                     self.roll_x: x,
@@ -1607,7 +1608,7 @@ class GenNmt(object):
             if i == 0:
                 rewards.append(ypred)
             else:
-                rewards[self.max_len_s-1] += ypred
+                rewards[self.max_leng-1] += ypred
 
         if bias_num is None:
             rewards = rewards * y_sample_mask

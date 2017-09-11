@@ -580,6 +580,7 @@ class Vocab(object):
                         %s\n' % line)
                     continue
                 w = pieces[0]
+                # should I add the end of sentence?
                 if w in [
                     UNKNOWN_TOKEN, START_DECODING, STOP_DECODING
                 ]:
