@@ -527,6 +527,7 @@ class DisCNN(object):
         grads_and_vars = average_clip_gradient_by_value(grads, -1.0, 1.0)
         optm = self.optimizer.apply_gradients(grads_and_vars)
 
+        print('get the loss')
         self.train_loss = loss
         self.train_accuracy = accuracy
         self.train_grads_and_vars = grads_and_vars
@@ -625,9 +626,8 @@ class DisCNN(object):
             xs_data_list = numpy.split(numpy.array(xs), self.gpu_num)
 
             myFeed_dict = {}
-            for i, x, y, xs in zip(
-                    range(self.gpu_num),
-                    x_data_list, y_data_list, xs_data_list):
+            for i, x, y, xs in zip(range(self.gpu_num),
+                                   x_data_list, y_data_list, xs_data_list):
                 x = x.tolist()
                 x, y, xs = dis_three_length_prepare(
                     x, y, xs, self.max_len_s, self.max_leng)
@@ -636,8 +636,8 @@ class DisCNN(object):
                 myFeed_dict[self.xs_list[i]] = xs
                 myFeed_dict[self.drop_list[i]] = drop_prob
 
-            print("start running session")
             stt = time.time()
+            print("start running session")
             _, loss_out, accuracy_out, grads_out = self.sess.run(
                 [self.train_optm, self.train_loss,
                  self.train_accuracy, self.train_grads_and_vars],
