@@ -1,59 +1,29 @@
 import tensorflow as tf
 import numpy
 import copy
-# import sys
 import time
-# import random
-# import pdb
 import cPickle as pkl
 
-# from collections import OrderedDict
 from six.moves import xrange, zip
 import os
-
 from data_iterator import TextIterator
-# from data_iterator import genTextIterator
-# from data_iterator import disTextIterator
 from data_iterator import fopen
-
-# from cnn_discriminator import DisCNN
-
 from gru_cell import GRULayer
 from gru_cell import GRUCondLayer
-
-# from share_function import _p
 from share_function import prepare_data
-# from share_function import dis_length_prepare
-# from share_function import ortho_weight
-# from share_function import norm_weight
 from share_function import tableLookup
 from share_function import FCLayer
 from share_function import average_clip_gradient
 from share_function import prepare_single_sentence
 from share_function import prepare_multiple_sentence
-# from share_function import prepare_sentence_to_maxlen
 from share_function import gen_train_iter
-# from share_function import gen_force_train_iter
 from share_function import print_string
 from share_function import deal_generated_y_sentence
 from share_function import Vocab
-
 from tensorflow.python.platform import tf_logging as logging
 from tensorflow.python.ops import variable_scope as vs
-
-# from tensorflow.python.ops.rnn_cell import GRUCell
-# from tensorflow.python.framework import dtypes
-# from tensorflow.python.framework import ops
-# from tensorflow.python.ops import array_ops
-# from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import tensor_array_ops
-# from tensorflow.python.ops import embedding_ops
 from tensorflow.python.ops import math_ops
-# from tensorflow.python.ops import nn_ops
-# from tensorflow.python.ops import rnn
-# from tensorflow.python.ops import rnn_cell
-# from tensorflow.python.ops import variable_scope
-# from tensorflow.python.ops.rnn_cell import RNNCell
 from tensorflow.python.ops.rnn import dynamic_rnn
 
 logging.set_verbosity(logging.INFO)

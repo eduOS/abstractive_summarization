@@ -1,63 +1,17 @@
 import tensorflow as tf
 import numpy
-# import copy
 import sys
-# import time
-# import random
-# import pdb
-# import cPickle as pkl
-
 from collections import OrderedDict
-# from six.moves import xrange,zip
-
-# from data_iterator import TextIterator
-# from data_iterator import genTextIterator
-# from data_iterator import disTextIterator
-
 from cnn_discriminator import DisCNN
 from nmt_generator import GenNmt
-
-
-# from gru_cell import GRULayer
-# from gru_cell import GRUCondLayer
-
-# from share_function import _p
 from share_function import prepare_data
-# from share_function import dis_length_prepare
-# from share_function import ortho_weight
-# from share_function import norm_weight
-# from share_function import tableLookup
-# from share_function import FCLayer
-# from share_function import average_clip_gradient
-# from share_function import gen_train_iter
 from share_function import gen_force_train_iter
-# from share_function import dis_train_iter
 from share_function import FlushFile
 from share_function import prepare_gan_dis_data
-# from share_function import prepare_three_gan_dis_dev_data
-# from share_function import prepare_single_sentence
-# from share_function import prepare_multiple_sentence
 from share_function import prepare_sentence_to_maxlen
-# from share_function import print_string
 from share_function import deal_generated_y_sentence
 
 from tensorflow.python.platform import tf_logging as logging
-# from tensorflow.python.ops import variable_scope as vs
-
-# from tensorflow.python.ops.rnn_cell import GRUCell
-# from tensorflow.python.framework import dtypes
-# from tensorflow.python.framework import ops
-# from tensorflow.python.ops import array_ops
-# from tensorflow.python.ops import control_flow_ops
-# from tensorflow.python.ops import tensor_array_ops
-# from tensorflow.python.ops import embedding_ops
-# from tensorflow.python.ops import math_ops
-# from tensorflow.python.ops import nn_ops
-# from tensorflow.python.ops import rnn
-# from tensorflow.python.ops import rnn_cell
-# from tensorflow.python.ops import variable_scope
-# from tensorflow.python.ops.rnn_cell import RNNCell
-# from tensorflow.python.ops.rnn import dynamic_rnn
 
 tf.app.flags.DEFINE_integer(
     'dim_word', 512, 'the dimension of the word embedding')
@@ -189,9 +143,6 @@ tf.app.flags.DEFINE_string(
 
 tf.app.flags.DEFINE_string(
     'dict_path', './vocab', "the vocabulary")
-# tf.app.flags.DEFINE_string(
-#     'target_dict', './data_1000w_golden/target_u8.txt.shuf.pkl',
-#     'the target vocabulary')
 
 tf.app.flags.DEFINE_boolean(
     'use_dropout', False, 'whether to use dropout')
@@ -362,9 +313,6 @@ def main(argv):
             generator.rollout_generate(generate_batch=gan_gen_batch_size)
             generator.init_and_reload()
 
-            # print('building testing ')
-            # generator.build_test()
-            # print('done')
 
 # ----------- pretraining the discriminator -----------
 
@@ -441,13 +389,10 @@ def main(argv):
             gan_dis_iter_num = FLAGS.gan_dis_iter_num
 
             gan_gen_reshuffle = FLAGS.gan_gen_reshuffle
-            # gan_gen_source_data = FLAGS.gan_gen_source_data
 
             gan_dis_source_data = FLAGS.gan_dis_source_data
             gan_dis_positive_data = FLAGS.gan_dis_positive_data
             gan_dis_negative_data = FLAGS.gan_dis_negative_data
-            # gan_dis_reshuffle = FLAGS.gan_dis_reshuffle
-            # gan_dis_batch_size = FLAGS.gan_dis_batch_size
             gan_dispFreq = FLAGS.gan_dispFreq
             gan_saveFreq = FLAGS.gan_saveFreq
             roll_num = FLAGS.rollnum
@@ -460,12 +405,6 @@ def main(argv):
             for gan_iter in range(gan_total_iter_num):
 
                 print('reinforcement training for %d epoch' % gan_iter)
-                # gen_train_it = gen_train_iter(gan_gen_source_data,
-                # gan_gen_reshuffle, generator.dictionaries[0], n_words_src,
-                # gan_gen_batch_size, max_len_s) gen_train_it =
-                # gen_train_iter(gan_dis_source_data, gan_gen_reshuffle,
-                # generator.dictionaries[0], n_words_src,
-                # gan_gen_batch_size, max_len_s)
                 gen_train_it = gen_force_train_iter(
                     gan_dis_source_data,
                     gan_dis_positive_data,
@@ -483,22 +422,11 @@ def main(argv):
                     x, y_ground, _ = next(gen_train_it)
                     x_to_maxlen = prepare_sentence_to_maxlen(x, max_len_s)
 
-                    # x, x_mask = prepare_multiple_sentence(x,
-                    # maxlen=max_len_s)
                     x, x_mask, y_ground, y_ground_mask = prepare_data(
                         x, y_ground, max_len_s=max_len_s,
                         max_leng=max_leng, vocab_size=vocab_size
                     )
                     y_sample_out = generator.generate_step(x, x_mask)
-
-                    # for debug to print these generated sentence
-                    # y_out, _ = deal_generated_y_sentence(y_sample_out,
-                    # generator.worddicts)
-                    # y_out = numpy.transpose(y_out)
-
-                    # for id, y in enumerate(y_out):
-                    #    y_str = print_string('y', y, generator.worddicts_r)
-                    #    print y_str+'\n'
 
                     y_input, y_input_mask = deal_generated_y_sentence(
                         y_sample_out, generator.vocab, precision=precision)
@@ -549,11 +477,6 @@ def main(argv):
                 generator.saver.save(generator.sess, generator.saveto)
                 print('finetune the generator done!')
 
-                # print('self testing')
-                # generator.self_test(gan_dis_source_data,
-                # gan_dis_negative_data)
-                # print('self testing done!')
-
                 print('prepare the gan_dis_data begin ')
                 data_num = prepare_gan_dis_data(
                     train_data_source, train_data_target,
@@ -573,10 +496,6 @@ def main(argv):
                 print('done!')
 
                 print('prepare the dis_dev sets')
-                # dev_num = prepare_three_gan_dis_dev_data(
-                #     gan_dis_positive_data, gan_dis_negative_data,
-                #     gan_dis_source_data, dis_dev_positive_data,
-                #     dis_dev_negative_data, dis_dev_source_data, 200)
                 print('done!')
 
                 print('finetune the discriminator begin...')

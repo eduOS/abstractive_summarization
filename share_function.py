@@ -3,18 +3,13 @@ import numpy
 import time
 import os
 
-from data_iterator import disTextIterator
 from data_iterator import genTextIterator
 from data_iterator import TextIterator
 
 PAD_TOKEN = '[PAD]'
 EOS_TOKEN = '[eos]'
-# This has a vocab id, which is used to represent out-of-vocabulary words
 UNKNOWN_TOKEN = '[UNK]'
-# This has a vocab id, which is used at the start of every decoder input
-# sequence
 START_DECODING = '[START]'
-# This has a vocab id, which is used at the end of untruncated target sequences
 STOP_DECODING = '[STOP]'
 
 
@@ -172,45 +167,13 @@ def _p(pp, name):
     return '%s_%s' % (pp, name)
 
 
-def dis_train_iter(
-    dis_positive_data,
-    dis_negative_data,
-    reshuffle,
-    dictionary,
-    n_words_trg,
-    batch_size,
-    maxlen
-):
-    iter = 0
-    while True:
-        if reshuffle:
-            os.popen(
-                'python shuffle.py ' + dis_positive_data +
-                ' ' + dis_positive_data)
-            os.popen('mv ' + dis_negative_data + '.shuf ' + dis_negative_data)
-            os.popen('mv ' + dis_negative_data + '.shuf ' + dis_negative_data)
-        disTrain = disTextIterator(
-            dis_positive_data,
-            dis_negative_data,
-            dictionary,
-            batch_size,
-            maxlen,
-            n_words_trg
-        )
-        iter += 1
-        ExampleNum = 0
-        for x, y in disTrain:
-            ExampleNum += len(x)
-            yield x, y, iter
-
-
 def gen_train_iter(
     gen_file,
     reshuffle,
-    dictionary,
-    n_words,
+    vocab,
+    vocab_size,
     batch_size,
-    maxlen
+    maxlen,
 ):
     iter = 0
     while True:
@@ -219,10 +182,10 @@ def gen_train_iter(
             os.popen('mv ' + gen_file + '.shuf ' + gen_file)
         gen_train = genTextIterator(
             gen_file,
-            dictionary,
-            n_words_source=n_words,
+            vocab,
+            vocab_size,
             batch_size=batch_size,
-            maxlen=maxlen
+            maxlen=maxlen,
         )
         ExampleNum = 0
         EpochStart = time.time()

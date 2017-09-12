@@ -1,4 +1,3 @@
-import cPickle as pkl
 import gzip
 import numpy
 
@@ -128,118 +127,22 @@ class disThreeTextIterator:
         return x_shuffled, y_shuffled, xs_shuffled
 
 
-class disTextIterator:
-
-    def __init__(
-        self,
-        positive_data,
-        negative_data,
-        dis_dict,
-        batch=1,
-        maxlen=30,
-        dismaxlen=-1
-    ):
-        self.positive = fopen(positive_data, 'r')
-        self.negative = fopen(negative_data, 'r')
-        # what is the positive and negative data?
-        with open(dis_dict) as f:
-            self.dis_dict = pkl.load(f)
-
-        self.batch_size = batch
-        assert self.batch_size % 2 == 0, \
-            'the batch size of disTextIterator is not an even number'
-
-        self.maxlen = maxlen
-        self.dismaxlen = dismaxlen
-        self.end_of_data = False
-
-    def __iter__(self):
-        return self
-
-    def reset(self):
-        self.positive.seek(0)
-        self.negative.seek(0)
-
-    def next(self):
-        if self.end_of_data:
-            self.end_of_data = False
-            self.reset()
-            raise StopIteration
-
-        positive = []
-        negative = []
-        x = []
-        y = []
-        try:
-            while True:
-                ss = self.positive.readline()
-                if ss == "":
-                    raise IOError
-                ss = ss.strip().split()
-                ss = [self.dis_dict[w] if w in self.dis_dict else 1 for w in ss]
-                if self.dismaxlen > 0:
-                    ss = [w if w < self.dismaxlen else 1 for w in ss]
-
-                tt = self.negative.readline()
-                if tt == "":
-                    raise IOError
-                tt = tt.strip().split()
-                tt = [self.dis_dict[w] if w in self.dis_dict else 1 for w in tt]
-                if self.dismaxlen > 0:
-                    tt = [w if w < self.dismaxlen else 1 for w in tt]
-
-                if len(ss) > self.maxlen or len(tt) > self.maxlen:
-                    continue
-
-                positive.append(ss)
-                negative.append(tt)
-                x = positive + negative
-                positive_labels = [[0, 1] for _ in positive]
-                negative_labels = [[1, 0] for _ in negative]
-                y = positive_labels + negative_labels
-                shuffle_indices = numpy.random.permutation(numpy.arange(len(x)))
-                x_np = numpy.array(x)
-                y_np = numpy.array(y)
-                x_np_shuffled = x_np[shuffle_indices]
-                y_np_shuffled = y_np[shuffle_indices]
-
-                x_shuffled = x_np_shuffled.tolist()
-                y_shuffled = y_np_shuffled.tolist()
-
-                if len(x_shuffled) >= self.batch_size and len(
-                        y_shuffled) >= self.batch_size:
-                    break
-
-        except IOError:
-            self.end_of_data = True
-
-        if len(positive) <= 0 or len(negative) <= 0:
-            self.end_of_data = False
-            self.reset()
-            raise StopIteration
-
-        return x_shuffled, y_shuffled
-
-
 class genTextIterator:
 
     def __init__(
         self,
         train_data,
-        source_dict,
+        vocab,
+        vocab_size,
         batch_size=1,
         maxlen=30,
-        dismaxlen=-1
     ):
         self.source = fopen(train_data, 'r')
 
-        with open(source_dict, 'rb') as f:
-            self.source_dict = pkl.load(f)
-
         self.batch_size = batch_size
         self.maxlen = maxlen
+        self.vocab = vocab
 
-        self.dismaxlen = dismaxlen
         self.end_of_data = False
 
     def __iter__(self):
@@ -261,14 +164,12 @@ class genTextIterator:
                 if ss == "":
                     raise IOError
                 ss = ss.strip().split()
-                ss = [
-                    self.source_dict[w]
-                    if w in self.source_dict else 1 for w in ss]
-                if self.dismaxlen > 0:
-                    ss = [w if w < self.dismaxlen else 1 for w in ss]
+                ss = [self.vocab.word2id(w) for w in ss]
+                if self.vocab_size > 0:
+                    ss = [w if w < self.vocab_size else 1 for w in ss]
 
                 if len(ss) > self.maxlen:
-                    continue
+                    ss = ss[:self.maxlen-1]
 
                 source.append(ss)
 
@@ -308,7 +209,7 @@ class TextIterator:
         self.source.seek(0)
         self.target.seek(0)
 
-    def next(self):
+    def next(self):  # NOQA
         if self.end_of_data:
             self.end_of_data = False
             self.reset()
