@@ -860,6 +860,7 @@ class GenNmt(object):
 
             if len(ll) > self.max_len_s:
                 continue
+                # ll = ll[:self.max_len_s-1]
 
             source.append(ll)
             ll = prepare_single_sentence(source)
@@ -1449,7 +1450,6 @@ class GenNmt(object):
                               give_num.get_shape(),
                               tf.TensorShape([None, self.dim]),
                               tf.TensorShape(None)))
-        print(i)
 
         _, _, _, _, _, y_sample = tf.while_loop(
             cond=lambda i, _1, _2, _3, _4, _5: i < self.max_leng,
@@ -1522,7 +1522,7 @@ class GenNmt(object):
 
     def generate_and_save(self, infile, outfile, generate_batch=2):
         gen_train_it = gen_train_iter(
-            infile, None, self.dictionaries[0],
+            infile, None, self.vocab,
             self.vocab_size, generate_batch, self.max_len_s)
         epoch = 0
         outfile = fopen(outfile, 'w')
@@ -1597,6 +1597,7 @@ class GenNmt(object):
             # 1)).astype('int32')
             # y_sample_len_norm[:len(y_sample), 0] = y_sample[:,0]
 
+            # for the last one
             feed = {
                 discriminator.dis_input_x: y_sample,
                 discriminator.dis_input_xs: x_to_maxlen,
