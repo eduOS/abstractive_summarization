@@ -652,7 +652,6 @@ class DisCNN(object):
                         tf.assign(x, tf.clip_by_value(x, -1.0, 1.0))
                     ) for x in tf.trainable_variables() if self.scope in x.name]
                 # clip the value into -0.01 to 0.01
-            print(4)
 
             # print('ypred_for_auc is ', ypred_out)
             BatchTime = time.time()-BatchStart
@@ -665,13 +664,11 @@ class DisCNN(object):
                         epoch, uidx * self.gpu_num * self.batch_size, loss_out,
                         accuracy_out, BatchTime
                     ))
-            print(5)
 
             if numpy.mod(uidx, self.saveFreq) == 0:
                 print('save params when epoch %d, samples %d' %
                       (epoch, uidx * self.gpu_num * self.batch_size))
                 self.saver.save(self.sess, self.saveto)
-            print(6)
 
             if numpy.mod(uidx, self.devFreq) == 0:
                 print('testing the accuracy on the evaluation sets')
@@ -682,7 +679,7 @@ class DisCNN(object):
                         disTrain = disThreeTextIterator(
                             self.dev_positive_data, self.dev_negative_data,
                             self.dev_source_data, self.vocab, self.vocab_size,
-                            batch=self.batch_size, maxlen=self.max_len_x,
+                            batch=self.batch_size, maxlen=self.max_len_s,
                             dismaxlen=self.max_leng)
                         ExampleNum = 0
                         # EpochStart = time.time()
