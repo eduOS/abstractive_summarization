@@ -650,9 +650,9 @@ class GenSum(object):
         return results['ids'], results[
             'probs'], new_states, attn_dists, p_gens, new_coverage
 
-    def rollout_generate(self, generate_batch=2, reuse_var=True):
+    def rollout_generate(self, batch_size=2, reuse_var=True):
 
-        n_sample = generate_batch
+        n_sample = batch_size
 
         x = tf.placeholder(tf.int32, [None, n_sample])
         x_mask = tf.placeholder(self.dtype, [None, n_sample])

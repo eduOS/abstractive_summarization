@@ -524,7 +524,6 @@ def main(argv):  # NOQA
             training_model_hps = training_model_hps._replace(mode="train")
             model = GenSum(training_model_hps, vocab)
             setup_training(model, batcher)
-            model.rollout_generate(generate_batch=gan_gen_batch_size)
             print('done')
 
         elif is_decode:
@@ -535,16 +534,6 @@ def main(argv):  # NOQA
             model = GenSum(decode_model_hps, vocab)
             decoder = BeamSearchDecoder(model, batcher, vocab)
             decoder.decode()
-            # decode_file = FLAGS.decode_file
-            # decode_result_file = FLAGS.decode_result_file
-            # decode_gpu = FLAGS.decode_gpu
-            # decode_is_print = FLAGS.decode_is_print
-            # print(
-            #     'decoding the file %s on %s' % (
-            #         decode_file, decode_gpu))
-            # generator.gen_sample(
-            #     decode_file, decode_result_file, 10,
-            #     is_print=decode_is_print, gpu_device=decode_gpu)
             print('done')
             return 0
 
@@ -557,10 +546,6 @@ def main(argv):  # NOQA
                 optimizer='rmsprop')
             generator.rollout_generate(generate_batch=gan_gen_batch_size)
             generator.init_and_reload()
-
-            # print('building testing ')
-            # generator.build_test()
-            # print('done')
 
 # ----------- pretraining the discriminator -----------
 
