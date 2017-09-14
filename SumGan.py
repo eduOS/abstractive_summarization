@@ -570,7 +570,6 @@ def main(argv):  # NOQA
 
         filter_sizes_s = [i for i in range(1, max_len_s, 4)]
         num_filters_s = [(100 + i*10) for i in range(1, max_len_s, 4)]
-
         dis_filter_sizes = [i for i in range(1, max_leng, 4)]
         dis_num_filters = [(100 + i*10) for i in range(1, max_leng, 4)]
 
@@ -620,15 +619,10 @@ def main(argv):  # NOQA
             gan_total_iter_num = FLAGS.gan_total_iter_num
             gan_gen_iter_num = FLAGS.gan_gen_iter_num
             gan_dis_iter_num = FLAGS.gan_dis_iter_num
-
             gan_gen_reshuffle = FLAGS.gan_gen_reshuffle
-            # gan_gen_source_data = FLAGS.gan_gen_source_data
-
             gan_dis_source_data = FLAGS.gan_dis_source_data
             gan_dis_positive_data = FLAGS.gan_dis_positive_data
             gan_dis_negative_data = FLAGS.gan_dis_negative_data
-            # gan_dis_reshuffle = FLAGS.gan_dis_reshuffle
-            # gan_dis_batch_size = FLAGS.gan_dis_batch_size
             gan_dispFreq = FLAGS.gan_dispFreq
             gan_saveFreq = FLAGS.gan_saveFreq
             roll_num = FLAGS.rollnum
@@ -641,12 +635,6 @@ def main(argv):  # NOQA
             for gan_iter in range(gan_total_iter_num):
 
                 print('reinforcement training for %d epoch' % gan_iter)
-                # gen_train_it = gen_train_iter(gan_gen_source_data,
-                # gan_gen_reshuffle, generator.dictionaries[0], n_words_src,
-                # gan_gen_batch_size, max_len_s) gen_train_it =
-                # gen_train_iter(gan_dis_source_data, gan_gen_reshuffle,
-                # generator.dictionaries[0], n_words_src,
-                # gan_gen_batch_size, max_len_s)
                 gen_train_it = gen_force_train_iter(
                     gan_dis_source_data,
                     gan_dis_positive_data,
@@ -664,22 +652,11 @@ def main(argv):  # NOQA
                     x, y_ground, _ = next(gen_train_it)
                     x_to_maxlen = prepare_sentence_to_maxlen(x, max_len_s)
 
-                    # x, x_mask = prepare_multiple_sentence(x,
-                    # maxlen=max_len_s)
                     x, x_mask, y_ground, y_ground_mask = prepare_data(
                         x, y_ground, max_len_s=max_len_s,
                         max_leng=max_leng, vocab_size=vocab_size
                     )
                     y_sample_out = generator.generate_step(x, x_mask)
-
-                    # for debug to print these generated sentence
-                    # y_out, _ = deal_generated_y_sentence(y_sample_out,
-                    # generator.worddicts)
-                    # y_out = numpy.transpose(y_out)
-
-                    # for id, y in enumerate(y_out):
-                    #    y_str = print_string('y', y, generator.worddicts_r)
-                    #    print y_str+'\n'
 
                     y_input, y_input_mask = deal_generated_y_sentence(
                         y_sample_out, generator.vocab, precision=precision)
@@ -730,11 +707,6 @@ def main(argv):  # NOQA
                 generator.saver.save(generator.sess, generator.saveto)
                 print('finetune the generator done!')
 
-                # print('self testing')
-                # generator.self_test(gan_dis_source_data,
-                # gan_dis_negative_data)
-                # print('self testing done!')
-
                 print('prepare the gan_dis_data begin ')
                 data_num = prepare_gan_dis_data(
                     train_data_source, train_data_target,
@@ -751,13 +723,6 @@ def main(argv):  # NOQA
                     gan_dis_source_data, gan_dis_negative_data,
                     generate_batch=gan_gen_batch_size
                 )
-                print('done!')
-
-                print('prepare the dis_dev sets')
-                # dev_num = prepare_three_gan_dis_dev_data(
-                #     gan_dis_positive_data, gan_dis_negative_data,
-                #     gan_dis_source_data, dis_dev_positive_data,
-                #     dis_dev_negative_data, dis_dev_source_data, 200)
                 print('done!')
 
                 print('finetune the discriminator begin...')

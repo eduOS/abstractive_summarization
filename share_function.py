@@ -620,7 +620,7 @@ class Vocab(object):
         return self._count
 
 
-def linear(args, output_size, bias, bias_start=0.0, scope=None):
+def linear_gp(args, output_size, bias, bias_start=0.0, scope=None):
     """Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
 
     Args:
@@ -670,3 +670,34 @@ def linear(args, output_size, bias, bias_start=0.0, scope=None):
             "Bias", [output_size],
             initializer=tf.constant_initializer(bias_start))
     return res + bias_term
+
+
+def linear(input_, output_size, scope=None):
+    '''
+    Linear map: output[k] = sum_i(Matrix[k, i] * input_[i] ) + Bias[k]
+    Args:
+    input_: a tensor or a list of 2D, batch x n, Tensors.
+    output_size: int, second dimension of W[i].
+    scope: VariableScope for the created subgraph; defaults to "Linear".
+  Returns:
+    A 2D Tensor with shape [batch x output_size] equal to
+    sum_i(input_[i] * W[i]), where W[i]s are newly created matrices.
+  Raises:
+    ValueError: if some of the arguments has unspecified or wrong shape.
+  '''
+
+    shape = input_.get_shape().as_list()
+    if len(shape) != 2:
+        raise ValueError("Linear is expecting 2D arguments: %s" % str(shape))
+    if not shape[1]:
+        raise ValueError(
+            "Linear expects shape[1] of arguments: %s" % str(shape))
+    input_size = shape[1]
+
+    # Now the computation.
+    with tf.variable_scope(scope or "SimpleLinear"):
+        matrix = tf.get_variable(
+            "Matrix", [output_size, input_size], dtype=input_.dtype)
+        bias_term = tf.get_variable("Bias", [output_size], dtype=input_.dtype)
+
+    return tf.matmul(input_, tf.transpose(matrix)) + bias_term
