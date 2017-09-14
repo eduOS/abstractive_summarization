@@ -29,12 +29,14 @@ def conv_batch_norm(x, is_train, scope='bn', decay=0.9, reuse_var=False):
 
 
 def highway(input_, size, num_layers=1, bias=-2.0, f=tf.nn.relu,
-            scope='Highway'):
+            reuse_var=False, scope='Highway4T'):
     """Highway Network (cf. http://arxiv.org/abs/1505.00387).
     t = sigmoid(Wy + b)
     z = t * g(Wy + b) + (1 - t) * y
     where g is nonlinearity, t is transform gate, and (1 - t) is carry gate.
     """
+    if reuse_var:
+        tf.get_variable_scope().reuse_variables()
 
     with tf.variable_scope(scope):
         for idx in range(num_layers):
@@ -48,24 +50,25 @@ def highway(input_, size, num_layers=1, bias=-2.0, f=tf.nn.relu,
     return output
 
 
-def highway_s(input_, size, layer_size=1, bias=-2, f=tf.nn.relu,
-              reuse_var=False):
-    output = input_
+def highway_s(input_, size, num_layers=1, bias=-2.0, f=tf.nn.relu,
+              reuse_var=False, scope='Highway4S'):
+    """Highway Network (cf. http://arxiv.org/abs/1505.00387).
+    t = sigmoid(Wy + b)
+    z = t * g(Wy + b) + (1 - t) * y
+    where g is nonlinearity, t is transform gate, and (1 - t) is carry gate.
+    """
     if reuse_var:
         tf.get_variable_scope().reuse_variables()
-    for idx in xrange(layer_size):  # NOQA
-        # it is for a layer
-        output = f(
-            linear(
-                output, size, 0, scope='output_s_lin_%d' % idx
-            )
-        )
-        transform_gate = tf.sigmoid(
-            linear(
-                input_, size, 0, scope='transform_s_lin_%d' % idx) + bias
-        )
-        carry_gate = 1. - transform_gate
-        output = transform_gate * output + carry_gate * input_
+
+    with tf.variable_scope(scope):
+        for idx in range(num_layers):
+            g = f(linear(input_, size, scope='highway_lin_%d' % idx))
+            t = tf.sigmoid(
+                linear(input_, size, scope='highway_gate_%d' % idx) + bias)
+
+            output = t * g + (1. - t) * input_
+            input_ = output
+
     return output
 
 
@@ -524,6 +527,7 @@ class DisCNN(object):
         for i, gpu_device in enumerate(self.gpu_devices):
             if i > 0:
                 reuse_var = True
+                # in differenct gpu device the variables are shared
             print('before build model')
             (
                 _, _, _, ypred_for_auc, predictions, losses,
