@@ -194,9 +194,7 @@ def gen_train_iter(
                 continue
             ExampleNum += len(x)
             yield x, iter
-        TimeCost = time.time() - EpochStart
         iter += 1
-        print('Seen ', ExampleNum, 'generator samples. Time cost is ', TimeCost)
 
 
 def gen_force_train_iter(
@@ -344,7 +342,7 @@ def deal_generated_y_sentence(seqs_y, vocab, precision='float32'):
     n_samples = len(seqs_y)
     lens_y = [len(seq) for seq in seqs_y]
     maxlen_y = numpy.max(lens_y)
-    eosTag = '[STOP]'
+    eosTag = '[eos]'
     eosIndex = vocab.word2id(eosTag)
 
     y = numpy.zeros((maxlen_y, n_samples)).astype('int32')

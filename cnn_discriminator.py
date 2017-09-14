@@ -290,6 +290,9 @@ class DisCNN(object):
                     embeddingtable, input_x_trans)
                 sentence_embed_expanded = tf.expand_dims(sentence_embed, -1)
                 pooled_outputs = []
+
+                start_time_yc = tf.Summary.Value(
+                    tag="start_abstract_convolution", simple_value=time.time())
                 for filter_size, num_filter in zip(
                         self.filter_sizes, self.num_filters):
                     scope = "conv_maxpool-%s" % filter_size
@@ -309,6 +312,14 @@ class DisCNN(object):
                         padding='VALID',
                         name='pool')
                     pooled_outputs.append(pooled)
+
+                end_time_yc = tf.Summary.Value(
+                    tag="start_abstract_convolution", simple_value=time.time())
+
+                summary_writer.add_event(
+                    summary=tf.summary.Event(tf.Summary(
+                        [end_time_yc-start_time_yc]))
+                )
 
                 h_pool = tf.concat(pooled_outputs, 3)
                 h_pool_flat = tf.reshape(h_pool, [-1, self.num_filters_total])
@@ -554,9 +565,10 @@ class DisCNN(object):
             max_epoch = self.max_epoches
 
         def train_iter():
-            Epoch = 0
+            epoch = 0
             while True:
                 if self.reshuffle:
+                    print('reshuffling the data...')
                     os.popen(
                         'python shuffle.py ' + positive_data + ' \
                         ' + negative_data + ' ' + source_data
@@ -576,32 +588,25 @@ class DisCNN(object):
                     dismaxlen=self.max_leng)
 
                 ExampleNum = 0
-                print('Epoch :', Epoch)
+                print('epoch :', epoch)
 
-                EpochStart = time.time()
+                BatchStart = time.time()
                 for x, y, xs in disTrain:
                     # xs is the source source
                     if len(x) < self.gpu_num:
+                        print('not enough data')
                         continue
                     ExampleNum += len(x)
-                    yield x, y, xs, Epoch
-                TimeCost = time.time() - EpochStart
+                    yield x, y, xs, epoch
+                TimeCost = time.time() - BatchStart
 
-                Epoch += 1
-                print(
-                    'Seen ',
-                    ExampleNum,
-                    ' examples for discriminator. Time Cost : ',
-                    TimeCost)
+                epoch += 1
+                print('Seen ', ExampleNum,
+                      ' examples for discriminator. Time Cost : ', TimeCost)
 
         train_it = train_iter()
 
-        drop_prob = 1.0
-
-        # if self.reload:
-        #    print('reload params from %s' %self.saveto)
-        #    saver.restore(self.sess, self.saveto)
-        #    print('reload params done')
+        drop_prob = 0.8
 
         TrainStart = time.time()
         epoch = 0
@@ -638,10 +643,18 @@ class DisCNN(object):
 
             stt = time.time()
             print("start running session")
-            _, loss_out, accuracy_out, grads_out = self.sess.run(
-                [self.train_optm, self.train_loss,
-                 self.train_accuracy, self.train_grads_and_vars],
-                feed_dict=myFeed_dict)
+            builder = tf.profile.ProfileOptionBuilder
+            opts = builder(builder.time_and_memory()).order_by('micros').build()
+            with tf.contrib.tfprof.ProfileContext('./profile_dir',
+                                                  trace_steps=[],
+                                                  dump_steps=[]) as pctx:
+                pctx.trace_next_step()
+                pctx.dump_next_step()
+                _, loss_out, accuracy_out, grads_out = self.sess.run(
+                    [self.train_optm, self.train_loss,
+                     self.train_accuracy, self.train_grads_and_vars],
+                    feed_dict=myFeed_dict)
+                pctx.profiler.profile_operations(options=opts)
             print(
                 'finished running session, costing %s s' % (stt - time.time())
             )
@@ -701,12 +714,12 @@ class DisCNN(object):
                     dev_xs = numpy.array(dev_xs)
 
                     x, y, xs = dis_three_length_prepare(
-                        dev_x, dev_y, dev_xs, self.max_leng)
+                        dev_x, dev_y, dev_xs, self.max_len_s, self.max_leng)
                     myFeed_dict = {
                         self.dis_input_x: x,
                         self.dis_input_y: y,
                         self.dis_input_xs: xs,
-                        self.dis_dropout_keep_prob: 1.0}
+                        self.dis_dropout_keep_prob: 0.8}
                     dev_ypred_out, dev_accuracy_out = self.sess.run(
                         [self.dis_ypred_for_auc, self.dis_accuracy],
                         feed_dict=myFeed_dict)

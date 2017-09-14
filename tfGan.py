@@ -307,7 +307,7 @@ def main(argv):
             print('build the generate without training')
             generator.build_train_model()
             generator.build_generate(
-                maxlen=max_len_s,
+                maxlen=max_leng,
                 generate_batch=gan_gen_batch_size,
                 optimizer='rmsprop')
             generator.rollout_generate(generate_batch=gan_gen_batch_size)
@@ -420,6 +420,7 @@ def main(argv):
                 for gen_iter in range(gan_gen_iter_num):
 
                     x, y_ground, _ = next(gen_train_it)
+                    # source, target
                     x_to_maxlen = prepare_sentence_to_maxlen(x, max_len_s)
 
                     x, x_mask, y_ground, y_ground_mask = prepare_data(
@@ -433,7 +434,6 @@ def main(argv):
                     rewards = generator.get_reward(
                         x, x_mask, x_to_maxlen, y_input, y_input_mask,
                         roll_num, discriminator, bias_num=bias_num)
-                    print('the reward is ', rewards)
                     loss = generator.generate_step_and_update(
                         x, x_mask, y_input, rewards)
                     if gen_iter % gan_dispFreq == 0:
