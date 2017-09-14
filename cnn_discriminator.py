@@ -1,12 +1,6 @@
 # this code is implemented as a discriminator to classify the sentence
 
 import tensorflow as tf
-# from tensorflow.python.ops import math_ops
-# from tensorflow.python.ops import variable_scope as vs
-
-# from data_iterator import disTextIterator
-# from share_function import dis_length_prepare
-# from share_function import average_clip_gradient
 import os
 from data_iterator import disThreeTextIterator
 from share_function import average_clip_gradient_by_value
@@ -77,10 +71,8 @@ def highway_s(
 
 class CNN_layer(object):
 
-    def __init__(
-        self, filter_size, dim_word, num_filter,
-        scope='cnn_layer', init_device='/cpu:0', reuse_var=False
-    ):
+    def __init__(self, filter_size, dim_word, num_filter,
+                 scope='cnn_layer', init_device='/cpu:0', reuse_var=False):
         self.filter_size = filter_size
         self.dim_word = dim_word
         self.num_filter = num_filter
@@ -90,27 +82,23 @@ class CNN_layer(object):
             with tf.variable_scope(self.scope or 'cnn_layer'):
                 with tf.variable_scope('self_model'):
                     with tf.device(init_device):
-                        pass
                         filter_shape = [filter_size, dim_word, 1, num_filter]
-                        b = tf.get_variable('b', initializer=tf.constant(
+                        b = tf.get_variable('b', initializer=tf.constant(  # NOQA
                             0.1, shape=[num_filter]))
-                        W = tf.get_variable(
+                        W = tf.get_variable(  # NOQA
                             'W', initializer=tf.truncated_normal(
                                 filter_shape, stddev=0.1))
 
     # convolutuon with batch normalization
-    def conv_op(
-        self, input_sen, stride, is_train, padding='VALID', is_batch_norm=True,
-        f_activation=tf.nn.relu
-    ):
+    def conv_op(self, input_sen, stride, is_train, padding='VALID',
+                is_batch_norm=True, f_activation=tf.nn.relu):
         with tf.variable_scope(self.scope):
             with tf.variable_scope('self_model'):
                 tf.get_variable_scope().reuse_variables()
                 b = tf.get_variable('b')
                 W = tf.get_variable('W')
                 conv = tf.nn.conv2d(
-                    input_sen, W, stride, padding, name='conv'
-                )
+                    input_sen, W, stride, padding, name='conv')
                 bias_add = tf.nn.bias_add(conv, b)
 
             if is_batch_norm:
@@ -131,41 +119,15 @@ class DisCNN(object):
     convolutional layer, max_pooling and softmax layer.
     """
 
-    def __init__(
-        self,
-        sess,
-        max_len_s,
-        max_leng,
-        num_classes,
-        dict_path,
-        vocab_size,
-        batch_size,
-        dim_word,
-        filter_sizes,
-        num_filters,
-        filter_sizes_s,
-        num_filters_s,
-        gpu_device,
-        positive_data,
-        negative_data,
-        source_data,
-        dev_positive_data=None,
-        dev_negative_data=None,
-        dev_source_data=None,
-        max_epoches=10,
-        dispFreq=1,
-        saveFreq=10,
-        devFreq=1000,
-        clip_c=1.0,
-        optimizer='adadelta',
-        saveto='discriminator',
-        reload_mod=False,
-        reshuffle=False,
-        l2_reg_lambda=0.0,
-        scope='discnn',
-        init_device="/cpu:0",
-        reuse_var=False
-    ):
+    def __init__(self, sess, max_len_s, max_leng, num_classes, dict_path,
+                 vocab_size, batch_size, dim_word, filter_sizes, num_filters,
+                 filter_sizes_s, num_filters_s, gpu_device, positive_data,
+                 negative_data, source_data, dev_positive_data=None,
+                 dev_negative_data=None, dev_source_data=None, max_epoches=10,
+                 dispFreq=1, saveFreq=10, devFreq=1000, clip_c=1.0,
+                 optimizer='adadelta', saveto='discriminator', reload_mod=False,
+                 reshuffle=False, l2_reg_lambda=0.0, scope='discnn',
+                 init_device="/cpu:0", reuse_var=False):
 
         self.sess = sess
         self.max_leng = max_leng
@@ -232,19 +194,19 @@ class DisCNN(object):
             with tf.variable_scope(self.scope or 'disCNN'):
                 with tf.variable_scope('model_self'):
                     with tf.device(init_device):
-                        embeddingtable = tf.get_variable(
+                        embeddingtable = tf.get_variable(  # NOQA
                             'embeddingtable',
                             initializer=tf.random_uniform(
                                 [self.vocab_size, self.dim_word], -1.0, 1.0
                             ))
 
-                        W = tf.get_variable(
+                        W = tf.get_variable(  # NOQA
                             'W', initializer=tf.truncated_normal(
                                 [self.num_filters_total +
                                  self.num_filters_total_s, self.num_classes],
                                 stddev=0.1
                             ))
-                        b = tf.get_variable(
+                        b = tf.get_variable(  # NOQA
                             'b', initializer=tf.constant(
                                 0.1, shape=[self.num_classes]))
 
@@ -303,7 +265,6 @@ class DisCNN(object):
     def get_inputs(self, gpu_device):
         try:
             gpu_id = self.gpu_devices.index(gpu_device)
-            print('get inputs')
         except:
             raise ValueError('get inputs error!')
         return (
@@ -314,23 +275,11 @@ class DisCNN(object):
     def build_model(self, reuse_var=False, gpu_device='0'):
         with tf.variable_scope(self.scope):
             with tf.device('/gpu:%d' % int(gpu_device)):
-                # self.input_x = tf.placeholder(tf.int32, [self.max_len_s,
-                # None],
-                # name='input_x') self.input_y = tf.placeholder(tf.float32,
-                # [self.num_classes, None], name='input_y')
-
-                # print('build model on gpu_device is ', gpu_device)
-                # print('building model on device %s, reuse : %d' %(gpu_device,
-                # reuse_var))
-
                 input_x, input_xs, input_y, drop_keep_prob = \
                     self.get_inputs(gpu_device)
-
                 input_x_trans = tf.transpose(input_x, [1, 0])
                 input_xs_trans = tf.transpose(input_xs, [1, 0])
                 input_y_trans = tf.transpose(input_y, [1, 0])
-                # self.dropout_keep_prob = tf.placeholder(tf.float32,
-                # name='dropout_keep_prob')
                 with tf.variable_scope('model_self'):
                     tf.get_variable_scope().reuse_variables()
                     W = tf.get_variable('W')
@@ -341,11 +290,13 @@ class DisCNN(object):
                     embeddingtable, input_x_trans)
                 sentence_embed_expanded = tf.expand_dims(sentence_embed, -1)
                 pooled_outputs = []
+
+                start_time_yc = tf.Summary.Value(
+                    tag="start_abstract_convolution", simple_value=time.time())
                 for filter_size, num_filter in zip(
                         self.filter_sizes, self.num_filters):
-                    # print('the filter size is ', filter_size)
                     scope = "conv_maxpool-%s" % filter_size
-                    # filter_shape = [filter_size, self.dim_word, 1, num_filter]
+                    filter_shape = [filter_size, self.dim_word, 1, num_filter]  # NOQA
                     strides = [1, 1, 1, 1]
                     conv = CNN_layer(
                         filter_size, self.dim_word, num_filter,
@@ -360,24 +311,24 @@ class DisCNN(object):
                         strides=strides,
                         padding='VALID',
                         name='pool')
-                    # print('the shape of the pooled is ', pooled.get_shape())
                     pooled_outputs.append(pooled)
 
-                h_pool = tf.concat(pooled_outputs, 3)
-                # [None, 1, 1, 680]
-                # print('the shape of h_pool is ', h_pool.get_shape())
-                # print('the num_filters_total is ', self.num_filters_total)
-                h_pool_flat = tf.reshape(h_pool, [-1, self.num_filters_total])
+                end_time_yc = tf.Summary.Value(
+                    tag="start_abstract_convolution", simple_value=time.time())
 
-                # print('the shape of h_pool_flat is ', h_pool_flat.get_shape())
+                summary_writer.add_event(
+                    summary=tf.summary.Event(tf.Summary(
+                        [end_time_yc-start_time_yc]))
+                )
+
+                h_pool = tf.concat(pooled_outputs, 3)
+                h_pool_flat = tf.reshape(h_pool, [-1, self.num_filters_total])
 
                 h_highway = highway(
                     h_pool_flat, h_pool_flat.get_shape()[1],
                     1, 0, reuse_var=reuse_var)
                 h_drop = tf.nn.dropout(h_highway, drop_keep_prob)
-                # print('the shape of h_drop is ', h_drop.get_shape())
 
-                # for the source sentence
                 sentence_embed_s = tf.nn.embedding_lookup(
                     embeddingtable, input_xs_trans)
                 sentence_embed_expanded_s = tf.expand_dims(sentence_embed_s, -1)
@@ -386,8 +337,8 @@ class DisCNN(object):
                 for filter_size_s, num_filter_s in zip(
                         self.filter_sizes_s, self.num_filters_s):
                     scope = "conv_s_maxpool-%s" % filter_size_s
-                    # filter_shape = [
-                    #     filter_size_s, self.dim_word, 1, num_filter_s]
+                    filter_shape = [  # NOQA
+                        filter_size_s, self.dim_word, 1, num_filter_s]
                     strides = [1, 1, 1, 1]
                     conv = CNN_layer(
                         filter_size_s, self.dim_word, num_filter_s,
@@ -431,16 +382,8 @@ class DisCNN(object):
                     param for param in tf.trainable_variables()
                     if self.scope in param.name]
 
-                # for param in params:
-                #    print param.name
-
-                # self.params = params
-
                 grads_and_vars = self.optimizer.compute_gradients(
                     losses, params)
-
-                # for grad, var in grads_and_vars:
-                #        print (var.name, grad)
 
                 l2_loss = tf.constant(0.0)
                 l2_loss += tf.nn.l2_loss(W)
@@ -482,17 +425,11 @@ class DisCNN(object):
                     embeddingtable, input_x_trans)
 
                 sentence_embed_expanded = tf.expand_dims(sentence_embed, -1)
-                # print('the shape of sentence_embed is ',
-                # sentence_embed.get_shape()) print('the shape of
-                # sentence_embed_expanded is ',
-                # sentence_embed_expanded.get_shape())
                 pooled_outputs = []
 
                 for filter_size, num_filter in zip(
                         self.filter_sizes, self.num_filters):
-                    # print('the filter size is ', filter_size)
                     scope = "conv_maxpool-%s" % filter_size
-                    # filter_shape = [filter_size, self.dim_word, 1, num_filter]
                     strides = [1, 1, 1, 1]
                     conv = CNN_layer(
                         filter_size, self.dim_word, num_filter,
@@ -505,22 +442,15 @@ class DisCNN(object):
                         ksize=[
                             1, (self.max_leng - filter_size + 1), 1, 1],
                         strides=strides, padding='VALID', name='pool')
-                    # print('the shape of the pooled is ', pooled.get_shape())
                     pooled_outputs.append(pooled)
 
                 h_pool = tf.concat(pooled_outputs, 3)
-                # print('the shape of h_pool is ', h_pool.get_shape())
-                # print('the num_filters_total is ', self.num_filters_total)
-
                 h_pool_flat = tf.reshape(h_pool, [-1, self.num_filters_total])
-
-                # print('the shape of h_pool_flat is ', h_pool_flat.get_shape())
 
                 h_highway = highway(
                     h_pool_flat, h_pool_flat.get_shape()[1],
                     1, 0, reuse_var=reuse_var)
                 h_drop = tf.nn.dropout(h_highway, self.dis_dropout_keep_prob)
-                # print('the shape of h_drop is ', h_drop.get_shape())
 
                 sentence_embed_s = tf.nn.embedding_lookup(
                     embeddingtable, input_xs_trans)
@@ -590,10 +520,8 @@ class DisCNN(object):
 
         reuse_var = False
         for i, gpu_device in enumerate(self.gpu_devices):
-            # print('i is %d, gpu is %s' %(i, gpu_device))
             if i > 0:
                 reuse_var = True
-            # print('reuse_var is ', reuse_var)
             print('before build model')
             (
                 _, _, _, ypred_for_auc, predictions, losses,
@@ -610,19 +538,18 @@ class DisCNN(object):
         grads_and_vars = average_clip_gradient_by_value(grads, -1.0, 1.0)
         optm = self.optimizer.apply_gradients(grads_and_vars)
 
+        print('get the loss')
         self.train_loss = loss
         self.train_accuracy = accuracy
         self.train_grads_and_vars = grads_and_vars
         self.train_optm = optm
         self.train_ypred = ypred_for_auc
 
-    def train(  # NOQA
-        self,
-        max_epoch=None,
-        positive_data=None,
-        negative_data=None,
-        source_data=None
-    ):
+    def train(self,  # NOQA
+              max_epoch=None,
+              positive_data=None,
+              negative_data=None,
+              source_data=None):
 
         if positive_data is None or negative_data is None \
                 or source_data is None:
@@ -638,9 +565,10 @@ class DisCNN(object):
             max_epoch = self.max_epoches
 
         def train_iter():
-            Epoch = 0
+            epoch = 0
             while True:
                 if self.reshuffle:
+                    print('reshuffling the data...')
                     os.popen(
                         'python shuffle.py ' + positive_data + ' \
                         ' + negative_data + ' ' + source_data
@@ -648,11 +576,6 @@ class DisCNN(object):
                     os.popen('mv ' + positive_data + '.shuf ' + positive_data)
                     os.popen('mv ' + negative_data + '.shuf ' + negative_data)
                     os.popen('mv ' + source_data + '.shuf ' + source_data)
-
-                # disTrain = disTextIterator(
-                #     positive_data, negative_data, self.dictionaries[1],
-                #     batch=self.batch_size * self.gpu_num,
-                #     maxlen=self.max_len_s, n_words_target=self.vocab_size)
 
                 disTrain = disThreeTextIterator(
                     positive_data,
@@ -665,32 +588,25 @@ class DisCNN(object):
                     dismaxlen=self.max_leng)
 
                 ExampleNum = 0
-                print('Epoch :', Epoch)
+                print('epoch :', epoch)
 
-                EpochStart = time.time()
+                BatchStart = time.time()
                 for x, y, xs in disTrain:
                     # xs is the source source
                     if len(x) < self.gpu_num:
+                        print('not enough data')
                         continue
                     ExampleNum += len(x)
-                    yield x, y, xs, Epoch
-                TimeCost = time.time() - EpochStart
+                    yield x, y, xs, epoch
+                TimeCost = time.time() - BatchStart
 
-                Epoch += 1
-                print(
-                    'Seen ',
-                    ExampleNum,
-                    ' examples for discriminator. Time Cost : ',
-                    TimeCost)
+                epoch += 1
+                print('Seen ', ExampleNum,
+                      ' examples for discriminator. Time Cost : ', TimeCost)
 
         train_it = train_iter()
 
-        drop_prob = 1.0
-
-        # if self.reload:
-        #    print('reload params from %s' %self.saveto)
-        #    saver.restore(self.sess, self.saveto)
-        #    print('reload params done')
+        drop_prob = 0.8
 
         TrainStart = time.time()
         epoch = 0
@@ -715,9 +631,8 @@ class DisCNN(object):
             xs_data_list = numpy.split(numpy.array(xs), self.gpu_num)
 
             myFeed_dict = {}
-            for i, x, y, xs in zip(
-                    range(self.gpu_num),
-                    x_data_list, y_data_list, xs_data_list):
+            for i, x, y, xs in zip(range(self.gpu_num),
+                                   x_data_list, y_data_list, xs_data_list):
                 x = x.tolist()
                 x, y, xs = dis_three_length_prepare(
                     x, y, xs, self.max_len_s, self.max_leng)
@@ -726,18 +641,26 @@ class DisCNN(object):
                 myFeed_dict[self.xs_list[i]] = xs
                 myFeed_dict[self.drop_list[i]] = drop_prob
 
-            print("start running session")
             stt = time.time()
-            _, loss_out, accuracy_out, grads_out = self.sess.run(
-                [self.train_optm, self.train_loss,
-                 self.train_accuracy, self.train_grads_and_vars],
-                feed_dict=myFeed_dict)
+            print("start running session")
+            builder = tf.profile.ProfileOptionBuilder
+            opts = builder(builder.time_and_memory()).order_by('micros').build()
+            with tf.contrib.tfprof.ProfileContext('./profile_dir',
+                                                  trace_steps=[],
+                                                  dump_steps=[]) as pctx:
+                pctx.trace_next_step()
+                pctx.dump_next_step()
+                _, loss_out, accuracy_out, grads_out = self.sess.run(
+                    [self.train_optm, self.train_loss,
+                     self.train_accuracy, self.train_grads_and_vars],
+                    feed_dict=myFeed_dict)
+                pctx.profiler.profile_operations(options=opts)
             print(
                 'finished running session, costing %s s' % (stt - time.time())
             )
 
             if uidx == 1:
-                x_variable = [
+                x_variable = [  # NOQA
                     self.sess.run(
                         tf.assign(x, tf.clip_by_value(x, -1.0, 1.0))
                     ) for x in tf.trainable_variables() if self.scope in x.name]
@@ -769,7 +692,8 @@ class DisCNN(object):
                         disTrain = disThreeTextIterator(
                             self.dev_positive_data, self.dev_negative_data,
                             self.dev_source_data, self.vocab, self.vocab_size,
-                            batch=self.batch_size, maxlen=self.max_leng)
+                            batch=self.batch_size, maxlen=self.max_len_s,
+                            dismaxlen=self.max_leng)
                         ExampleNum = 0
                         # EpochStart = time.time()
                         for x, y, xs in disTrain:
@@ -790,12 +714,12 @@ class DisCNN(object):
                     dev_xs = numpy.array(dev_xs)
 
                     x, y, xs = dis_three_length_prepare(
-                        dev_x, dev_y, dev_xs, self.max_leng)
+                        dev_x, dev_y, dev_xs, self.max_len_s, self.max_leng)
                     myFeed_dict = {
                         self.dis_input_x: x,
                         self.dis_input_y: y,
                         self.dis_input_xs: xs,
-                        self.dis_dropout_keep_prob: 1.0}
+                        self.dis_dropout_keep_prob: 0.8}
                     dev_ypred_out, dev_accuracy_out = self.sess.run(
                         [self.dis_ypred_for_auc, self.dis_accuracy],
                         feed_dict=myFeed_dict)
