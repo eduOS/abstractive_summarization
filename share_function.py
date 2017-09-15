@@ -175,7 +175,7 @@ def gen_train_iter(
     batch_size,
     maxlen,
 ):
-    iter = 0
+    ite = 0
     while True:
         if reshuffle:
             os.popen('python shuffle.py ' + gen_file)
@@ -194,7 +194,9 @@ def gen_train_iter(
                 continue
             ExampleNum += len(x)
             yield x, iter
-        iter += 1
+        TimeCost = time.time() - EpochStart
+        ite += 1
+        print('Seen ', ExampleNum, 'generator samples. Time cost is ', TimeCost)
 
 
 def gen_force_train_iter(
