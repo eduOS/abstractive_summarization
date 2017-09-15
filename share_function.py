@@ -3,18 +3,13 @@ import numpy
 import time
 import os
 
-from data_iterator import disTextIterator
 from data_iterator import genTextIterator
 from data_iterator import TextIterator
 
 PAD_TOKEN = '[PAD]'
 EOS_TOKEN = '[eos]'
-# This has a vocab id, which is used to represent out-of-vocabulary words
 UNKNOWN_TOKEN = '[UNK]'
-# This has a vocab id, which is used at the start of every decoder input
-# sequence
 START_DECODING = '[START]'
-# This has a vocab id, which is used at the end of untruncated target sequences
 STOP_DECODING = '[STOP]'
 
 
@@ -172,57 +167,25 @@ def _p(pp, name):
     return '%s_%s' % (pp, name)
 
 
-def dis_train_iter(
-    dis_positive_data,
-    dis_negative_data,
-    reshuffle,
-    dictionary,
-    n_words_trg,
-    batch_size,
-    maxlen
-):
-    iter = 0
-    while True:
-        if reshuffle:
-            os.popen(
-                'python shuffle.py ' + dis_positive_data +
-                ' ' + dis_positive_data)
-            os.popen('mv ' + dis_negative_data + '.shuf ' + dis_negative_data)
-            os.popen('mv ' + dis_negative_data + '.shuf ' + dis_negative_data)
-        disTrain = disTextIterator(
-            dis_positive_data,
-            dis_negative_data,
-            dictionary,
-            batch_size,
-            maxlen,
-            n_words_trg
-        )
-        iter += 1
-        ExampleNum = 0
-        for x, y in disTrain:
-            ExampleNum += len(x)
-            yield x, y, iter
-
-
 def gen_train_iter(
     gen_file,
     reshuffle,
-    dictionary,
-    n_words,
+    vocab,
+    vocab_size,
     batch_size,
-    maxlen
+    maxlen,
 ):
-    iter = 0
+    ite = 0
     while True:
         if reshuffle:
             os.popen('python shuffle.py ' + gen_file)
             os.popen('mv ' + gen_file + '.shuf ' + gen_file)
         gen_train = genTextIterator(
             gen_file,
-            dictionary,
-            n_words_source=n_words,
+            vocab,
+            vocab_size,
             batch_size=batch_size,
-            maxlen=maxlen
+            maxlen=maxlen,
         )
         ExampleNum = 0
         EpochStart = time.time()
@@ -232,7 +195,7 @@ def gen_train_iter(
             ExampleNum += len(x)
             yield x, iter
         TimeCost = time.time() - EpochStart
-        iter += 1
+        ite += 1
         print('Seen ', ExampleNum, 'generator samples. Time cost is ', TimeCost)
 
 
@@ -381,7 +344,7 @@ def deal_generated_y_sentence(seqs_y, vocab, precision='float32'):
     n_samples = len(seqs_y)
     lens_y = [len(seq) for seq in seqs_y]
     maxlen_y = numpy.max(lens_y)
-    eosTag = '[STOP]'
+    eosTag = '[eos]'
     eosIndex = vocab.word2id(eosTag)
 
     y = numpy.zeros((maxlen_y, n_samples)).astype('int32')
@@ -620,7 +583,7 @@ class Vocab(object):
         return self._count
 
 
-def linear_gp(args, output_size, bias, bias_start=0.0, scope=None):
+def linear(args, output_size, bias, bias_start=0.0, scope=None):
     """Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
 
     Args:
@@ -670,34 +633,3 @@ def linear_gp(args, output_size, bias, bias_start=0.0, scope=None):
             "Bias", [output_size],
             initializer=tf.constant_initializer(bias_start))
     return res + bias_term
-
-
-def linear(input_, output_size, scope=None):
-    '''
-    Linear map: output[k] = sum_i(Matrix[k, i] * input_[i] ) + Bias[k]
-    Args:
-    input_: a tensor or a list of 2D, batch x n, Tensors.
-    output_size: int, second dimension of W[i].
-    scope: VariableScope for the created subgraph; defaults to "Linear".
-  Returns:
-    A 2D Tensor with shape [batch x output_size] equal to
-    sum_i(input_[i] * W[i]), where W[i]s are newly created matrices.
-  Raises:
-    ValueError: if some of the arguments has unspecified or wrong shape.
-  '''
-
-    shape = input_.get_shape().as_list()
-    if len(shape) != 2:
-        raise ValueError("Linear is expecting 2D arguments: %s" % str(shape))
-    if not shape[1]:
-        raise ValueError(
-            "Linear expects shape[1] of arguments: %s" % str(shape))
-    input_size = shape[1]
-
-    # Now the computation.
-    with tf.variable_scope(scope or "SimpleLinear"):
-        matrix = tf.get_variable(
-            "Matrix", [output_size, input_size], dtype=input_.dtype)
-        bias_term = tf.get_variable("Bias", [output_size], dtype=input_.dtype)
-
-    return tf.matmul(input_, tf.transpose(matrix)) + bias_term
