@@ -61,12 +61,6 @@ tf.app.flags.DEFINE_integer(
 tf.app.flags.DEFINE_float('l2_r', 0.0001, 'L2 regularization penalty')
 
 tf.app.flags.DEFINE_integer(
-    'max_len_s', 80, 'the max length of the training sentence')
-tf.app.flags.DEFINE_integer(
-    'max_leng', 15,
-    'the max length of the training sentence for discriminator')
-
-tf.app.flags.DEFINE_integer(
     'batch_size', 60, 'the size of the minibatch for training')
 tf.app.flags.DEFINE_integer(
     'dis_batch_size', 10,
@@ -171,9 +165,6 @@ tf.app.flags.DEFINE_boolean('DebugMode', False, 'whether to debug')
 tf.app.flags.DEFINE_string(
     'adagrad_init_acc', '0.1',
     'the initial accuracy for the adagrad optimizer')
-tf.app.flags.DEFINE_string(
-    'dis_gpu_device', 'gpu-0',
-    'this many gpus used to train the generator model')
 
 tf.app.flags.DEFINE_string(
     'cov_loss_wt', '1',
@@ -192,8 +183,6 @@ tf.app.flags.DEFINE_float('bias_num', 0.5, 'the bias_num  for rewards')
 
 tf.app.flags.DEFINE_boolean(
     'decode_is_print', False, 'whether to decode')
-tf.app.flags.DEFINE_string(
-    'decode_gpu', '/gpu:0', 'the device used to decode')
 
 tf.app.flags.DEFINE_string(
     'decode_file', '/home/lerner/data/LCSTS/finished_files/test-art.txt',
@@ -537,15 +526,13 @@ def main(argv):  # NOQA
             print('done')
             return 0
 
-        else:
+        elif is_gan_train:
+            # draw the graph of the generator
             print('build the generate without training')
-            generator.build_train_model()
-            generator.build_generate(
-                maxlen=max_len_s,
-                generate_batch=gan_gen_batch_size,
-                optimizer='rmsprop')
-            generator.rollout_generate(generate_batch=gan_gen_batch_size)
-            generator.init_and_reload()
+            build_graph_hps = hps
+            build_graph_hps = build_graph_hps._replace(mode="train")
+            model = GenSum(build_graph_hps, vocab)
+            model.build_graph()
 
 # ----------- pretraining the discriminator -----------
 
@@ -558,8 +545,8 @@ def main(argv):  # NOQA
         dis_batch_size = FLAGS.dis_batch_size
         dis_saveto = FLAGS.dis_saveto
         dis_reshuffle = FLAGS.dis_reshuffle
-        dis_gpu_device = FLAGS.dis_gpu_device
-        max_leng = FLAGS.max_leng
+        max_dec_steps = FLAGS.max_dec_steps
+        max_enc_steps = FLAGS.max_enc_steps
         dis_positive_data = FLAGS.dis_positive_data
         dis_negative_data = FLAGS.dis_negative_data
         dis_source_data = FLAGS.dis_source_data
@@ -568,25 +555,23 @@ def main(argv):  # NOQA
         dis_dev_source_data = FLAGS.dis_dev_source_data
         dis_reload = FLAGS.dis_reload
 
-        filter_sizes_s = [i for i in range(1, max_len_s, 4)]
-        num_filters_s = [(100 + i*10) for i in range(1, max_len_s, 4)]
-        dis_filter_sizes = [i for i in range(1, max_leng, 4)]
-        dis_num_filters = [(100 + i*10) for i in range(1, max_leng, 4)]
+        filter_sizes_s = [i for i in range(1, max_enc_steps, 4)]
+        num_filters_s = [(100 + i*10) for i in range(1, max_enc_steps, 4)]
+        dis_filter_sizes = [i for i in range(1, max_dec_steps, 4)]
+        dis_num_filters = [(100 + i*10) for i in range(1, max_dec_steps, 4)]
 
         discriminator = DisCNN(
             sess=sess,
-            max_len_s=max_len_s,
-            max_leng=max_leng,
+            max_enc_steps=max_enc_steps,
+            max_dec_steps=max_dec_steps,
             num_classes=2,
-            vocab_path=vocab_path,
-            vocab_size=vocab_size,
+            vocab,
             batch_size=dis_batch_size,
             dim_word=FLAGS.emb_dim,
             filter_sizes=dis_filter_sizes,
             num_filters=dis_num_filters,
             filter_sizes_s=filter_sizes_s,
             num_filters_s=num_filters_s,
-            gpu_device=dis_gpu_device,
             positive_data=dis_positive_data,
             negative_data=dis_negative_data,
             source_data=dis_source_data,
@@ -642,19 +627,19 @@ def main(argv):  # NOQA
                     generator.vocab,
                     vocab_size,
                     gan_gen_batch_size,
-                    max_len_s,
-                    max_leng
+                    max_enc_steps,
+                    max_dec_steps
                 )
 
-                print('finetune the generator begin...')
+                print('finetune the generator ...')
                 for gen_iter in range(gan_gen_iter_num):
 
                     x, y_ground, _ = next(gen_train_it)
-                    x_to_maxlen = prepare_sentence_to_maxlen(x, max_len_s)
+                    x_to_maxlen = prepare_sentence_to_maxlen(x, max_enc_steps)
 
                     x, x_mask, y_ground, y_ground_mask = prepare_data(
-                        x, y_ground, max_len_s=max_len_s,
-                        max_leng=max_leng, vocab_size=vocab_size
+                        x, y_ground, max_enc_steps=max_enc_steps,
+                        max_dec_steps=max_dec_steps, vocab_size=vocab_size
                     )
                     y_sample_out = generator.generate_step(x, x_mask)
 
@@ -684,10 +669,10 @@ def main(argv):  # NOQA
                     # teacher force training
                     if teacher_forcing:
                         y_ground = prepare_sentence_to_maxlen(
-                            numpy.transpose(y_ground), maxlen=max_leng,
+                            numpy.transpose(y_ground), maxlen=max_dec_steps,
                             precision=precision)
                         y_ground_mask = prepare_sentence_to_maxlen(
-                            numpy.transpose(y_ground_mask), maxlen=max_leng,
+                            numpy.transpose(y_ground_mask), maxlen=max_dec_steps,
                             precision=precision)
                         rewards_ground = numpy.ones_like(y_ground)
                         rewards_ground = rewards_ground * y_ground_mask

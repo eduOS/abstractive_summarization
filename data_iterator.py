@@ -11,20 +11,18 @@ def fopen(filename, mode='r'):
 
 class disThreeTextIterator:
 
-    def __init__(
-        self, positive_data, negative_data, source_data,
-        vocab, vocab_size, batch=1, maxlen=80, dismaxlen=15
-    ):
+    def __init__(self, positive_data, negative_data, source_data,
+                 vocab, vocab_size, batch_size=1,
+                 max_enc_steps=80, max_dec_steps=15):
         self.positive = fopen(positive_data, 'r')
         self.negative = fopen(negative_data, 'r')
         self.source = fopen(source_data, 'r')
         self.vocab = vocab
         self.vocab_size = vocab_size
 
-        self.batch_size = batch
-        assert self.batch_size % 2 == 0
-        self.maxlen = maxlen
-        self.dismaxlen = dismaxlen
+        self.batch_size = batch_size
+        self.max_enc_steps = max_enc_steps
+        self.max_dec_steps = max_dec_steps
         self.end_of_data = False
 
     def __iter__(self):
@@ -77,9 +75,9 @@ class disThreeTextIterator:
                     ll = [w if w < self.vocab_size else 1 for w in ll]
 
                 if (
-                    len(ss) > self.dismaxlen or
-                    len(tt) > self.dismaxlen or
-                    len(ll) > self.maxlen or
+                    len(ss) > self.max_dec_steps or
+                    len(tt) > self.max_dec_steps or
+                    len(ll) > self.max_enc_steps or
                     should_continue
                 ):
                     continue
@@ -136,8 +134,8 @@ class disTextIterator:
         negative_data,
         dis_dict,
         batch=1,
-        maxlen=30,
-        dismaxlen=-1
+        max_enc_steps=30,
+        max_dec_steps=-1
     ):
         self.positive = fopen(positive_data, 'r')
         self.negative = fopen(negative_data, 'r')
@@ -149,8 +147,8 @@ class disTextIterator:
         assert self.batch_size % 2 == 0, \
             'the batch size of disTextIterator is not an even number'
 
-        self.maxlen = maxlen
-        self.dismaxlen = dismaxlen
+        self.max_enc_steps = max_enc_steps
+        self.max_dec_steps = max_dec_steps
         self.end_of_data = False
 
     def __iter__(self):
@@ -177,18 +175,18 @@ class disTextIterator:
                     raise IOError
                 ss = ss.strip().split()
                 ss = [self.dis_dict[w] if w in self.dis_dict else 1 for w in ss]
-                if self.dismaxlen > 0:
-                    ss = [w if w < self.dismaxlen else 1 for w in ss]
+                if self.max_dec_steps > 0:
+                    ss = [w if w < self.max_dec_steps else 1 for w in ss]
 
                 tt = self.negative.readline()
                 if tt == "":
                     raise IOError
                 tt = tt.strip().split()
                 tt = [self.dis_dict[w] if w in self.dis_dict else 1 for w in tt]
-                if self.dismaxlen > 0:
-                    tt = [w if w < self.dismaxlen else 1 for w in tt]
+                if self.max_dec_steps > 0:
+                    tt = [w if w < self.max_dec_steps else 1 for w in tt]
 
-                if len(ss) > self.maxlen or len(tt) > self.maxlen:
+                if len(ss) > self.max_enc_steps or len(tt) > self.max_enc_steps:
                     continue
 
                 positive.append(ss)
@@ -228,8 +226,8 @@ class genTextIterator:
         train_data,
         source_dict,
         batch_size=1,
-        maxlen=30,
-        dismaxlen=-1
+        max_enc_steps=30,
+        max_dec_steps=-1
     ):
         self.source = fopen(train_data, 'r')
 
@@ -237,9 +235,9 @@ class genTextIterator:
             self.source_dict = pkl.load(f)
 
         self.batch_size = batch_size
-        self.maxlen = maxlen
+        self.max_enc_steps = max_enc_steps
 
-        self.dismaxlen = dismaxlen
+        self.max_dec_steps = max_dec_steps
         self.end_of_data = False
 
     def __iter__(self):
@@ -264,10 +262,10 @@ class genTextIterator:
                 ss = [
                     self.source_dict[w]
                     if w in self.source_dict else 1 for w in ss]
-                if self.dismaxlen > 0:
-                    ss = [w if w < self.dismaxlen else 1 for w in ss]
+                if self.max_dec_steps > 0:
+                    ss = [w if w < self.max_dec_steps else 1 for w in ss]
 
-                if len(ss) > self.maxlen:
+                if len(ss) > self.max_enc_steps:
                     continue
 
                 source.append(ss)
@@ -288,15 +286,13 @@ class genTextIterator:
 class TextIterator:
     """Simple Bitext iterator."""
 
-    def __init__(
-        self, source, target, vocab,
-        vocab_size, batch_size=128, max_len_s=50, max_leng=15,
-    ):
+    def __init__(self, source, target, vocab, vocab_size, batch_size=128,
+                 max_enc_steps=50, max_dec_steps=15):
         self.source = fopen(source, 'r')
         self.target = fopen(target, 'r')
         self.batch_size = batch_size
-        self.max_len_s = max_len_s
-        self.max_leng = max_leng
+        self.max_enc_steps = max_enc_steps
+        self.max_dec_steps = max_dec_steps
         self.vocab = vocab
         self.vocab_size = vocab_size
         self.end_of_data = False
@@ -308,7 +304,7 @@ class TextIterator:
         self.source.seek(0)
         self.target.seek(0)
 
-    def next(self):
+    def next(self):  # NOQA
         if self.end_of_data:
             self.end_of_data = False
             self.reset()
@@ -340,10 +336,10 @@ class TextIterator:
                 if self.vocab_size > 0:
                     tt = [w if w < self.vocab_size else 1 for w in tt]
 
-                if len(ss) > self.max_len_s:
-                    ss = ss[:self.max_len_s-1]
-                if len(tt) > self.max_leng:
-                    tt = tt[:self.max_leng-1]
+                if len(ss) > self.max_enc_steps:
+                    ss = ss[:self.max_enc_steps-1]
+                if len(tt) > self.max_dec_steps:
+                    tt = tt[:self.max_dec_steps-1]
 
                 source.append(ss)
                 target.append(tt)

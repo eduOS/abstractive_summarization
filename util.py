@@ -42,7 +42,6 @@ def load_ckpt(saver, sess):
             saver.restore(sess, ckpt_state.model_checkpoint_path)
             return ckpt_state.model_checkpoint_path
         except:
-            raise
             tf.logging.info(
                 "Failed to load checkpoint from %s. Sleeping for %i secs...",
                 train_dir, 10)
