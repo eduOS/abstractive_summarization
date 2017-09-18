@@ -649,7 +649,7 @@ class DisCNN(object):
 
             stt = time.time()
             print("start running session")
-            builder = tf.profile.ProfileOptionBuilder
+            builder = tf.profiler.ProfileOptionBuilder
             opts = builder(builder.time_and_memory()).order_by('micros').build()
             with tf.contrib.tfprof.ProfileContext('./profile_dir',
                                                   trace_steps=[],
