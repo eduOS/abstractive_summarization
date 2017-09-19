@@ -255,6 +255,7 @@ def main(argv):
     gan_gen_batch_size = FLAGS.gan_gen_batch_size
 
     sess = tf.Session(config=config)
+    writer = tf.summary.FileWriter('./log', sess.graph)
     with tf.variable_scope('second_generate'):
         generator = GenNmt(
             sess=sess,
@@ -343,6 +344,7 @@ def main(argv):
 
         discriminator = DisCNN(
             sess=sess,
+            writer=writer,
             max_len_s=max_len_s,
             max_leng=max_leng,
             num_classes=2,

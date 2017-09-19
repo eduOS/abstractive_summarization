@@ -122,17 +122,19 @@ class DisCNN(object):
     convolutional layer, max_pooling and softmax layer.
     """
 
-    def __init__(self, sess, max_len_s, max_leng, num_classes, dict_path,
-                 vocab_size, batch_size, dim_word, filter_sizes, num_filters,
-                 filter_sizes_s, num_filters_s, gpu_device, positive_data,
-                 negative_data, source_data, dev_positive_data=None,
-                 dev_negative_data=None, dev_source_data=None, max_epoches=10,
-                 dispFreq=1, saveFreq=10, devFreq=1000, clip_c=1.0,
-                 optimizer='adadelta', saveto='discriminator', reload_mod=False,
-                 reshuffle=False, l2_reg_lambda=0.0, scope='discnn',
-                 init_device="/cpu:0", reuse_var=False):
+    def __init__(self, sess, writer, max_len_s, max_leng, num_classes,
+                 dict_path, vocab_size, batch_size, dim_word, filter_sizes,
+                 num_filters, filter_sizes_s, num_filters_s, gpu_device,
+                 positive_data, negative_data, source_data,
+                 dev_positive_data=None, dev_negative_data=None,
+                 dev_source_data=None, max_epoches=10, dispFreq=1, saveFreq=10,
+                 devFreq=1000, clip_c=1.0, optimizer='adadelta',
+                 saveto='discriminator', reload_mod=False, reshuffle=False,
+                 l2_reg_lambda=0.0, scope='discnn', init_device="/cpu:0",
+                 reuse_var=False):
 
         self.sess = sess
+        self.writer = writer
         self.max_leng = max_leng
         self.max_len_s = max_len_s
         self.num_classes = num_classes
@@ -647,23 +649,14 @@ class DisCNN(object):
                 myFeed_dict[self.xs_list[i]] = xs
                 myFeed_dict[self.drop_list[i]] = drop_prob
 
-            stt = time.time()
+            # stt = time.time()
             print("start running session")
-            builder = tf.profiler.ProfileOptionBuilder
-            opts = builder(builder.time_and_memory()).order_by('micros').build()
-            with tf.contrib.tfprof.ProfileContext('./profile_dir',
-                                                  trace_steps=[],
-                                                  dump_steps=[]) as pctx:
-                pctx.trace_next_step()
-                pctx.dump_next_step()
-                _, loss_out, accuracy_out, grads_out = self.sess.run(
-                    [self.train_optm, self.train_loss,
-                     self.train_accuracy, self.train_grads_and_vars],
-                    feed_dict=myFeed_dict)
-                pctx.profiler.profile_operations(options=opts)
-            print(
-                'finished running session, costing %s s' % (stt - time.time())
-            )
+            run_metadata = tf.RunMetadata()
+            _, loss_out, accuracy_out, grads_out = self.sess.run(
+                [self.train_optm, self.train_loss,
+                 self.train_accuracy, self.train_grads_and_vars],
+                feed_dict=myFeed_dict)
+            self.writer.add_run_metadata(run_metadata, 'step%d', i)
 
             if uidx == 1:
                 x_variable = [  # NOQA
