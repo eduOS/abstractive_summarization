@@ -372,7 +372,7 @@ def main(argv):
             clip_c=clip_c,
             optimizer='rmsprop',
             reshuffle=dis_reshuffle,
-            scope='discnn')
+            scope='disCNN')
 
         if is_discriminator_train:
             print('train the discriminator')
