@@ -526,7 +526,7 @@ def main(argv):  # NOQA
             print('done')
             return 0
 
-        elif is_gan_train:
+        else:
             # draw the graph of the generator
             print('build the generate without training')
             build_graph_hps = hps
@@ -565,7 +565,7 @@ def main(argv):  # NOQA
             max_enc_steps=max_enc_steps,
             max_dec_steps=max_dec_steps,
             num_classes=2,
-            vocab,
+            vocab=vocab,
             batch_size=dis_batch_size,
             dim_word=FLAGS.emb_dim,
             filter_sizes=dis_filter_sizes,

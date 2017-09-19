@@ -650,7 +650,7 @@ class GenSum(object):
         return results['ids'], results[
             'probs'], new_states, attn_dists, p_gens, new_coverage
 
-    def rollout_generate(self, batch_size=2, reuse_var=True):
+    def rollout_generate(self, batch_size=2):
 
         n_sample = batch_size
 
