@@ -23,6 +23,7 @@ import time
 import numpy as np
 import tensorflow as tf
 from attention_decoder import attention_decoder
+from share_function import tableLookup
 from tensorflow.contrib.tensorboard.plugins import projector
 
 FLAGS = tf.app.flags.FLAGS
@@ -70,7 +71,7 @@ class GenSum(object):
             self.prev_coverage = tf.placeholder(
                 tf.float32, [hps.batch_size, None],
                 name='prev_coverage')
-            # so this need not to be reloaded and taken gradient
+            # so this need not to be reloaded and taken gradient hps
 
     def _make_feed_dict(self, batch, just_enc=False):
         """Make a feed dictionary mapping parts of the batch to the appropriate
@@ -317,6 +318,11 @@ class GenSum(object):
         hps = self._hps
         vsize = self._vocab.size()  # size of the vocabulary
 
+        self.embedding = tableLookup(
+            self._vocab.size(),
+            self.dim_word,
+            scope='vocabtable')
+
         with tf.variable_scope('seq2seq'):
             # Some initializers
             self.rand_unif_init = tf.random_uniform_initializer(
@@ -324,22 +330,12 @@ class GenSum(object):
             self.trunc_norm_init = tf.truncated_normal_initializer(
                 stddev=hps.trunc_norm_init_std)
 
-            # Add embedding matrix (shared by the encoder and decoder inputs)
-            with tf.variable_scope('embedding'):
-                embedding = tf.get_variable(
-                    'embedding', [vsize, hps.emb_dim],
-                    dtype=tf.float32, initializer=self.trunc_norm_init)
-                if hps.mode == "train":
-                    self._add_emb_vis(embedding)  # add to tensorboard
-                # tensor with shape (batch_size, max_enc_steps, emb_size)
-                emb_enc_inputs = tf.nn.embedding_lookup(
-                    embedding, self._enc_batch)
-                emb_dec_inputs = [
-                    tf.nn.embedding_lookup(
-                        embedding, x) for x in tf.unstack(
-                            self._dec_batch, axis=1)]
-                # list length max_dec_steps containing shape (batch_size,
-                # emb_size)
+            emb_enc_inputs = tf.nn.embedding_lookup(
+                self.embedding, self._enc_batch)
+            emb_dec_inputs = [
+                tf.nn.embedding_lookup(
+                    self.embedding, x) for x in tf.unstack(
+                        self._dec_batch, axis=1)]
 
             # Add the encoder.
             enc_outputs, fw_st, bw_st = self._add_encoder(
@@ -397,7 +393,7 @@ class GenSum(object):
 
             if hps.mode in ['train', 'eval']:
                 # Calculate the loss
-                with tf.variable_scope('loss'):
+                with tf.variable_scope('train_loss'):
                     if FLAGS.pointer_gen:  # calculate loss from log_dists
                         # Calculate the loss per step
                         # This is fiddly; we use tf.gather_nd to pick out the
@@ -443,6 +439,27 @@ class GenSum(object):
                             self._loss + hps.cov_loss_wt * self._coverage_loss
                         tf.summary.scalar('total_loss', self._total_loss)
 
+                with tf.variable_scope('g_loss'):
+                    self.g_loss = -tf.reduce_sum(
+                        tf.reduce_sum(
+                            tf.one_hot(
+                                tf.to_int32(tf.reshape(y_transpose, [-1])),
+                                self._hps.max_dec_steps,
+                                1.0,
+                                0.0
+                            ) *
+                            tf.reshape(
+                                g_predictions,
+                                [-1, self._hps.max_dec_steps]), 1
+                        ) * tf.reshape(reward, [-1]), 0) / n_sample
+                    # log is removed for WGAN
+
+                    self.g_grad, _ = tf.clip_by_global_norm(
+                        tf.gradients(self.g_loss, self.g_params),
+                        self.grad_clip)
+                    self.g_updates = g_opt.apply_gradients(
+                        zip(self.g_grad, self.g_params))
+
         if hps.mode == "decode":
             # We run decode beam search mode one decoder step at a time
             # log_dists is a singleton list containing shape (batch_size,
@@ -459,6 +476,32 @@ class GenSum(object):
         # minimize
         loss_to_minimize = \
             self._total_loss if self._hps.coverage else self._loss
+        tvars = tf.trainable_variables()
+        gradients = tf.gradients(
+            loss_to_minimize, tvars,
+            aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
+
+        # Clip the gradients
+        with tf.device("/gpu:0"):
+            grads, global_norm = tf.clip_by_global_norm(
+                gradients, self._hps.max_grad_norm)
+
+        # Add a summary
+        tf.summary.scalar('global_norm', global_norm)
+
+        # Apply adagrad optimizer
+        optimizer = tf.train.AdagradOptimizer(
+            self._hps.lr, initial_accumulator_value=self._hps.adagrad_init_acc)
+        with tf.device("/gpu:0"):
+            self._train_op = optimizer.apply_gradients(
+                zip(grads, tvars),
+                global_step=self.global_step, name='train_step')
+
+    def _add_gen_op(self):
+        """Sets self._gen_op, the op to run for generator."""
+        # Take gradients of the trainable variables w.r.t. the loss function to
+        # minimize
+        loss_to_minimize = self.g_loss
         tvars = tf.trainable_variables()
         gradients = tf.gradients(
             loss_to_minimize, tvars,
@@ -649,271 +692,6 @@ class GenSum(object):
 
         return results['ids'], results[
             'probs'], new_states, attn_dists, p_gens, new_coverage
-
-    def rollout_generate(self, batch_size=2):
-
-        n_sample = batch_size
-
-        x = tf.placeholder(tf.int32, [None, n_sample])
-        x_mask = tf.placeholder(self.dtype, [None, n_sample])
-
-        y = tf.placeholder(tf.int32, [None, n_sample])
-
-        give_num = tf.placeholder(tf.int32, shape=[], name='give_num')
-
-        xr = tf.reverse(x, [True, False])
-        xr_mask = tf.reverse(x_mask, [True, False])
-
-        x_flat = tf.reshape(x, [-1])
-        xr_flat = tf.reshape(xr, [-1])
-
-        x_mask_tile = tf.tile(x_mask[:, :, None], [1, 1, self.dim])
-        xr_mask_tile = tf.tile(xr_mask[:, :, None], [1, 1, self.dim])
-
-        vocabtable = tableLookup(
-            self.vocab_size,
-            self.dim_word,
-            scope='vocabtable',
-            reuse_var=reuse_var,
-            prefix='Wemb')
-
-        emb = tf.nn.embedding_lookup(vocabtable, x_flat)
-        emb = tf.reshape(emb, [-1, n_sample, self.dim_word])
-
-        embr = tf.nn.embedding_lookup(vocabtable, xr_flat)
-        embr = tf.reshape(embr, [-1, n_sample, self.dim_word])
-
-        cellForward = GRULayer(
-            self.dim,
-            scope='encoder_f',
-            input_size=self.dim_word,
-            activation=math_ops.tanh,
-            prefix='encoder',
-            reuse_var=reuse_var)
-        proj = dynamic_rnn(
-            cellForward, (emb, x_mask_tile),
-            time_major=True, dtype=tf.float32, scope='encoder_f',
-            swap_memory=True)
-
-        contextForward = proj[0]
-
-        cellBackward = GRULayer(
-            self.dim,
-            scope='encoder_b',
-            input_size=self.dim_word,
-            activation=math_ops.tanh,
-            prefix='encoder_r',
-            reuse_var=reuse_var)
-        projr = dynamic_rnn(
-            cellBackward, (embr, xr_mask_tile),
-            time_major=True, dtype=tf.float32, scope='encoder_b',
-            swap_memory=True)
-
-        contextBackward = projr[0]
-
-        ctx = tf.concat([contextForward, contextBackward[::-1]], 2)
-
-        ctx_mean = tf.reduce_sum(
-            tf.multiply(ctx, x_mask[:, :, None]), 0) / tf.reduce_sum(
-                x_mask, 0)[:, None]
-
-        init_state = FCLayer(
-            ctx_mean,
-            self.dim*2,
-            self.dim,
-            is_3d=False,
-            activation=math_ops.tanh,
-            reuse_var=reuse_var,
-            scope='ff_state',
-            prefix='ff_state',
-            precision=self.precision)
-
-        cellDecoder_s = GRUCondLayer(
-            self.dim,
-            ctx,
-            scope='decoder',
-            context_mask=x_mask,
-            input_size=self.dim_word,
-            prefix='decoder',
-            precision=self.precision,
-            reuse_var=reuse_var)
-
-        cellDecoder_s.set_pctx_()
-
-        sample_len = self.max_leng
-
-        y_sample = tensor_array_ops.TensorArray(
-            dtype=tf.int32,
-            size=sample_len,
-            dynamic_size=True,
-            infer_shape=True)
-
-        y_index = tensor_array_ops.TensorArray(
-            dtype=tf.int32,
-            size=sample_len,
-            dynamic_size=True,
-            infer_shape=True)
-
-        y_index = y_index.unstack(y)
-
-        def recurrency_given(i, y, emb_y, given_num, init_state, y_sample):
-            with tf.variable_scope('decoder'):
-                proj_y = cellDecoder_s(
-                    (emb_y, tf.ones([n_sample, self.dim])), init_state)
-
-            next_state = tf.slice(proj_y[0], [0, 0], [n_sample, self.dim])
-            ctxs = tf.slice(proj_y[0], [0, self.dim], [n_sample, self.dim * 2])
-
-            logit_rnn = FCLayer(
-                next_state,
-                self.dim,
-                self.dim_word,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit_lstm',
-                prefix='ff_logit_lstm',
-                precision=self.precision)
-            logit_prev = FCLayer(
-                emb_y,
-                self.dim_word,
-                self.dim_word,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit_prev',
-                prefix='ff_logit_prev',
-                precision=self.precision)
-            logit_ctx = FCLayer(
-                ctxs,
-                self.dim*2,
-                self.dim_word,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit_ctx',
-                prefix='ff_logit_ctx',
-                precision=self.precision)
-
-            logit = tf.tanh(logit_rnn + logit_prev + logit_ctx)
-            logit = FCLayer(
-                logit,
-                self.dim_word,
-                self.vocab_size,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit',
-                prefix='ff_logit',
-                precision=self.precision)
-            logit = tf.reshape(logit, [-1, self.vocab_size])
-
-            next_y = y_index.read(i)
-            next_y_e = next_y[:, None]
-            next_emb = tf.nn.embedding_lookup(vocabtable, next_y)
-            y_sample = y_sample.write(i, next_y)
-
-            return i+1, next_y_e, next_emb, give_num, next_state, y_sample
-
-        def recurrency(i, y, emb_y, give_num, init_state, y_sample):
-
-            # print('the dtype of i is ', i.dtype)
-            # print('the shape of y is ', y.dtype)
-            with tf.variable_scope('decoder'):
-                proj_y = cellDecoder_s(
-                    (emb_y, tf.ones([n_sample, self.dim])),
-                    init_state)
-
-            next_state = tf.slice(proj_y[0], [0, 0], [n_sample, self.dim])
-            ctxs = tf.slice(proj_y[0], [0, self.dim], [n_sample, self.dim * 2])
-
-            logit_rnn = FCLayer(
-                next_state,
-                self.dim,
-                self.dim_word,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit_lstm',
-                prefix='ff_logit_lstm',
-                precision=self.precision)
-            logit_prev = FCLayer(
-                emb_y,
-                self.dim_word,
-                self.dim_word,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit_prev',
-                prefix='ff_logit_prev',
-                precision=self.precision)
-            logit_ctx = FCLayer(
-                ctxs,
-                self.dim*2,
-                self.dim_word,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit_ctx',
-                prefix='ff_logit_ctx',
-                precision=self.precision)
-            logit = tf.tanh(logit_rnn + logit_prev + logit_ctx)
-            logit = FCLayer(
-                logit,
-                self.dim_word,
-                self.vocab_size,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit',
-                prefix='ff_logit',
-                precision=self.precision)
-            logit = tf.reshape(logit, [-1, self.vocab_size])
-
-            next_probs = tf.nn.softmax(logit)
-            log_probs = tf.log(next_probs)
-            next_sample = tf.multinomial(log_probs, 1)
-
-            next_sample_flat = tf.cast(
-                next_sample, tf.int32)  # convert to tf.int32
-            next_sample_squeeze = tf.squeeze(next_sample_flat, [1])
-
-            y_sample = y_sample.write(i, next_sample_squeeze)
-            next_emb = tf.nn.embedding_lookup(
-                self.vocabtable, next_sample_squeeze)
-
-            return (
-                i+1, next_sample_flat, next_emb, give_num, next_state, y_sample)
-
-        y0 = tf.zeros([n_sample, self.dim_word])
-
-        i, y_out, emb_y, give_num_out, init_state, y_sample = tf.while_loop(
-            cond=lambda i, _1, _2, give_num, _4, _5: i < give_num,
-            body=recurrency_given,
-            loop_vars=(tf.constant(0, dtype=tf.int32),
-                       tf.constant(
-                           -1, shape=[n_sample, 1],
-                           dtype=tf.int32),
-                       y0, give_num, init_state, y_sample),
-            shape_invariants=(tf.TensorShape(None),
-                              tf.TensorShape([n_sample, 1]),
-                              y0.get_shape(),
-                              give_num.get_shape(),
-                              tf.TensorShape([None, self.dim]),
-                              tf.TensorShape(None)))
-
-        _, _, _, _, _, y_sample = tf.while_loop(
-            cond=lambda i, _1, _2, _3, _4, _5: i < self.max_leng,
-            body=recurrency,
-            loop_vars=(i, y_out, emb_y, give_num_out, init_state, y_sample),
-            shape_invariants=(i.get_shape(),
-                              tf.TensorShape([n_sample, 1]),
-                              emb_y.get_shape(),
-                              give_num.get_shape(),
-                              tf.TensorShape([None, self.dim]),
-                              tf.TensorShape(None)))
-
-        y_sample = y_sample.stack()
-
-        self.roll_x = x
-        self.roll_x_mask = x_mask
-        self.roll_y = y
-        self.roll_give_num = give_num
-        self.roll_y_sample = y_sample
-
-        return x, y, give_num, y_sample
 
 
 def _mask_and_avg(values, padding_mask):

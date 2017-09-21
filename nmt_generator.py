@@ -1513,22 +1513,6 @@ class GenNmt(object):
                 output = self.sess.run(self.roll_y_sample, feed_dict=feed)
 
                 output = output * y_sample_mask
-                # print('the shape of the y_sample is ', y_sample.shape)
-                # print('the shape of output is ', output.shape)
-                #
-                # samper_str = print_string('y', y_sample[:,0],
-                # self.worddicts_r) output_str = print_string('y', output[:,0],
-                # self.worddicts_r)
-                #
-                # samper_str_2 = print_string('y', y_sample[:,1],
-                # self.worddicts_r) output_str_2 = print_string('y',
-                # output[:,1], self.worddicts_r)
-                # #print('i is %d give_num is %d' %(i, give_num))
-                #  print samper_str
-                #  print output_str
-
-                # print samper_str_2
-                # print output_str_2
 
                 feed = {
                     discriminator.dis_input_x: output,

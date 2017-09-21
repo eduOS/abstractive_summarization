@@ -199,16 +199,8 @@ def gen_train_iter(
         print('Seen ', ExampleNum, 'generator samples. Time cost is ', TimeCost)
 
 
-def gen_force_train_iter(
-    source_data,
-    target_data,
-    reshuffle,
-    vocab,
-    vocab_size,
-    batch_size,
-    max_len_s,
-    max_leng,
-):
+def gen_force_train_iter(source_data, target_data, reshuffle, vocab,
+                         vocab_size, batch_size, max_len_s, max_leng):
     iter_num = 0
     while True:
         if reshuffle:
@@ -378,27 +370,15 @@ def norm_weight(nin, nout=None, scale=0.01, ortho=True, precision='float32'):
     return W.astype(precision)
 
 
-def tableLookup(
-        vocab_size,
-        embedding_size,
-        scope="tableLookup",
-        init_device='/cpu:0',
-        reuse_var=False,
-        prefix='tablelookup'):
-
-    if not scope:
-        scope = tf.get_variable_scope()
+def tableLookup(vocab_size,
+                embedding_size, scope="tableLookup", init_device='/cpu:0'):
 
     with tf.variable_scope(scope):
-        if not reuse_var:
-            with tf.device(init_device):
-                embeddings_init = norm_weight(vocab_size, embedding_size)
-                embeddings = tf.get_variable(
-                    'embeddings', shape=[vocab_size, embedding_size],
-                    initializer=tf.constant_initializer(embeddings_init))
-        else:
-            tf.get_variable_scope().reuse_variables()
-            embeddings = tf.get_variable('embeddings')
+        with tf.device(init_device):
+            embeddings_init = norm_weight(vocab_size, embedding_size)
+            embeddings = tf.get_variable(
+                'embeddings', shape=[vocab_size, embedding_size],
+                initializer=tf.constant_initializer(embeddings_init))
     return embeddings
 
 

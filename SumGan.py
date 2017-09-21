@@ -15,6 +15,8 @@ from share_function import FlushFile
 from share_function import prepare_gan_dis_data
 from share_function import prepare_sentence_to_maxlen
 from share_function import deal_generated_y_sentence
+from attention_decoder import attention_decoder
+from decode import BeamSearchDecoder
 
 from tensorflow.python.platform import tf_logging as logging
 from data import Vocab
@@ -511,8 +513,8 @@ def main(argv):  # NOQA
             print('train the model and build the generate')
             training_model_hps = hps
             training_model_hps = training_model_hps._replace(mode="train")
-            model = GenSum(training_model_hps, vocab)
-            setup_training(model, batcher)
+            generator = GenSum(training_model_hps, vocab)
+            setup_training(generator, batcher)
             print('done')
 
         elif is_decode:
@@ -520,8 +522,8 @@ def main(argv):  # NOQA
             decode_model_hps = hps
             decode_model_hps = decode_model_hps._replace(mode="decode")
             decode_model_hps = decode_model_hps._replace(max_dec_steps=1)
-            model = GenSum(decode_model_hps, vocab)
-            decoder = BeamSearchDecoder(model, batcher, vocab)
+            generator = GenSum(decode_model_hps, vocab)
+            decoder = BeamSearchDecoder(generator, batcher, vocab)
             decoder.decode()
             print('done')
             return 0
@@ -531,8 +533,8 @@ def main(argv):  # NOQA
             print('build the generate without training')
             build_graph_hps = hps
             build_graph_hps = build_graph_hps._replace(mode="train")
-            model = GenSum(build_graph_hps, vocab)
-            model.build_graph()
+            generator = GenSum(build_graph_hps, vocab)
+            generator.build_graph()
 
 # ----------- pretraining the discriminator -----------
 
@@ -614,8 +616,10 @@ def main(argv):  # NOQA
             generate_num = FLAGS.generate_num
             bias_num = FLAGS.bias_num
             teacher_forcing = FLAGS.teacher_forcing
+            update_rate = FLAGS.update_rate
 
             print('reinforcement training begin...')
+            decoder = BeamSearchDecoder(generator, batcher, vocab)
 
             for gan_iter in range(gan_total_iter_num):
 
@@ -631,33 +635,19 @@ def main(argv):  # NOQA
                     max_dec_steps
                 )
 
+                rollout = ROLLOUT(generator, update_rate)
                 print('finetune the generator ...')
                 for gen_iter in range(gan_gen_iter_num):
 
                     x, y_ground, _ = next(gen_train_it)
-                    x_to_maxlen = prepare_sentence_to_maxlen(x, max_enc_steps)
+                    y_sample_out = generator.generate(x)
 
-                    x, x_mask, y_ground, y_ground_mask = prepare_data(
-                        x, y_ground, max_enc_steps=max_enc_steps,
-                        max_dec_steps=max_dec_steps, vocab_size=vocab_size
-                    )
-                    y_sample_out = generator.generate_step(x, x_mask)
-
-                    y_input, y_input_mask = deal_generated_y_sentence(
-                        y_sample_out, generator.vocab, precision=precision)
-                    rewards = generator.get_reward(
-                        x, x_mask, x_to_maxlen, y_input, y_input_mask,
-                        roll_num, discriminator, bias_num=bias_num)
+                    rewards = rollout.get_reward(
+                        sess, y_sample_out, rollout_num, discriminator)
+                    feed = {generator.x: y_sample_out, generator.rewards: rewards}
+                    _ = sess.run(generator.g_updates, feed_dict=feed)
                     print('the reward is ', rewards)
-                    loss = generator.generate_step_and_update(
-                        x, x_mask, y_input, rewards)
-                    if gen_iter % gan_dispFreq == 0:
-                        print(
-                            'the %d iter, seen %d examples, loss is %f ' % (
-                                gen_iter, (
-                                    (gan_iter) * gan_gen_iter_num + gen_iter + 1
-                                ), loss)
-                        )
+                    rollout.update_params()
                     if gen_iter % gan_saveFreq == 0:
                         generator.saver.save(
                             generator.sess, generator.saveto)

@@ -84,49 +84,31 @@ class BeamSearchDecoder(object):
             if not os.path.exists(self._rouge_dec_dir):
                 os.mkdir(self._rouge_dec_dir)
 
+    def generate(self, batch):
+        if batch is None:
+            return
+
+        # Run beam search to get best Hypothesis
+        best_hyp = beam_search.run_beam_search(
+            self._sess, self._model, self._vocab, batch)
+
+        # Extract the output ids from the hypothesis and convert back to
+        # words
+        output_ids = [int(t) for t in best_hyp.tokens[1:]]
+        return output_ids
+
     def decode(self):
         """Decode examples until data is exhausted (if FLAGS.single_pass) and
         return, or decode indefinitely, loading latest checkpoint at regular
-    intervals"""
+        intervals"""
         t0 = time.time()
         counter = 0
         while True:
             batch = self._batcher.next_batch()
             # 1 example repeated across batch
-            if batch is None:
-                # finished decoding dataset in single_pass mode
-                assert FLAGS.single_pass, (
-                    "Dataset exhausted, but we are not in single_pass mode")
-                tf.logging.info(
-                    "Decoder has finished reading dataset for single_pass.")
-                tf.logging.info(
-                    "Output has been saved in %s and %s. \
-                    Now starting ROUGE eval...",
-                    self._rouge_ref_dir,
-                    self._rouge_dec_dir)
-                # results_dict = rouge_eval(
-                #     self._rouge_ref_dir, self._rouge_dec_dir)
-                # rouge_log(results_dict, self._decode_dir)
-                return
 
-            original_article = batch.original_articles[0]  # string
-            original_abstract = batch.original_abstracts[0]  # string
-            original_abstract_sents = batch.original_abstracts_sents[0]
-            # list of strings
+            output_ids = self.generate(batch)
 
-            article_withunks = data.show_art_oovs(
-                original_article, self._vocab)  # string
-            abstract_withunks = data.show_abs_oovs(
-                original_abstract, self._vocab,
-                (batch.art_oovs[0] if FLAGS.pointer_gen else None))  # string
-
-            # Run beam search to get best Hypothesis
-            best_hyp = beam_search.run_beam_search(
-                self._sess, self._model, self._vocab, batch)
-
-            # Extract the output ids from the hypothesis and convert back to
-            # words
-            output_ids = [int(t) for t in best_hyp.tokens[1:]]
             decoded_words = data.outputids2words(
                 output_ids, self._vocab,
                 (batch.art_oovs[0] if FLAGS.pointer_gen else None))
