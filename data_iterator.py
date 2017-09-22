@@ -142,6 +142,7 @@ class genTextIterator:
         self.batch_size = batch_size
         self.maxlen = maxlen
         self.vocab = vocab
+        self.vocab_size = vocab_size
 
         self.end_of_data = False
 

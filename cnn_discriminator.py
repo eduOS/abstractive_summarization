@@ -7,6 +7,7 @@ from share_function import average_clip_gradient_by_value
 from share_function import dis_three_length_prepare
 from share_function import linear
 from share_function import Vocab
+from tensorflow.python.client import timeline
 
 import time
 import numpy
@@ -653,16 +654,16 @@ class DisCNN(object):
             print("start running session")
             run_metadata = tf.RunMetadata()
             _, loss_out, accuracy_out, grads_out = self.sess.run(
-                [self.train_optm, self.train_loss,
-                 self.train_accuracy, self.train_grads_and_vars],
-                feed_dict=myFeed_dict)
-            self.writer.add_run_metadata(run_metadata, 'step%d', i)
+                [self.train_optm, self.train_loss, self.train_accuracy, self.train_grads_and_vars],
+                feed_dict=myFeed_dict,
+                options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE), run_metadata=run_metadata)
+            trace = timeline.Timeline(step_stats=run_metadata.step_stats)
+            self.writer.write(trace.generate_chrome_trace_format())
+            self.writer.flush()
 
             if uidx == 1:
-                x_variable = [  # NOQA
-                    self.sess.run(
-                        tf.assign(x, tf.clip_by_value(x, -1.0, 1.0))
-                    ) for x in tf.trainable_variables() if self.scope in x.name]
+                x_variable = [self.sess.run(tf.assign(x, tf.clip_by_value(x, -1.0, 1.0)))
+                              for x in tf.trainable_variables() if self.scope in x.name]
                 # clip the value into -0.01 to 0.01
 
             # print('ypred_for_auc is ', ypred_out)
