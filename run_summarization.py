@@ -212,9 +212,7 @@ def setup_training(model, batcher):
     with default_device:
         model.build_graph()  # build the graph
         if FLAGS.convert_to_coverage_model:
-            assert FLAGS.coverage, (
-                "To convert your non-coverage model to a coverage model, run"
-                "with convert_to_coverage_model=True and coverage=True")
+            assert FLAGS.coverage, ("To convert your non-coverage model to a coverage model, run with convert_to_coverage_model=True and coverage=True")
             convert_to_coverage_model()
         # only keep 1 checkpoint at a time
         saver = tf.train.Saver(max_to_keep=1)
@@ -230,15 +228,13 @@ def setup_training(model, batcher):
                              global_step=model.global_step)
     summary_writer = sv.summary_writer
     tf.logging.info("Preparing or waiting for session...")
-    sess_context_manager = sv.prepare_or_wait_for_session(
-        config=util.get_config())
+    sess_context_manager = sv.prepare_or_wait_for_session(config=util.get_config())
     tf.logging.info("Created session.")
     try:
         # this is an infinite loop until interrupted
         run_training(model, batcher, sess_context_manager, sv, summary_writer)
     except KeyboardInterrupt:
-        tf.logging.info(
-            "Caught keyboard interrupt on worker. Stopping supervisor...")
+        tf.logging.info("Caught keyboard interrupt on worker. Stopping supervisor...")
         sv.stop()
 
 

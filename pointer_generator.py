@@ -29,7 +29,7 @@ from tensorflow.contrib.tensorboard.plugins import projector
 FLAGS = tf.app.flags.FLAGS
 
 
-class GenSum(object):
+class PointerGenerator(object):
     """A class to represent a sequence-to-sequence model for text summarization.
     Supports both baseline mode, pointer-generator mode, and coverage"""
 
@@ -43,34 +43,19 @@ class GenSum(object):
         hps = self._hps
 
         # encoder part
-        self._enc_batch = tf.placeholder(
-            tf.int32, [hps.batch_size, None],
-            name='enc_batch')
-        self._enc_lens = tf.placeholder(
-            tf.int32, [hps.batch_size],
-            name='enc_lens')
+        self._enc_batch = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch')
+        self._enc_lens = tf.placeholder(tf.int32, [hps.batch_size], name='enc_lens')
         if FLAGS.pointer_gen:
-            self._enc_batch_extend_vocab = tf.placeholder(
-                tf.int32, [hps.batch_size, None],
-                name='enc_batch_extend_vocab')
-            self._max_art_oovs = tf.placeholder(
-                tf.int32, [], name='max_art_oovs')
+            self._enc_batch_extend_vocab = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch_extend_vocab')
+            self._max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
 
         # decoder part
-        self._dec_batch = tf.placeholder(
-            tf.int32, [hps.batch_size, hps.max_dec_steps],
-            name='dec_batch')
-        self._target_batch = tf.placeholder(
-            tf.int32, [hps.batch_size, hps.max_dec_steps],
-            name='target_batch')
-        self._padding_mask = tf.placeholder(
-            tf.float32, [hps.batch_size, hps.max_dec_steps],
-            name='padding_mask')
+        self._dec_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='dec_batch')
+        self._target_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='target_batch')
+        self._padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_dec_steps], name='padding_mask')
 
         if hps.mode == "decode" and hps.coverage:
-            self.prev_coverage = tf.placeholder(
-                tf.float32, [hps.batch_size, None],
-                name='prev_coverage')
+            self.prev_coverage = tf.placeholder(tf.float32, [hps.batch_size, None], name='prev_coverage')
             # so this need not to be reloaded and taken gradient hps
 
     def _make_feed_dict(self, batch, just_enc=False):
@@ -86,8 +71,7 @@ class GenSum(object):
         feed_dict[self._enc_batch] = batch.enc_batch
         feed_dict[self._enc_lens] = batch.enc_lens
         if FLAGS.pointer_gen:
-            feed_dict[self._enc_batch_extend_vocab] = \
-                batch.enc_batch_extend_vocab
+            feed_dict[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
             feed_dict[self._max_art_oovs] = batch.max_art_oovs
             # the unique feature for the pointer gen is the
             # enc_batch_extend_vocab and the max_art_oovs
@@ -116,17 +100,10 @@ class GenSum(object):
             ([batch_size,hidden_dim],[batch_size,hidden_dim])
         """
         with tf.variable_scope('encoder'):
-            cell_fw = tf.contrib.rnn.LSTMCell(
-                self._hps.hidden_dim,
-                initializer=self.rand_unif_init,
-                state_is_tuple=True)
-            cell_bw = tf.contrib.rnn.LSTMCell(
-                self._hps.hidden_dim,
-                initializer=self.rand_unif_init,
-                state_is_tuple=True)
+            cell_fw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
+            cell_bw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
             (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
-                cell_fw, cell_bw, encoder_inputs, dtype=tf.float32,
-                sequence_length=seq_len, swap_memory=True)
+                cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
             # concatenate the forwards and backwards states
             encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
         return encoder_outputs, fw_st, bw_st
@@ -318,24 +295,15 @@ class GenSum(object):
         hps = self._hps
         vsize = self._vocab.size()  # size of the vocabulary
 
-        self.embedding = tableLookup(
-            self._vocab.size(),
-            self.dim_word,
-            scope='vocabtable')
+        self.embedding = tableLookup(self._vocab.size(), self.dim_word, scope='vocabtable')
 
         with tf.variable_scope('seq2seq'):
             # Some initializers
-            self.rand_unif_init = tf.random_uniform_initializer(
-                -hps.rand_unif_init_mag, hps.rand_unif_init_mag, seed=123)
-            self.trunc_norm_init = tf.truncated_normal_initializer(
-                stddev=hps.trunc_norm_init_std)
+            self.rand_unif_init = tf.random_uniform_initializer(-hps.rand_unif_init_mag, hps.rand_unif_init_mag, seed=123)
+            self.trunc_norm_init = tf.truncated_normal_initializer(stddev=hps.trunc_norm_init_std)
 
-            emb_enc_inputs = tf.nn.embedding_lookup(
-                self.embedding, self._enc_batch)
-            emb_dec_inputs = [
-                tf.nn.embedding_lookup(
-                    self.embedding, x) for x in tf.unstack(
-                        self._dec_batch, axis=1)]
+            emb_enc_inputs = tf.nn.embedding_lookup(self.embedding, self._enc_batch)
+            emb_dec_inputs = [tf.nn.embedding_lookup(self.embedding, x) for x in tf.unstack(self._dec_batch, axis=1)]
 
             # Add the encoder.
             enc_outputs, fw_st, bw_st = self._add_encoder(
@@ -666,10 +634,7 @@ class GenSum(object):
 
         # Convert results['states'] (a single LSTMStateTuple) into a list of
         # LSTMStateTuple -- one for each hypothesis
-        new_states = [
-            tf.contrib.rnn.LSTMStateTuple(
-                results['states'].c[i, :], results['states'].h[i, :])
-            for i in xrange(beam_size)] # NOQA
+        new_states = [tf.contrib.rnn.LSTMStateTuple(results['states'].c[i, :], results['states'].h[i, :]) for i in range(beam_size)]
 
         # Convert singleton list containing a tensor to a list of k arrays
         assert len(results['attn_dists']) == 1
@@ -680,7 +645,7 @@ class GenSum(object):
             assert len(results['p_gens']) == 1
             p_gens = results['p_gens'][0].tolist()
         else:
-            p_gens = [None for _ in xrange(beam_size)]  # NOQA
+            p_gens = [None for _ in range(beam_size)]
 
         # Convert the coverage tensor to a list length k containing the coverage
         # vector for each hypothesis
@@ -688,10 +653,9 @@ class GenSum(object):
             new_coverage = results['coverage'].tolist()
             assert len(new_coverage) == beam_size
         else:
-            new_coverage = [None for _ in xrange(beam_size)]  # NOQA
+            new_coverage = [None for _ in range(beam_size)]
 
-        return results['ids'], results[
-            'probs'], new_states, attn_dists, p_gens, new_coverage
+        return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
 
 
 def _mask_and_avg(values, padding_mask):
