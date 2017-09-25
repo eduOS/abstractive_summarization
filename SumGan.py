@@ -317,6 +317,18 @@ tf.app.flags.DEFINE_boolean(
     for the coverage training stage.')
 
 
+def generate_samples(sess, trainable_model, batch_size, generated_num, output_file):
+    # Generate Samples
+    generated_samples = []
+    for _ in range(int(generated_num / batch_size)):
+        generated_samples.extend(trainable_model.generate(sess))
+
+    with open(output_file, 'w') as fout:
+        for poem in generated_samples:
+            buffer = ' '.join([str(x) for x in poem]) + '\n'
+            fout.write(buffer)
+
+
 def run_training(model, batcher, sess_context_manager, sv, summary_writer):
     """Repeatedly runs training iterations, logging loss to screen and writing
     summaries"""
@@ -401,7 +413,7 @@ def convert_to_coverage_model():
     exit()
 
 
-def setup_training(generator):
+def setup_training(max_to_keep):
     """Does setup before starting training (run_training)"""
     train_dir = os.path.join(FLAGS.log_root, "train")
     if not os.path.exists(train_dir):
@@ -409,12 +421,11 @@ def setup_training(generator):
 
     default_device = tf.device('/gpu:0')
     with default_device:
-        generator.build_graph()  # build the graph
         if FLAGS.convert_to_coverage_model:
             assert FLAGS.coverage, "To convert your non-coverage model to a coverage model, run with convert_to_coverage_model=True and coverage=True"
             convert_to_coverage_model()
         # only keep 1 checkpoint at a time
-        saver = tf.train.Saver(max_to_keep=3)
+        saver = tf.train.Saver(max_to_keep=max_to_keep)
 
     sv = tf.train.Supervisor(logdir=train_dir, is_chief=True, saver=saver, summary_op=None, save_summaries_secs=60, save_model_secs=60, global_step=generator.global_step)
     summary_writer = sv.summary_writer
@@ -422,19 +433,20 @@ def setup_training(generator):
     sess_context_manager = sv.prepare_or_wait_for_session(config=util.get_config())
     tf.logging.info("Created session.")
 
+    ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
+    if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
+        print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+        model.saver.restore(session, ckpt.model_checkpoint_path)
+    else:
+        print("Created model with fresh parameters.")
+        session.run(tf.global_variables_initializer())
+        for ld in model.loaders:
+            ld.restore(session, tf.train.get_checkpoint_state("pretrained").model_checkpoint_path)
+    return generator, discriminator
+
 
 def main(argv):
-    # -----------   create the session  -----------
-    sess = tf.Session(config=util.get_config())
     tf.set_random_seed(111)  # a seed value for randomness
-
-    # -----------  pretraining  the generator -----------
-    train_data_source = FLAGS.train_data_source
-    train_data_target = FLAGS.train_data_target
-
-    gan_gen_batch_size = FLAGS.gan_gen_batch_size
-
-    vocab = Vocab(FLAGS.vocab_path, FLAGS.vocab_size)
 
     if FLAGS.segment is not True:
         hps = hps._replace(max_enc_steps=110)
@@ -445,9 +457,15 @@ def main(argv):
 
     # Create a batcher object that will create minibatches of data
     batcher = Batcher(FLAGS.data_path, vocab, hps, single_pass=FLAGS.single_pass)
+    # TODO change to pass number
+
+    vocab = Vocab(FLAGS.vocab_path, FLAGS.vocab_size)
 
     if "train" in FLAGS.mode:
-        # --------------- build session ---------------
+        # --------------- build graph ---------------
+        graph = get_graph()
+
+        with tf.Graph():
         hparam_gen = [
             'mode',
             'adagrad_init_acc',
@@ -472,72 +490,82 @@ def main(argv):
 
         hps = namedtuple("HParamsGen", hps_dict.keys())(**hps_dict)
         generator = PointerGenerator(hps, vocab)
+        generator.build_graph()
 
-        dis_max_epoches = FLAGS.dis_epoches
-        dis_dispFreq = FLAGS.dis_dispFreq
-        dis_saveFreq = FLAGS.dis_saveFreq
-        dis_devFreq = FLAGS.dis_devFreq
-        dis_batch_size = FLAGS.dis_batch_size
-        dis_saveto = FLAGS.dis_saveto
-        dis_reshuffle = FLAGS.dis_reshuffle
-        max_dec_steps = FLAGS.max_dec_steps
-        max_enc_steps = FLAGS.max_enc_steps
-        dis_positive_data = FLAGS.dis_positive_data
-        dis_negative_data = FLAGS.dis_negative_data
-        dis_source_data = FLAGS.dis_source_data
-        dis_dev_positive_data = FLAGS.dis_dev_positive_data
-        dis_dev_negative_data = FLAGS.dis_dev_negative_data
-        dis_dev_source_data = FLAGS.dis_dev_source_data
-        dis_reload = FLAGS.dis_reload
+        hparam_gen = [
+            'mode',
+            'adagrad_init_acc',
+            'batch_size',
+            'cov_loss_wt',
+            'coverage',
+            'emb_dim',
+            'hidden_dim',
+            'lr',
+            'max_dec_steps',
+            'max_grad_norm',
+            'pointer_gen',
+            'rand_unif_init_mag',
+            'trunc_norm_init_std',
+            'max_enc_steps',
+        ]
 
-        filter_sizes_s = [i for i in range(1, max_enc_steps, 4)]
-        num_filters_s = [(100 + i*10) for i in range(1, max_enc_steps, 4)]
-        dis_filter_sizes = [i for i in range(1, max_dec_steps, 4)]
-        dis_num_filters = [(100 + i*10) for i in range(1, max_dec_steps, 4)]
+        hps_dict = {}
+        for key, val in FLAGS.__flags.iteritems():  # for each flag
+            if key in hparam_gen:  # if it's in the list
+                hps_dict[key] = val  # add it to the dict
 
-        discriminator = DisCNN(
-            sess=sess,
-            max_enc_steps=max_enc_steps,
-            max_dec_steps=max_dec_steps,
-            num_classes=2,
-            vocab=vocab,
-            batch_size=dis_batch_size,
-            dim_word=FLAGS.emb_dim,
-            filter_sizes=dis_filter_sizes,
-            num_filters=dis_num_filters,
-            filter_sizes_s=filter_sizes_s,
-            num_filters_s=num_filters_s,
-            positive_data=dis_positive_data,
-            negative_data=dis_negative_data,
-            source_data=dis_source_data,
-            dev_positive_data=dis_dev_positive_data,
-            dev_negative_data=dis_dev_negative_data,
-            dev_source_data=dis_dev_source_data,
-            max_epoches=dis_max_epoches,
-            dispFreq=dis_dispFreq,
-            saveFreq=dis_saveFreq,
-            devFreq=dis_devFreq,
-            saveto=dis_saveto,
-            reload_mod=dis_reload,
-            clip_c=FLAGS.max_grad_norm,
-            optimizer='rmsprop',
-            reshuffle=dis_reshuffle,
-            scope='discnn')
+        hps = namedtuple("HParamsGen", hps_dict.keys())(**hps_dict)
 
+        discriminator = DisCNN(hps, vocab)
+        discriminator.build_graph()
 
         # --------------- train generator ---------------
-        generator_training_model_hps = hps
-        sess = setup_training()
+        if "gen" in mode:
+            generator_training_model_hps = hps
+            train_generator()
 
         # --------------- train discriminator ---------------
-        try:
-            # this is an infinite loop until interrupted
-            run_training(generator, batcher, sess_context_manager, sv, summary_writer)
-        except KeyboardInterrupt:
-            tf.logging.info("Caught keyboard interrupt on worker. Stopping supervisor...")
-            sv.stop()
+        elif "dis" in mode:
+            train_discriminator()
 
         # --------------- train GAN ---------------
+        else:
+            rollout = ROLLOUT(generator, 0.8)
+            for i_gan in range(gan_iter):
+                # Train the generator for one step
+                for it in range(gan_gen_iter):
+                    samples = generator.generate(sess)
+                    rewards = rollout.get_reward(sess, samples, 16, discriminator)
+                    feed = {generator.x: samples, generator.rewards: rewards}
+                    _ = sess.run(generator.g_updates, feed_dict=feed)
+
+                # Test
+                if i_gan % 5 == 0 or i_gan == gan_iter - 1:
+                    generate_samples(sess, generator, gan_iter, generated_num, eval_file)
+                    likelihood_data_loader.create_batches(eval_file)
+                    test_loss = target_loss(sess, target_lstm, likelihood_data_loader)
+                    buffer = 'epoch:\t' + str(total_batch) + '\tnll:\t' + str(test_loss) + '\n'
+                    print('total_batch: ', total_batch, 'test_loss: ', test_loss)
+                    log.write(buffer)
+
+                # Update roll-out parameters
+                rollout.update_params()
+
+                # Train the discriminator
+                for _ in range(gan_dis_iter):
+                    generate_samples(sess, generator, BATCH_SIZE, generated_num, negative_file)
+                    dis_data_loader.load_train_data(positive_file, negative_file)
+
+                    for _ in range(3):
+                        dis_data_loader.reset_pointer()
+                        for it in xrange(dis_data_loader.num_batch):
+                            x_batch, y_batch = dis_data_loader.next_batch()
+                            feed = {
+                                discriminator.input_x: x_batch,
+                                discriminator.input_y: y_batch,
+                                discriminator.dropout_keep_prob: dis_dropout_keep_prob
+                            }
+                            _ = sess.run(discriminator.train_op, feed)
 
     elif FLAGS.mode == "decode":
         decode_model_hps = hps
@@ -546,187 +574,3 @@ def main(argv):
         generator = PointerGenerator(decode_model_hps, vocab)
         decoder = BeamSearchDecoder(generator, batcher, vocab)
         decoder.decode()
-
-    elif FLAGS.mode == "eval":
-        pass
-
-    with tf.variable_scope('generator'):
-        if is_generator_train:
-            print('train the model and build the generate')
-            training_model_hps = hps
-            training_model_hps = training_model_hps._replace(mode="train")
-            generator = PointerGenerator(training_model_hps, vocab)
-            print('done')
-
-        elif is_decode:
-            print('generator decoding')
-            decode_model_hps = hps
-            decode_model_hps = decode_model_hps._replace(mode="decode")
-            decode_model_hps = decode_model_hps._replace(max_dec_steps=1)
-            generator = PointerGenerator(decode_model_hps, vocab)
-            decoder = BeamSearchDecoder(generator, batcher, vocab)
-            decoder.decode()
-            print('done')
-            return 0
-
-        else:
-            # draw the graph of the generator
-            print('build the generate without training')
-            build_graph_hps = hps
-            build_graph_hps = build_graph_hps._replace(mode="train")
-            generator = PointerGenerator(build_graph_hps, vocab)
-            generator.build_graph()
-
-    # ----------- pretraining the discriminator -----------
-
-    if is_discriminator_train or is_gan_train:
-
-        dis_max_epoches = FLAGS.dis_epoches
-        dis_dispFreq = FLAGS.dis_dispFreq
-        dis_saveFreq = FLAGS.dis_saveFreq
-        dis_devFreq = FLAGS.dis_devFreq
-        dis_batch_size = FLAGS.dis_batch_size
-        dis_saveto = FLAGS.dis_saveto
-        dis_reshuffle = FLAGS.dis_reshuffle
-        max_dec_steps = FLAGS.max_dec_steps
-        max_enc_steps = FLAGS.max_enc_steps
-        dis_positive_data = FLAGS.dis_positive_data
-        dis_negative_data = FLAGS.dis_negative_data
-        dis_source_data = FLAGS.dis_source_data
-        dis_dev_positive_data = FLAGS.dis_dev_positive_data
-        dis_dev_negative_data = FLAGS.dis_dev_negative_data
-        dis_dev_source_data = FLAGS.dis_dev_source_data
-        dis_reload = FLAGS.dis_reload
-
-        filter_sizes_s = [i for i in range(1, max_enc_steps, 4)]
-        num_filters_s = [(100 + i*10) for i in range(1, max_enc_steps, 4)]
-        dis_filter_sizes = [i for i in range(1, max_dec_steps, 4)]
-        dis_num_filters = [(100 + i*10) for i in range(1, max_dec_steps, 4)]
-
-        discriminator = DisCNN(
-            sess=sess,
-            max_enc_steps=max_enc_steps,
-            max_dec_steps=max_dec_steps,
-            num_classes=2,
-            vocab=vocab,
-            batch_size=dis_batch_size,
-            dim_word=FLAGS.emb_dim,
-            filter_sizes=dis_filter_sizes,
-            num_filters=dis_num_filters,
-            filter_sizes_s=filter_sizes_s,
-            num_filters_s=num_filters_s,
-            positive_data=dis_positive_data,
-            negative_data=dis_negative_data,
-            source_data=dis_source_data,
-            dev_positive_data=dis_dev_positive_data,
-            dev_negative_data=dis_dev_negative_data,
-            dev_source_data=dis_dev_source_data,
-            max_epoches=dis_max_epoches,
-            dispFreq=dis_dispFreq,
-            saveFreq=dis_saveFreq,
-            devFreq=dis_devFreq,
-            saveto=dis_saveto,
-            reload_mod=dis_reload,
-            clip_c=FLAGS.max_grad_norm,
-            optimizer='rmsprop',
-            reshuffle=dis_reshuffle,
-            scope='discnn')
-
-        if is_discriminator_train:
-            print('train the discriminator')
-            discriminator.train()
-            print('done')
-
-        else:
-            print('building the discriminator without training done')
-            print('done')
-
-    #   ----------- Start Reinforcement Training -----------
-        if is_gan_train:
-
-            gan_total_iter_num = FLAGS.gan_total_iter_num
-            gan_gen_iter_num = FLAGS.gan_gen_iter_num
-            gan_dis_iter_num = FLAGS.gan_dis_iter_num
-            gan_gen_reshuffle = FLAGS.gan_gen_reshuffle
-            gan_dis_source_data = FLAGS.gan_dis_source_data
-            gan_dis_positive_data = FLAGS.gan_dis_positive_data
-            gan_dis_negative_data = FLAGS.gan_dis_negative_data
-            gan_dispFreq = FLAGS.gan_dispFreq
-            gan_saveFreq = FLAGS.gan_saveFreq
-            roll_num = FLAGS.rollnum
-            generate_num = FLAGS.generate_num
-            bias_num = FLAGS.bias_num
-            teacher_forcing = FLAGS.teacher_forcing
-            update_rate = FLAGS.update_rate
-
-            print('reinforcement training begin...')
-            decoder = BeamSearchDecoder(generator, batcher, vocab)
-
-            for gan_iter in range(gan_total_iter_num):
-
-                print('reinforcement training for %d epoch' % gan_iter)
-                gen_train_it = gen_force_train_iter(
-                    gan_dis_source_data,
-                    gan_dis_positive_data,
-                    gan_gen_reshuffle,
-                    generator.vocab,
-                    vocab_size,
-                    gan_gen_batch_size,
-                    max_enc_steps,
-                    max_dec_steps
-                )
-
-                rollout = ROLLOUT(generator, update_rate)
-                print('finetune the generator ...')
-                for gen_iter in range(gan_gen_iter_num):
-
-                    x, y_ground, _ = next(gen_train_it)
-                    y_sample_out = generator.generate(x)
-
-                    rewards = rollout.get_reward(sess, y_sample_out, rollout_num, discriminator)
-                    feed = {generator.x: y_sample_out, generator.rewards: rewards}
-                    _ = sess.run(generator.g_updates, feed_dict=feed)
-                    print('the reward is ', rewards)
-                    rollout.update_params()
-                    if gen_iter % gan_saveFreq == 0:
-                        generator.saver.save(generator.sess, generator.saveto)
-                        print('save the parameters when seen %d examples' % ((gan_iter) * gan_gen_iter_num + gan_iter + 1))
-
-                    # teacher force training
-                    if teacher_forcing:
-                        y_ground = prepare_sentence_to_maxlen(numpy.transpose(y_ground), maxlen=max_dec_steps, precision=precision)
-                        y_ground_mask = prepare_sentence_to_maxlen(numpy.transpose(y_ground_mask), maxlen=max_dec_steps, precision=precision)
-                        rewards_ground = numpy.ones_like(y_ground)
-                        rewards_ground = rewards_ground * y_ground_mask
-                        rewards_ground = numpy.transpose(rewards_ground)
-                        print('the reward for ground in teacher forcing is ', rewards_ground)
-                        loss = generator.generate_step_and_update(x, x_mask, y_ground, rewards_ground)
-                        if gen_iter % gan_dispFreq == 0:
-                            print('the %d iter, seen %d ground examples,\ loss is %f ' % (gen_iter, ((gan_iter) * gan_gen_iter_num + gen_iter + 1), loss))
-
-                generator.saver.save(generator.sess, generator.saveto)
-                print('finetune the generator done!')
-
-                print('prepare the gan_dis_data begin ')
-                data_num = prepare_gan_dis_data(train_data_source, train_data_target, gan_dis_source_data, gan_dis_positive_data, num=generate_num, reshuf=True)
-                print('prepare the gan_dis_data done, the num of the gan_dis_data is %d' % data_num)
-
-                print('generator generate and save to %s' % gan_dis_negative_data)
-                generator.generate_and_save(gan_dis_source_data, gan_dis_negative_data, generate_batch=gan_gen_batch_size)
-                print('done!')
-
-                print('finetune the discriminator begin...')
-                discriminator.train(
-                    max_epoch=gan_dis_iter_num,
-                    positive_data=gan_dis_positive_data,
-                    negative_data=gan_dis_negative_data,
-                    source_data=gan_dis_source_data)
-                discriminator.saver.save(discriminator.sess, discriminator.saveto)
-                print('finetune the discriminator done!')
-
-            print('reinforcement training done')
-
-
-if __name__ == '__main__':
-    sys.stdout = FlushFile(sys.stdout)
-    tf.app.run()

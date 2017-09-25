@@ -99,8 +99,7 @@ class Seq2ClassModel(object):
     # Feeds for inputs.
     self.encoder_inputs = []
     for i in xrange(buckets[-1]):  # Last bucket is the biggest one.
-      self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
-                                                name="encoder{0}".format(i)))
+      self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None], name="encoder{0}".format(i)))
 
     # Feeds target
     self.targets = tf.placeholder(tf.int32, shape=[None], name="target")
