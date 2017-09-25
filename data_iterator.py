@@ -116,7 +116,6 @@ class disThreeTextIterator:
                     break
         except IOError:
             print("IOError")
-            raise
             self.end_of_data = True
 
         if len(positive) <= 0 or len(negative) <= 0:
