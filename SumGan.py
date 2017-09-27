@@ -19,302 +19,91 @@ from attention_decoder import attention_decoder
 from decode import BeamSearchDecoder
 from rollout import ROLLOUT
 
-from tensorflow.python.platform import tf_logging as logging
-from data import Vocab
+from res_discriminator import Seq2ClassModel
+from data import VocabD, VocabG
 
-# ------------------------------------- from tfGan
-tf.app.flags.DEFINE_integer(
-    'max_epoches', 1, 'the max epoches for training')
-tf.app.flags.DEFINE_integer('dis_epoches', 2, 'the max epoches for training')
 
-tf.app.flags.DEFINE_integer(
-    'gan_total_iter_num', 1, 'the max epoches for training')
-tf.app.flags.DEFINE_integer(
-    'gan_gen_iter_num', 1, 'the max epoches for training')
-tf.app.flags.DEFINE_integer(
-    'gan_dis_iter_num', 1, 'the max epoches for training')
+tf.app.flags.DEFINE_string('mode', 'train', 'must be one of pretrain_gen/pretrain_dis/train_gan/decode')
+# ------------------------------------- discriminator
 
-tf.app.flags.DEFINE_integer(
-    'dispFreq', 50, 'train for this many minibatches for displaying')
-tf.app.flags.DEFINE_integer(
-    'dis_dispFreq', 1,
-    'train for this many minibatches for displaying discriminator')
-tf.app.flags.DEFINE_integer(
-    'gan_dispFreq', 50,
-    'train for this many minibatches for displaying the gan gen training')
-tf.app.flags.DEFINE_integer(
-    'dis_saveFreq', 100,
-    'train for this many minibatches for displaying discriminator')
-tf.app.flags.DEFINE_integer(
-    'gan_saveFreq', 100,
-    'train for this many minibatches for displaying discriminator')
-tf.app.flags.DEFINE_integer(
-    'dis_devFreq', 100,
-    'train for this many minibatches for displaying discriminator')
-tf.app.flags.DEFINE_integer(
-    'vocab_size', 80000, 'the size of the target vocabulary')
+# Model parameters
+tf.app.flags.DEFINE_integer("dis_hidden_dim", 512, "Size of each model layer.")
+tf.app.flags.DEFINE_integer("num_layers", 2, "Number of layers in the model.")
+tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
+tf.app.flags.DEFINE_integer("dis_vocab_size", 10000, "vocabulary size.")
+tf.app.flags.DEFINE_integer("num_class", 50, "num of output classes.")
+tf.app.flags.DEFINE_string("buckets", "9,12,20,40", "buckets of different lengths")
 
-tf.app.flags.DEFINE_integer(
-    'validFreq', 1000, 'train for this many minibatches for validation')
-tf.app.flags.DEFINE_integer(
-    'saveFreq', 2000, 'train for this many minibatches for saving model')
-tf.app.flags.DEFINE_integer(
-    'sampleFreq', 10000000, 'train for this many minibatches for sampling')
+# Training parameters
+tf.app.flags.DEFINE_float("dis_lr", 0.01, "Learning rate.")
+tf.app.flags.DEFINE_float("lr_decay_factor", 0.5, "Learning rate decays by this much.")
+tf.app.flags.DEFINE_float("dis_max_gradient", 5.0, "Clip gradients to this norm.")
+tf.app.flags.DEFINE_integer("dis_batch_size", 64, "Batch size to use during training.")
+tf.app.flags.DEFINE_boolean("early_stop", False, "Set to True to turn on early stop.")
+tf.app.flags.DEFINE_integer("max_steps", -1, "max number of steps to train")
 
-tf.app.flags.DEFINE_float('l2_r', 0.0001, 'L2 regularization penalty')
+# Misc
+tf.app.flags.DEFINE_string("dis_data_dir", "./js_corpus", "Data directory")
+tf.app.flags.DEFINE_string("train_dir", "./model", "Training directory.")
+tf.app.flags.DEFINE_integer("gpu_id", 0, "Select which gpu to use.")
 
-tf.app.flags.DEFINE_integer(
-    'dis_batch_size', 10,
-    'the size of the minibatch for training discriminator ')
-tf.app.flags.DEFINE_integer(
-    'gen_batch_size', 1, 'the size of the minibatch for training generator ')
-tf.app.flags.DEFINE_integer(
-    'gan_gen_batch_size', 2,
-    'the size of the minibatch for training generator ')
-tf.app.flags.DEFINE_integer(
-    'gan_dis_batch_size', 1,
-    'the size of the minibatch for training generator ')
+# Mode
+tf.app.flags.DEFINE_boolean("interactive_test", False, "Set to True for interactive testing.")
+tf.app.flags.DEFINE_boolean("test", False, "Run a test on the eval set.")
 
-tf.app.flags.DEFINE_integer(
-    'valid_batch_size', 10, 'the size of the minibatch for validation')
-
-tf.app.flags.DEFINE_string('optimizer', 'adadelta', 'the optimizing method')
-
-# tf.app.flags.DEFINE_string(
-#     'saveto', './gen_model/lcsts', 'the file name used to store the model')
-# tf.app.flags.DEFINE_string(
-#     'dis_saveto', './dis_model/lcsts',
-#     'the file name used to store the model of the discriminator')
-
-tf.app.flags.DEFINE_string(
-    'train_data_source', './data_1000w_golden/source_u8.txt.shuf',
-    'the train data set of the soruce side')
-tf.app.flags.DEFINE_string(
-    'train_data_target', './data_1000w_golden/target_u8.txt.shuf',
-    'the train data set of the target side')
-
-tf.app.flags.DEFINE_string(
-    'dis_positive_data', './data_test1000/positive.txt.shuf',
-    'the positive train data set for the discriminator')
-tf.app.flags.DEFINE_string(
-    'dis_negative_data', './data_test1000/negative.txt.shuf',
-    'the negative train data set for the discriminator')
-tf.app.flags.DEFINE_string(
-    'dis_source_data', './data_test1000/source.txt.shuf',
-    'the negative train data set for the discriminator')
-
-tf.app.flags.DEFINE_string(
-    'dis_dev_positive_data', './data_gan_100w_fromZxw/dev_positive_u8.txt',
-    'the positive train data set for the discriminator')
-tf.app.flags.DEFINE_string(
-    'dis_dev_negative_data', './data_gan_100w_fromZxw/dev_negative_u8.txt',
-    'the negative train data set for the discriminator')
-tf.app.flags.DEFINE_string(
-    'dis_dev_source_data', './data_gan_100w_fromZxw/dev_source_u8.txt',
-    'the negative train data set for the discriminator')
-
-tf.app.flags.DEFINE_string(
-    'gan_gen_source_data', './data_test1000/gan_gen_source_u8.txt',
-    'the positive train data set for the discriminator')
-tf.app.flags.DEFINE_string(
-    'gan_dis_source_data', './data_gan_100w_fromZxw/gan_dis_source_u8.txt',
-    'the positive train data set for the discriminator')
-tf.app.flags.DEFINE_string(
-    'gan_dis_positive_data', './data_gan_100w_fromZxw/gan_dis_positive_u8.txt',
-    'the positive train data set for the discriminator')
-tf.app.flags.DEFINE_string(
-    'gan_dis_negative_data', './data_gan_100w_fromZxw/gan_dis_negative_u8.txt',
-    'the negative train data set for the discriminator')
-
-tf.app.flags.DEFINE_string(
-    'valid_data_source', 'data/zhyang/dl4mt/source.txt',
-    'the valid data set of the soruce size')
-tf.app.flags.DEFINE_string(
-    'valid_data_target', 'data/zhyang/dl4mt/target.txt',
-    'the valid data set of the target side')
-
-tf.app.flags.DEFINE_string(
-    'vocab_path', './vocab', "the vocabulary")
-# tf.app.flags.DEFINE_string(
-#     'target_dict', './data_1000w_golden/target_u8.txt.shuf.pkl',
-#     'the target vocabulary')
-
-tf.app.flags.DEFINE_boolean(
-    'use_dropout', False, 'whether to use dropout')
-tf.app.flags.DEFINE_boolean(
-    'gen_reload', False, 'whether to reload the generate model from model file')
-tf.app.flags.DEFINE_boolean(
-    'dis_reload', False,
-    'whether to reload the discriminator model from model file')
-
-tf.app.flags.DEFINE_boolean(
-    'reshuffle', False, 'whether to reshuffle train data')
-tf.app.flags.DEFINE_boolean(
-    'dis_reshuffle', False,
-    'whether to reshuffle train data of the discriminator')
-tf.app.flags.DEFINE_boolean(
-    'gen_reshuffle', False, 'whether to reshuffle train data of the generator')
-tf.app.flags.DEFINE_boolean(
-    'gan_gen_reshuffle', False,
-    'whether to reshuffle train data of the generator')
-tf.app.flags.DEFINE_boolean(
-    'gan_dis_reshuffle', False,
-    'whether to reshuffle train data of the generator')
-
-tf.app.flags.DEFINE_boolean('DebugMode', False, 'whether to debug')
-
-tf.app.flags.DEFINE_string(
-    'cov_loss_wt', '1',
-    'the coverage loss weight')
-
-tf.app.flags.DEFINE_string(
-    'cpu_device', 'cpu-0', 'this cpu used to train the model')
-tf.app.flags.DEFINE_string(
-    'init_device', '/cpu:0', 'this cpu used to train the model')
-
-tf.app.flags.DEFINE_string('precision', 'float32', 'precision on GPU')
-
-tf.app.flags.DEFINE_integer('rollnum', 16, 'the rollnum for rollout')
-tf.app.flags.DEFINE_integer('generate_num', 200000, 'the rollnum for rollout')
-tf.app.flags.DEFINE_float('bias_num', 0.5, 'the bias_num  for rewards')
-
-tf.app.flags.DEFINE_boolean(
-    'decode_is_print', False, 'whether to decode')
-
-tf.app.flags.DEFINE_string(
-    'decode_file', '/home/lerner/data/LCSTS/finished_files/test-art.txt',
-    'the file to be decoded')
-tf.app.flags.DEFINE_string(
-    'decode_result_file', './data_test/negative.txt',
-    'the file to save the decode results')
-
-FLAGS = tf.app.flags.FLAGS
-
-logging.set_verbosity(logging.INFO)
-
-# ------------------------------------- from pointer generator
+# ------------------------------------- generator
 
 # the GAN training setting
-tf.app.flags.DEFINE_boolean(
-    'teacher_forcing', False,
-    'whether to do use teacher forcing for training the generator')
-tf.app.flags.DEFINE_boolean(
-    'is_gan_train', False, 'whether to do generative adversarial train')
-tf.app.flags.DEFINE_boolean(
-    'is_generator_train', True, 'whether to do generative adversarial train')
-tf.app.flags.DEFINE_boolean(
-    'is_discriminator_train', False,
-    'whether to do generative adversarial train')
-tf.app.flags.DEFINE_boolean(
-    'is_decode', False, 'whether to decode')
+tf.app.flags.DEFINE_boolean('teacher_forcing', False, 'whether to do use teacher forcing for training the generator')
 
 # Where to find data
-tf.app.flags.DEFINE_string(
-    'data_path', '',
-    ('Path expression to tf.Example datafiles. Can include wildcards to access'
-     'multiple datafiles.'))
-tf.app.flags.DEFINE_string(
-    'vocab_path',
-    '',
-    'Path expression to text vocabulary file.')
+tf.app.flags.DEFINE_string('data_path', '', 'Path expression to tf.Example datafiles. Can include wildcards to access multiple datafiles.')
+tf.app.flags.DEFINE_string('vocab_path', '', 'Path expression to text vocabulary file.')
 
 # Important settings
-tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/decode')
-tf.app.flags.DEFINE_boolean(
-    'single_pass', False,
-    (
-        'For decode mode only. If True, run eval on the full dataset using a'
-        'fixed checkpoint, i.e. take the current checkpoint, and use it to'
-        'produce one summary for each example in the dataset, writethesummaries'
-        'to file and then get ROUGE scores for the whole dataset. If False'
-        '(default), run concurrent decoding, i.e. repeatedly load latest'
-        'checkpoint, use it to produce summaries forrandomly-chosenexamples and'
-        'log the results to screen, indefinitely.'))
+tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True, run eval on the full dataset using a'
+                            'fixed checkpoint, i.e. take the current checkpoint, and use it to'
+                            'produce one summary for each example in the dataset, writethesummaries'
+                            'to file and then get ROUGE scores for the whole dataset. If False'
+                            '(default), run concurrent decoding, i.e. repeatedly load latest'
+                            'checkpoint, use it to produce summaries forrandomly-chosenexamples and'
+                            'log the results to screen, indefinitely.')
 
 # Where to save output
 tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
-tf.app.flags.DEFINE_string(
-    'exp_name', '',
-    (
-        'Name for experiment. Logs will be saved in'
-        'adirectory with this name, under log_root.'
-    ))
+tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in adirectory with this name, under log_root.')
 
 # Hyperparameters
-tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
+tf.app.flags.DEFINE_integer('gen_hidden_dim', 256, 'dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 128, 'dimension of word embeddings')
-tf.app.flags.DEFINE_integer('batch_size', 16, 'minibatch size')
-tf.app.flags.DEFINE_integer(
-    'max_enc_steps',
-    80,
-    'max timesteps of encoder (max source text tokens)')  # 400
-tf.app.flags.DEFINE_integer(
-    'max_dec_steps',
-    15,
-    'max timesteps of decoder (max summary tokens)')  # 100
-tf.app.flags.DEFINE_integer(
-    'beam_size',
-    4,
-    'beam size for beam search decoding.')
-tf.app.flags.DEFINE_integer(
-    'min_dec_steps', 35,
-    'Minimum sequence length of generated summary. \
-    Applies only for beam search decoding mode')
-tf.app.flags.DEFINE_integer(
-    'vocab_size',
-    50000,
-    (
-        'Size of vocabulary. These will be read from the vocabulary file in'
-        ' order. If the vocabulary file contains fewer words than this number,'
-        ' or if this number is set to 0, will take all words in the'
-        ' vocabulary file.'
-    )
-)
-tf.app.flags.DEFINE_float('lr', 0.15, 'learning rate')
-tf.app.flags.DEFINE_float(
-    'adagrad_init_acc',
-    0.1,
-    'initial accumulator value for Adagrad')
-tf.app.flags.DEFINE_float(
-    'rand_unif_init_mag', 0.02,
-    'magnitude for lstm cells random uniform inititalization')
-tf.app.flags.DEFINE_float(
-    'trunc_norm_init_std', 1e-4,
-    'std of trunc norm init, used for initializing everything else')
-tf.app.flags.DEFINE_float('max_grad_norm', 2.0, 'for gradient clipping')
+tf.app.flags.DEFINE_integer('gen_batch_size', 16, 'minibatch size')
+tf.app.flags.DEFINE_integer('max_enc_steps', 80, 'max timesteps of encoder (max source text tokens)')  # 400
+tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 100
+tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
+tf.app.flags.DEFINE_integer('min_dec_steps', 35, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
+tf.app.flags.DEFINE_integer('gen_vocab_size', 50000, 'Size of vocabulary. These will be read from the vocabulary file in'
+                            ' order. If the vocabulary file contains fewer words than this number,'
+                            ' or if this number is set to 0, will take all words in the vocabulary file.')
+tf.app.flags.DEFINE_float('gen_lr', 0.15, 'learning rate')
+tf.app.flags.DEFINE_float('adagrad_init_acc', 0.1, 'initial accumulator value for Adagrad')
+tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
+tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
+tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
 
 # Pointer-generator or baseline model
-tf.app.flags.DEFINE_boolean(
-    'pointer_gen', True,
-    'If True, use pointer-generator model. If False, use baseline model.')
-tf.app.flags.DEFINE_boolean(
-    'segment', True,
-    'If True, the source text is segmented, \
-    then max_enc_steps and max_dec_steps should be much smaller')
+tf.app.flags.DEFINE_boolean('pointer_gen', True, 'If True, use pointer-generator model. If False, use baseline model.')
+tf.app.flags.DEFINE_boolean('segment', True, 'If True, the source text is segmented, then max_enc_steps and max_dec_steps should be much smaller')
 
 # Coverage hyperparameters
-tf.app.flags.DEFINE_boolean(
-    'coverage',
-    True,
-    'Use coverage mechanism. Note, the experiments reported in the ACL\
-    paper train WITHOUT coverage until converged, \
-    and then train for a short phase WITH coverage afterwards. \
-    i.e. to reproduce the results in the ACL paper, \
-    turn this off for most of training then turn on \
-    for a short phase at the end.')
-tf.app.flags.DEFINE_float(
-    'cov_loss_wt', 1,
-    'Weight of coverage loss (lambda in the paper). \
-    If zero, then no incentive to minimize coverage loss.')
-tf.app.flags.DEFINE_boolean(
-    'convert_to_coverage_model',
-    True,
-    'Convert a non-coverage model to a coverage model. \
-    Turn this on and run in train mode. \
-    Your current model will be copied to a new version \
-    (same name with _cov_init appended)\
-    that will be ready to run with coverage flag turned on,\
-    for the coverage training stage.')
+tf.app.flags.DEFINE_boolean('coverage', True, 'Use coverage mechanism. Note, the experiments reported in the ACL '
+                            'paper train WITHOUT coverage until converged, and then train for a short phase WITH coverage afterwards.'
+                            'i.e. to reproduce the results in the ACL paper, turn this off for most of training then turn on for a short phase at the end.')
+tf.app.flags.DEFINE_float('cov_loss_wt', 1, 'Weight of coverage loss (lambda in the paper). If zero, then no incentive to minimize coverage loss.')
+tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-coverage model to a coverage model. '
+                            'Turn this on and run in train mode. \ Your current model will be copied to a new version '
+                            '(same name with _cov_init appended)\ that will be ready to run with coverage flag turned on,\ for the coverage training stage.')
+
+FLAGS = tf.app.flags.FLAGS
 
 
 def generate_samples(sess, trainable_model, batch_size, generated_num, output_file):
@@ -387,6 +176,10 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
                 summary_writer.flush()
 
 
+def train_discriminator():
+    pass
+
+
 def convert_to_coverage_model():
     """Load non-coverage checkpoint, add initialized extra variables for
     coverage, and save as new checkpoint"""
@@ -424,7 +217,6 @@ def setup_training(max_to_keep):
         if FLAGS.convert_to_coverage_model:
             assert FLAGS.coverage, "To convert your non-coverage model to a coverage model, run with convert_to_coverage_model=True and coverage=True"
             convert_to_coverage_model()
-        # only keep 1 checkpoint at a time
         saver = tf.train.Saver(max_to_keep=max_to_keep)
 
     sv = tf.train.Supervisor(logdir=train_dir, is_chief=True, saver=saver, summary_op=None, save_summaries_secs=60, save_model_secs=60, global_step=generator.global_step)
@@ -448,35 +240,25 @@ def setup_training(max_to_keep):
 def main(argv):
     tf.set_random_seed(111)  # a seed value for randomness
 
-    if FLAGS.segment is not True:
-        hps = hps._replace(max_enc_steps=110)
-        hps = hps._replace(max_dec_steps=25)
-    else:
-        assert hps.max_enc_steps == 80, "No segmentation, max_enc_steps wrong"
-        assert hps.max_dec_steps == 15, "No segmentation, max_dec_steps wrong"
-
     # Create a batcher object that will create minibatches of data
+    vocab = VocabG(FLAGS.vocab_path, FLAGS.vocab_size)
     batcher = Batcher(FLAGS.data_path, vocab, hps, single_pass=FLAGS.single_pass)
     # TODO change to pass number
 
-    vocab = Vocab(FLAGS.vocab_path, FLAGS.vocab_size)
-
     if "train" in FLAGS.mode:
         # --------------- build graph ---------------
-        graph = get_graph()
 
-        with tf.Graph():
         hparam_gen = [
             'mode',
             'adagrad_init_acc',
-            'batch_size',
+            'gen_batch_size',
             'cov_loss_wt',
             'coverage',
             'emb_dim',
-            'hidden_dim',
-            'lr',
+            'gen_hidden_dim',
+            'gen_lr',
             'max_dec_steps',
-            'max_grad_norm',
+            'gen_max_gradient',
             'pointer_gen',
             'rand_unif_init_mag',
             'trunc_norm_init_std',
@@ -488,36 +270,52 @@ def main(argv):
             if key in hparam_gen:  # if it's in the list
                 hps_dict[key] = val  # add it to the dict
 
-        hps = namedtuple("HParamsGen", hps_dict.keys())(**hps_dict)
-        generator = PointerGenerator(hps, vocab)
-        generator.build_graph()
+        hps = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
+        if FLAGS.segment is not True:
+            hps = hps._replace(max_enc_steps=110)
+            hps = hps._replace(max_dec_steps=25)
+        else:
+            assert hps.max_enc_steps == 80, "No segmentation, max_enc_steps wrong"
+            assert hps.max_dec_steps == 15, "No segmentation, max_dec_steps wrong"
+        with tf.variable_scope("generator"):
+            generator = PointerGenerator(hps, vocab)
+            generator.build_graph()
 
-        hparam_gen = [
+        hparam_dis = [
             'mode',
-            'adagrad_init_acc',
-            'batch_size',
-            'cov_loss_wt',
-            'coverage',
-            'emb_dim',
-            'hidden_dim',
-            'lr',
-            'max_dec_steps',
-            'max_grad_norm',
-            'pointer_gen',
-            'rand_unif_init_mag',
-            'trunc_norm_init_std',
-            'max_enc_steps',
+            'train_dir',
+            'dis_vocab_size',
+            'num_class',
+            'buckets',
+            'dis_hidden_dim',
+            'num_layers',
+            'dis_max_gradient',
+            'dis_batch_size',
+            'dis_lr',
+            'lr_decay_factor',
+            'cell_type',
         ]
-
         hps_dict = {}
         for key, val in FLAGS.__flags.iteritems():  # for each flag
-            if key in hparam_gen:  # if it's in the list
+            if key in hparam_dis:  # if it's in the list
                 hps_dict[key] = val  # add it to the dict
 
-        hps = namedtuple("HParamsGen", hps_dict.keys())(**hps_dict)
+        hps = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
+        with tf.variable_scope("discriminator"):
+            discriminator = Seq2ClassModel(hps)
+            discriminator.build_graph()
 
-        discriminator = DisCNN(hps, vocab)
-        discriminator.build_graph()
+        saver = tf.train.Saver()
+
+        sv = tf.train.Supervisor(logdir=hps.train_dir, is_chief=True, saver=saver, summary_op=None, save_summaries_secs=60, save_model_secs=60)
+        summary_writer = sv.summary_writer
+        tf.logging.info("Preparing or waiting for session...")
+        sess = sv.prepare_or_wait_for_session(config=util.get_config())
+
+        # initialize the embedding at the begging of training
+        ckpt = tf.train.get_checkpoint_state(hps.train_dir)
+        if ckpt and not tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
+            discriminator.init_emb(sess, hps.train_dir)
 
         # --------------- train generator ---------------
         if "gen" in mode:
@@ -528,7 +326,7 @@ def main(argv):
         elif "dis" in mode:
             train_discriminator()
 
-        # --------------- train GAN ---------------
+        # --------------- finetune the generator ---------------
         else:
             rollout = ROLLOUT(generator, 0.8)
             for i_gan in range(gan_iter):

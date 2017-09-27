@@ -16,6 +16,7 @@
 
 """This file contains code to process data into batches"""
 
+import random
 import Queue
 from random import shuffle
 from threading import Thread
@@ -479,3 +480,49 @@ class Batcher(object):
                     'Found an example with empty article text. Skipping it.')
             else:
                 yield (article_text, abstract_text)
+
+
+def get_batch(self, data, batch_size, balance=False, put_back=True):
+  """Get a random batch of data from the specified bucket, prepare for step.
+
+  To feed data in step(..) it must be a list of batch-major vectors, while
+  data here contains single length-major cases. So the main logic of this
+  function is to re-index data cases to be in the proper format for feeding.
+
+  Args:
+    data: a tuple of size len(self.buckets) in which each element contains
+      lists of pairs of input and output data that we use to create a batch.
+    bucket_id: integer, which bucket to get the batch for.
+
+  Returns:
+    The triple (encoder_inputs, decoder_inputs, target_weights) for
+    the constructed batch that has the proper format to call step(...) later.
+  """
+  encoder_inputs = []
+  targets = []
+
+  # Get a random batch of encoder and decoder inputs from data,
+  # pad them if needed, reverse encoder inputs and add GO to decoder.
+  for _ in range(batch_size):
+
+    if len(data) == 0:
+      break
+
+    else:
+      if put_back and not balance:
+        encoder_input, target = random.choice(data)
+      if put_back and balance:
+        cls = random.choice(data)
+        encoder_input, target = random.choice(cls)
+      else:
+        encoder_input, target = data.pop()
+      # add to the batch
+      encoder_inputs.append(encoder_input)
+      targets.append(target)
+
+  if len(targets) == 0:
+    return None, None, False
+  else:
+    encoder_inputs = list(np.transpose(np.array(encoder_inputs)))
+    targets = np.array(targets)
+    return encoder_inputs, targets, True
