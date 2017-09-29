@@ -24,6 +24,16 @@ import time
 import numpy as np
 import tensorflow as tf
 import data
+import gzip
+import os
+from cntk.tokenizer import text2charlist
+PAD_TOKEN = '[PAD]'
+
+
+def fopen(filename, mode='r'):
+    if filename.endswith('.gz'):
+        return gzip.open(filename, mode)
+    return open(filename, mode)
 
 
 class Example(object):
@@ -189,9 +199,7 @@ class Batch(object):
         # Initialize the numpy arrays
         # Note: our enc_batch can have different length (second dimension) for
         # each batch because we use dynamic_rnn for the encoder.
-        self.enc_batch = np.zeros(
-            (hps.batch_size, max_enc_seq_len),
-            dtype=np.int32)
+        self.enc_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
         self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
 
         # Fill in the numpy arrays
@@ -202,13 +210,11 @@ class Batch(object):
         # For pointer-generator mode, need to store some extra info
         if hps.pointer_gen:
             # Determine the max number of in-article OOVs in this batch
-            self.max_art_oovs = max([len(ex.article_oovs)
-                                     for ex in example_list])
+            self.max_art_oovs = max([len(ex.article_oovs) for ex in example_list])
             # Store the in-article OOVs themselves
             self.art_oovs = [ex.article_oovs for ex in example_list]
             # Store the version of the enc_batch that uses the article OOV ids
-            self.enc_batch_extend_vocab = np.zeros(
-                (hps.batch_size, max_enc_seq_len), dtype=np.int32)
+            self.enc_batch_extend_vocab = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
             for i, ex in enumerate(example_list):
                 self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
 
@@ -237,15 +243,9 @@ class Batch(object):
         # dynamic_rnn for decoding. However I believe this is possible, or will
         # soon be possible, with Tensorflow 1.0, in which case it may be best to
         # upgrade to that.
-        self.dec_batch = np.zeros(
-            (hps.batch_size, hps.max_dec_steps),
-            dtype=np.int32)
-        self.target_batch = np.zeros(
-            (hps.batch_size, hps.max_dec_steps),
-            dtype=np.int32)
-        self.padding_mask = np.zeros(
-            (hps.batch_size, hps.max_dec_steps),
-            dtype=np.float32)
+        self.dec_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
+        self.target_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
+        self.padding_mask = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.float32)
 
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):
@@ -257,18 +257,16 @@ class Batch(object):
     def store_orig_strings(self, example_list):
         """Store the original article and abstract strings in the Batch
         object"""
-        self.original_articles = [
-            ex.original_article for ex in example_list]  # list of lists
-        self.original_abstracts = [
-            ex.original_abstract for ex in example_list]  # list of lists
-        self.original_abstracts_sents = [
-            ex.original_abstract_sents for ex in example_list]
+        self.original_articles = [ex.original_article for ex in example_list]  # list of lists
+        self.original_abstracts = [ex.original_abstract for ex in example_list]  # list of lists
+        self.original_abstracts_sents = [ex.original_abstract_sents for ex in example_list]
         # list of list of lists
 
 
-class Batcher(object):
+class GenBatcher(object):
     """A class to generate minibatches of data. Buckets examples together based
     on length of the encoder sequence."""
+    # TODO: bucket can be added
 
     BATCH_QUEUE_MAX = 100  # max number of batches the batch_queue can hold
 
@@ -483,21 +481,6 @@ class Batcher(object):
 
 
 def get_batch(self, data, batch_size, balance=False, put_back=True):
-  """Get a random batch of data from the specified bucket, prepare for step.
-
-  To feed data in step(..) it must be a list of batch-major vectors, while
-  data here contains single length-major cases. So the main logic of this
-  function is to re-index data cases to be in the proper format for feeding.
-
-  Args:
-    data: a tuple of size len(self.buckets) in which each element contains
-      lists of pairs of input and output data that we use to create a batch.
-    bucket_id: integer, which bucket to get the batch for.
-
-  Returns:
-    The triple (encoder_inputs, decoder_inputs, target_weights) for
-    the constructed batch that has the proper format to call step(...) later.
-  """
   encoder_inputs = []
   targets = []
 
@@ -526,3 +509,91 @@ def get_batch(self, data, batch_size, balance=False, put_back=True):
     encoder_inputs = list(np.transpose(np.array(encoder_inputs)))
     targets = np.array(targets)
     return encoder_inputs, targets, True
+
+
+class DisBatcher:
+    """
+    all training data have a compared negative abstract which can be ignored in the gan training
+    """
+
+    def __init__(self, data_dir, vocab, batch_size=1, max_art_steps=80, max_abs_steps=15, single_pass=False, clip_length=True):
+        self.positive = fopen(os.path.join(data_dir, "positive"), 'r')
+        self.negative = fopen(os.path.join(data_dir, "negative"), 'r')
+        self.source = fopen(os.path.join(data_dir, "source"), 'r')
+        self.vocab = vocab
+
+        self.batch_size = batch_size
+        self.max_art_steps = max_art_steps
+        self.max_abs_steps = max_abs_steps
+        self.end_of_data = False
+        self.single_pass = single_pass
+        self.clip_length = clip_length
+
+    def __iter__(self):
+        return self
+
+    def reset(self):
+        self.positive.seek(0)
+        self.negative.seek(0)
+        self.source.seek(0)
+
+    def next(self):
+        if self.end_of_data:
+            self.end_of_data = False
+            self.reset()
+            raise StopIteration
+
+        positive = []
+        negative = []
+        source = []
+
+        try:
+            while True:
+                abs_p = self.positive.readline()
+                abs_n = self.negative.readline()
+                art = self.source.readline()
+
+                if abs_p == "" or art == "":
+                    raise IOError
+                if abs_n == "":
+                    # the generated negative abstract may be empty
+                    continue
+
+                abs_p = text2charlist(abs_p)
+                abs_n = text2charlist(abs_n)
+                art = text2charlist(art)
+
+                if not self.clip_length:
+                    if len(abs_p) > self.max_abs_steps or len(abs_n) > self.max_abs_steps or len(art) > self.max_art_steps:
+                        continue
+                else:
+                    abs_p = abs_p[:self.max_abs_steps]
+                    abs_n = abs_p[:self.max_abs_steps]
+                    art = art[:self.max_art_steps]
+
+                abs_p = abs_p + [PAD_TOKEN] * (self.max_abs_steps - len(abs_p))
+                abs_n = abs_n + [PAD_TOKEN] * (self.max_abs_steps - len(abs_n))
+                art = art + [PAD_TOKEN] * (self.max_art_steps - len(art))
+
+                abs_p = [self.vocab.word2id(w) for w in abs_p]
+                abs_n = [self.vocab.word2id(w) for w in abs_n]
+                art = [self.vocab.word2id(w) for w in art]
+
+                positive.append(abs_p)
+                negative.append(abs_p)
+                source.append(art)
+
+                if len(positive) >= self.batch_size:
+                    break
+        except IOError:
+            print("IOError")
+            if self.single_pass:
+                return None, None, None
+            self.end_of_data = True
+
+        if len(positive) <= 0 or len(negative) <= 0:
+            self.end_of_data = False
+            self.reset()
+            raise StopIteration
+
+        return source, positive, negative

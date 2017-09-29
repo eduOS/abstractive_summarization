@@ -22,6 +22,7 @@ import glob
 import random
 import struct
 import csv
+import numpy as np
 from tensorflow.core.example import example_pb2
 from six.moves import xrange  # pylint: disable=redefined-builtin
 
@@ -45,59 +46,7 @@ STOP_DECODING = '[STOP]'
 # the vocab file.
 
 
-class VocabD(object):
-    def __init__(self, filename, init=False):
-        self.filename = filename
-        self.vocab_list = []
-        self.vocab_dict = {}
-        if os.path.exists(filename) and not init:
-            with open(filename, 'r') as f:
-                for line in f:
-                    [key, count] = line.strip("\n").split("\t")
-                    self.vocab_list.append(key)
-                    self.vocab_dict[key] = [len(self.vocab_dict), int(count)]
-        self.changed = False
-
-    def idx2key(self, idx):
-        """given index return key"""
-        if idx >= len(self.vocab_list):
-            return None
-        else:
-            return self.vocab_list[idx]
-
-    def key2idx(self, key):
-        """given key return index"""
-        value = self.vocab_dict.get(key)
-        if value:
-            return value[0]
-        else:
-            return None
-
-    def size(self):
-        """return size of the vocab"""
-        return len(self.vocab_list)
-
-    def dump(self):
-        """dump the vocab to the file"""
-        if self.changed:
-            with open(self.filename, 'w') as f:
-                for key in self.vocab_list:
-                    f.write(key+'\t'+str(self.vocab_dict[key][1])+'\n')
-
-    def update(self, patch):
-        """update the vocab"""
-        self.changed = True
-        for key in patch:
-            if key in self.vocab_dict:
-                self.vocab_dict[key][1] += patch[key]
-            else:
-                self.vocab_dict[key] = [len(self.vocab_dict), patch[key]]
-        self.vocab_list = sorted(self.vocab_dict, key=lambda i: self.vocab_dict.get(i)[1], reverse=True)
-        for idx in xrange(len(self.vocab_list)):
-            self.vocab_dict[self.vocab_list[idx]][0] = idx
-
-
-class VocabG(object):
+class Vocab(object):
     """Vocabulary class for mapping between words and ids (integers)"""
 
     def __init__(self, vocab_file, max_size):
@@ -111,51 +60,30 @@ class VocabG(object):
           max_size: integer. The maximum size of the resulting Vocabulary."""
         self._word_to_id = {}
         self._id_to_word = {}
-        self._count = 0  # keeps track of total number of words in the Vocab
 
         # [UNK], [PAD], [START] and [STOP] get the ids 0,1,2,3.
-        for w in [UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING]:
-            self._word_to_id[w] = self._count
-            self._id_to_word[self._count] = w
-            self._count += 1
+        for w in [PAD_TOKEN, UNKNOWN_TOKEN, START_DECODING, STOP_DECODING]:
+            self._word_to_id[w], self._id_to_word[len(self._id_to_word)] = len(self._word_to_id), w
 
         # Read the vocab file and add words up to max_size
         with open(vocab_file, 'r') as vocab_f:
             for line in vocab_f:
                 pieces = line.split()
                 if len(pieces) != 2:
-                    print(
-                        'Warning: incorrectly formatted line in vocabulary file:\
-                        %s\n' % line)
+                    print('Warning: incorrectly formatted line in vocabulary file: %s\n' % line)
                     continue
                 w = pieces[0]
-                if w in [
-                        SENTENCE_START,
-                        SENTENCE_END,
-                        UNKNOWN_TOKEN,
-                        PAD_TOKEN,
-                        START_DECODING,
-                        STOP_DECODING]:
+                if w in [SENTENCE_START, SENTENCE_END, UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING]:
                     raise Exception(
-                        '<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t\
-                        be in the vocab file, but %s is' % w)
+                        '<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t be in the vocab file, but %s is' % w)
                 if w in self._word_to_id:
-                    raise Exception(
-                        'Duplicated word in vocabulary file: %s' % w)
-                self._word_to_id[w] = self._count
-                self._id_to_word[self._count] = w
-                self._count += 1
-                if max_size != 0 and self._count >= max_size:
-                    print(
-                        "max_size of vocab was specified as %i; we now have %i\
-                        words. Stopping reading." %
-                        (max_size, self._count))
+                    raise Exception('Duplicated word in vocabulary file: %s' % w)
+                self._word_to_id[w], self._id_to_word[len(self._id_to_word)] = len(self._word_to_id), w
+                if max_size != 0 and len(self._word_to_id) >= max_size:
+                    print("max_size of vocab was specified as %i; we now have %i words. Stopping reading." % (max_size, len(self._word_to_id)))
                     break
 
-        print(
-            "Finished constructing vocabulary of %i total words. Last word\
-            added: %s" % (
-                self._count, self._id_to_word[self._count - 1]))
+        print("Finished constructing vocabulary of %i total words. Last word added: %s" % (max_size, self._id_to_word[max_size-1]))
 
     def word2id(self, word):
         """Returns the id (integer) of a word (string). Returns [UNK] id if word
@@ -186,7 +114,7 @@ class VocabG(object):
         with open(fpath, "w") as f:
             fieldnames = ['word']
             writer = csv.DictWriter(f, delimiter="\t", fieldnames=fieldnames)
-            for i in xrange(self.size()):  # NOQA
+            for i in xrange(self.size()):
                 writer.writerow({"word": self._id_to_word[i]})
 
 
@@ -402,17 +330,16 @@ def abstract2sents(abstract):
             return sents
 
 
-def sentence2ids(text, vocab):
+def puresentence2ids(text, vocab):
     """encode a sentence in plain text into a sequence of token ids
         token_ids are one-based
     """
     text = text.strip()
-    seq = [vocab.key2idx(key.encode('utf8')) for key in list(text.decode('utf8'))]
-    seq = [idx+1 if idx else vocab.key2idx("_UNK")+1 for idx in seq]
+    seq = [vocab.word2id(word) for word in text]
     return seq
 
 
-def ids2sentence(token_ids, vocab):
+def pureids2sentence(token_ids, vocab):
     """decode a sequence of token ids to a sentence
         token_ids must be one-based
     """
@@ -420,3 +347,24 @@ def ids2sentence(token_ids, vocab):
     token_ids = map(lambda i: i-1 if vocab.idx2key(i-1) else vocab.key2idx("_UNK"), token_ids)
     text = "".join([vocab.idx2key(i) for i in token_ids])
     return text
+
+
+def prepare_dis_pretraining_batch(batch):
+    """
+    translate the list into np array
+    and add the targets for them
+    """
+    source, positive, negative = batch
+    inputs = positive + negative
+
+    positive_labels = [[0, 1] for _ in positive]
+    negative_labels = [[1, 0] for _ in negative]
+    targets = positive_labels + negative_labels
+
+    conditions = source + source
+
+    inputs = np.transpose(np.array(inputs))
+    conditions = np.transpose(np.array(conditions))
+    targets = np.array(targets)
+
+    return inputs, conditions, targets

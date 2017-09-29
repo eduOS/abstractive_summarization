@@ -671,8 +671,7 @@ def _mask_and_avg(values, padding_mask):
     """
 
     dec_lens = tf.reduce_sum(padding_mask, axis=1)  # shape batch_size. float32
-    values_per_step = [v * padding_mask[:, dec_step]
-                       for dec_step, v in enumerate(values)]
+    values_per_step = [v * padding_mask[:, dec_step] for dec_step, v in enumerate(values)]
     # shape (batch_size); normalized value for each batch member
     values_per_ex = sum(values_per_step)/dec_lens
     return tf.reduce_mean(values_per_ex)  # overall average

@@ -7,7 +7,7 @@ import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 from tensorflow.python.client import timeline
-from utils import model_utils
+import dis_utils
 
 
 class Seq2ClassModel(object):
@@ -35,121 +35,131 @@ class Seq2ClassModel(object):
       cell_type: choose between LSTM cells and GRU cells.
       is_decoding: if set, we do decoding instead of training.
     """
-    self.vocab_size = vocab_size
-    self.num_class = num_class
-    self.buckets = buckets
+    self.vocab_size = hps.dis_vocab_size
     with tf.variable_scope("OptimizeLoss"):
-      self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(learning_rate))
-    self.cell_type = cell_type
+      self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(hps.learning_rate))
+    self.cell_type = hps.cell_type
     self.global_step = tf.Variable(0, trainable=False)
-    self.is_decoding = is_decoding
-    self.num_models = 32
-    self.batch_size = batch_size * self.num_models
+    self.is_decoding = hps.is_decoding
+    self.num_models = hps.num_models
+    self.batch_size = hps.dis_batch_size * self.num_models
+    self.max_enc_steps = hps.max_enc_steps
+    self.max_dec_steps = hps.max_dec_steps
+    self.layer_size = hps.layer_size
+    self.conv_layers = hps.conv_layers
+    self.kernel_size = hps.kernel_size
+    self.pool_size = hps.pool_size
 
-  def init_emb(sess, emb_dir):
+  def init_emb(self, sess, emb_dir):
     for ld in self.loaders:
       ld.restore(sess, tf.train.get_checkpoint_state(emb_dir).model_checkpoint_path)
 
-  def build_graph(self):
-    # Feeds for inputs.
-    self.encoder_inputs = []
-    for i in xrange(self.buckets[-1]):  # Last bucket is the biggest one.
-      self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
-                                                name="encoder{0}".format(i)))
+  def _add_placeholders(self):
+    self.inputs = tf.placeholder(tf.int32, shape=[self.batch_size, self.max_dec_steps], name="inputs")
+    self.conditions = tf.placeholder(tf.int32, shape=[self.batch_size, self.max_enc_steps], name="conditions")
+    self.targets = tf.placeholder(tf.int32, shape=[self.batch_size, 2], name="targets")
 
-    # Feeds target
-    self.targets = tf.placeholder(tf.int32, shape=[None], name="target")
     if not self.is_decoding:
-      self.encoder_inputs_splitted = []
+      self.inputs_splitted = tf.split(self.inputs, self.num_models)
+      self.conditions_splitted = tf.split(self.conditions, self.num_models)
       self.targets_splitted = tf.split(self.targets, self.num_models)
-      for x in self.encoder_inputs:
-        self.encoder_inputs_splitted.append(tf.split(x, self.num_models))
 
+  def build_graph(self):
+    self._add_placeholders()
     # build the buckets
     self.outputs, self.losses, self.updates, self.indicators = [], [], [], []
-    for i in xrange(len(self.buckets)):
-      inputs_len = self.buckets[i]
-      if self.is_decoding:
-        probs = []
-        for m in xrange(self.num_models):
-          with tf.variable_scope("model"+str(m)):
-            probs.append(self.get_loss(self.encoder_inputs[:inputs_len], self.targets, self.is_decoding)[0])
-        self.outputs.append(tf.argmax(sum(probs), axis=1))
-      else:
-        loss_train = []
-        loss_cv = []
-        self.loaders = []
-        for m in xrange(self.num_models):
-          with tf.variable_scope("model"+str(m)) as sc:
-            loss_train.append(tf.expand_dims(
-                self.get_loss(list(np.transpose(self.encoder_inputs_splitted)[m][:inputs_len]), self.targets_splitted[m], self.is_decoding)[0], 0))
-            sc.reuse_variables()
-            loss_cv.append(tf.expand_dims(
-                self.get_loss(self.encoder_inputs[:inputs_len], self.targets, self.is_decoding)[0], 0))
-            var_dict = {}
-            var_dict["embed/char_embedding"] = tf.get_variable("embed/char_embedding")
-            self.loaders.append(tf.train.Saver(var_dict))
-        loss_train = tf.reduce_mean(tf.concat(loss_train, 0))
-        loss_cv = tf.reduce_mean(tf.concat(loss_cv, 0))
-        self.indicators.append(loss_cv)
-        self.losses.append(loss_train)
-        model_utils.params_decay(1.0 - self.learning_rate)
-        self.updates.append(tf.contrib.layers.optimize_loss(self.losses[i], self.global_step,
-                                                            tf.identity(self.learning_rate), 'Adam', gradient_noise_scale=None, clip_gradients=None,
-                                                            name="OptimizeLoss"))
-        del tf.get_collection_ref(tf.GraphKeys.UPDATE_OPS)[:]
+    if self.is_decoding:
+      probs = []
+      for m in xrange(self.num_models):
+        with tf.variable_scope("model"+str(m)):
+          probs.append(self._cseq2class_model(self.inputs, self.condition, self.targets, self.is_decoding))
+      self.outputs.append(tf.argmax(sum(probs), axis=1))
+    else:
+      loss_train = []
+      loss_cv = []
+      self.loaders = []
+      for m in xrange(self.num_models):
+        with tf.variable_scope("model"+str(m)) as sc:
+          loss_train.append(self._cseq2class_model(self.inputs_splitted[m], self.conditions_splitted[m], self.targets_splitted[m], self.is_decoding), 0)
+          sc.reuse_variables()
+          loss_cv.append(self._cseq2class_model(self.inputs_splitted[m], self.conditions_splitted[m], self.targets_splitted[m], self.is_decoding), 0)
+          var_dict = {}
+          var_dict["embed/char_embedding"] = tf.get_variable("embed/char_embedding")
+          self.loaders.append(tf.train.Saver(var_dict))
+      loss_train = tf.reduce_mean(tf.concat(loss_train, 0))
+      loss_cv = tf.reduce_mean(tf.concat(loss_cv, 0))
+      self.indicators.append(loss_cv)
+      self.losses.append(loss_train)
+      dis_utils.params_decay(1.0 - self.learning_rate)
+      self.updates.append(tf.contrib.layers.optimize_loss(self.losses[i], self.global_step,
+                                                          tf.identity(self.learning_rate), 'Adam', gradient_noise_scale=None, clip_gradients=None,
+                                                          name="OptimizeLoss"))
+      del tf.get_collection_ref(tf.GraphKeys.UPDATE_OPS)[:]
       tf.get_variable_scope().reuse_variables()
 
-  def get_loss(self, querys, targets, is_decoding):
+  def _cseq2class_model(self, inputs, conditions, targets, is_decoding):
+    """
+    conditional sequence to class model
+    """
 
-    batch_size = tf.shape(querys[0])[0]
-
+    batch_size = inputs.get_shape()[1].value
+    input_length = inputs.get_shape()[1].value
+    condition_length = conditions.get_shape()[1].value
     # embedding params
     with tf.variable_scope("embed"):
       char_embedding = tf.contrib.framework.model_variable("char_embedding",
-                                                           shape=[self.vocab_size, size],
+                                                           shape=[self.vocab_size, self.layer_size],
                                                            dtype=tf.float32,
                                                            initializer=tf.truncated_normal_initializer(0.0, 0.01),
                                                            collections=tf.GraphKeys.WEIGHTS,
                                                            trainable=True)
       class_output_weights = tf.contrib.framework.model_variable("class_output_weights",
-                                                            shape=[self.num_class, size],
-                                                            dtype=tf.float32,
-                                                            initializer=tf.truncated_normal_initializer(0.0, 0.01),
-                                                            collections=tf.GraphKeys.WEIGHTS,
-                                                            trainable=True)
+                                                                 shape=[self.num_class, self.layer_size],
+                                                                 dtype=tf.float32,
+                                                                 initializer=tf.truncated_normal_initializer(0.0, 0.01),
+                                                                 collections=tf.GraphKeys.WEIGHTS,
+                                                                 trainable=True)
 
     with tf.variable_scope("encoder"):
-      encoder_inputs = tf.stack(querys, 1)
-      query_masks = tf.greater(encoder_inputs, 0)
-      inputs = tf.nn.embedding_lookup(char_embedding, encoder_inputs)
-      inputs = tf.reshape(tf.where(tf.reshape(query_masks, [-1]),
-                                   tf.reshape(inputs, [-1, size]),
-                                   tf.zeros([batch_size*len(querys), size])), [batch_size, len(querys), size])
-      cnn_inputs = tf.expand_dims(inputs, 1)
-      cnn_outputs = model_utils.ResCNN(cnn_inputs, num_layers, [1, 3], [1, 2],
-                                       pool_layers=2, activation_fn=tf.nn.relu, is_training=not is_decoding, scope="cnn")
+      input_masks = tf.greater(inputs, 0)
+      condition_masks = tf.greater(conditions, 0)
+      emb_inputs = tf.nn.embedding_lookup(char_embedding, inputs)
+      emb_conditions = tf.nn.embedding_lookup(char_embedding, conditions)
+      # substitute pads with zeros
+      emb_inputs = tf.reshape(tf.where(tf.reshape(input_masks, [-1]),
+                                       tf.reshape(emb_inputs, [-1, self.layer_size]),
+                                       tf.zeros([batch_size*input_length, self.layer_size])),
+                              [batch_size, input_length, self.layer_size])
+      emb_conditions = tf.reshape(tf.where(tf.reshape(condition_masks, [-1]),
+                                           tf.reshape(emb_conditions, [-1, self.layer_size]),
+                                           tf.zeros([batch_size*condition_length, self.layer_size])),
+                                  [batch_size, condition_length, self.layer_size])
+      cnn_emb_inputs = tf.expand_dims(emb_inputs, 1)
+      cnn_emb_conditions = tf.expand_dims(emb_conditions, 1)
+      cnn_outputs = dis_utils.CResCNN(cnn_emb_inputs, cnn_emb_conditions, self.conv_layers, self.kernel_size, self.pool_size,
+                                      pool_layer=self.pool_layers, activation_fn=tf.nn.relu, is_training=not is_decoding, scope="cnn")
       cnn_outputs = tf.squeeze(cnn_outputs, [1])
       projection_input = tf.reduce_max(cnn_outputs, axis=1)
 
     with tf.variable_scope("projection"):
       logits = tf.matmul(projection_input, tf.transpose(class_output_weights/(tf.norm(class_output_weights, axis=1, keep_dims=True)+1e-20)))
       if is_decoding:
-        return tf.nn.softmax(logits), None
+        return tf.nn.softmax(logits)
       else:
-        loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=targets))
-        return loss, loss
+        # loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=targets))
+        loss = tf.nn.softmax_cross_entropy_with_logits(logits, targets)
+        return loss
 
-  def run_one_step(self, session, encoder_inputs, targets,
-                   bucket_id, update=False, do_profiling=False):
+  def run_one_step(self, sess, inputs, conditions, targets, update=False, do_profiling=False):
     """Run a step of the model feeding the given inputs.
 
     Args:
       session: tensorflow session to use.
-      encoder_inputs: list of numpy int vectors to feed as encoder inputs.
+      inputs: list of numpy int vectors to feed as encoder inputs.
+      conditions: the article
       targets: target class of the samples
-      bucket_id: which bucket of the model to use.
       update: whether to do the update or not.
+      do_profiling: if to profile the model
 
     Returns:
       A triple consisting of gradient norm (or None if we did not do backward),
@@ -159,14 +169,9 @@ class Seq2ClassModel(object):
       ValueError: if length of encoder_inputs, decoder_inputs, or
         target_weights disagrees with bucket size for the specified bucket_id.
     """
-    # Check if the sizes match.
-    encoder_size = self.buckets[bucket_id]
-    if len(encoder_inputs) != encoder_size:
-      raise ValueError("Encoder length must be equal to the one in bucket, %d != %d." % (len(encoder_inputs), encoder_size))
-
     # Input feed: encoder inputs, decoder inputs, target_weights, as provided.
     input_feed = {}
-    for l in xrange(encoder_size):
+    for l in range(encoder_size):
       input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
     if not self.is_decoding:
       input_feed[self.targets.name] = targets

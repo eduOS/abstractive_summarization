@@ -50,4 +50,4 @@ def load_ckpt(saver, sess):
 
 
 def shuffle_batch(batch):
-    pass
+    return batch
