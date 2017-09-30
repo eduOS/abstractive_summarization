@@ -37,7 +37,7 @@ def convolution2d(inputs,
     else:
       outputs = outputs + biases
     if pool_size:
-      pool_shape = [1] + list(pool_size) + [1]
+      pool_shape = [1, 1] + list(pool_size) + [1]
       outputs = tf.nn.max_pool(outputs, pool_shape, pool_shape, padding='SAME')
     if activation_fn:
       outputs = activation_fn(outputs)
@@ -77,6 +77,9 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
         for i in range(conv_layers):
           i_outputs -= convolution2d(activation_fn(i_outputs), layer_size, kernel_size, decay=decay,
                                      activation_fn=activation_fn, is_training=is_training)
+    # maybe dropout is useful
+    i_outputs = tf.squeeze(i_outputs, [1])
+    inputs_emb = tf.reduce_max(i_outputs, axis=1)
 
     c_outputs = conditions
     for j in range(pool_layers*2):
@@ -89,4 +92,9 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
         for i in range(conv_layers*2):
           c_outputs -= convolution2d(activation_fn(c_outputs), layer_size, kernel_size, decay=decay,
                                      activation_fn=activation_fn, is_training=is_training)
-    return tf.concat(0, [i_outputs, c_outputs])
+
+    c_outputs = tf.squeeze(c_outputs, [1])
+    conditions_emb = tf.reduce_max(c_outputs, axis=1)
+
+    return tf.concat(1, [inputs_emb, conditions_emb])
+    # concatenate on the third dimension, the length
