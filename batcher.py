@@ -516,10 +516,10 @@ class DisBatcher:
     all training data have a compared negative abstract which can be ignored in the gan training
     """
 
-    def __init__(self, data_dir, vocab, batch_size=1, max_art_steps=80, max_abs_steps=15, single_pass=False, clip_length=True):
-        self.positive = fopen(os.path.join(data_dir, "positive"), 'r')
-        self.negative = fopen(os.path.join(data_dir, "negative"), 'r')
-        self.source = fopen(os.path.join(data_dir, "source"), 'r')
+    def __init__(self, data_dir, mode, vocab, batch_size=1, max_art_steps=80, max_abs_steps=15, single_pass=False, clip_length=True):
+        self.positive = fopen(os.path.join(data_dir, mode + "_positive"), 'r')
+        self.negative = fopen(os.path.join(data_dir, mode + "_negative"), 'r')
+        self.source = fopen(os.path.join(data_dir, mode + "_source"), 'r')
         self.vocab = vocab
 
         self.batch_size = batch_size

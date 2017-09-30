@@ -78,7 +78,9 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
           i_outputs -= convolution2d(activation_fn(i_outputs), layer_size, kernel_size, decay=decay,
                                      activation_fn=activation_fn, is_training=is_training)
     # maybe dropout is useful
+    # squeeze the highth dimension
     i_outputs = tf.squeeze(i_outputs, [1])
+    # make the embedding sequence to be only one embedding
     inputs_emb = tf.reduce_max(i_outputs, axis=1)
 
     c_outputs = conditions
@@ -96,5 +98,5 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
     c_outputs = tf.squeeze(c_outputs, [1])
     conditions_emb = tf.reduce_max(c_outputs, axis=1)
 
+    # concatenate the two embeding and make the embedding to be twice long
     return tf.concat(1, [inputs_emb, conditions_emb])
-    # concatenate on the third dimension, the length

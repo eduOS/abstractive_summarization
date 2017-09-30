@@ -27,7 +27,7 @@ tf.app.flags.DEFINE_integer("kernel_size", 3, "Number of layers in the model.")
 tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
 tf.app.flags.DEFINE_integer("dis_vocab_size", 10000, "vocabulary size.")
-tf.app.flags.DEFINE_integer("num_class", 50, "num of output classes.")
+tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_string("buckets", "9,12,20,40", "buckets of different lengths")
 
 # Training parameters
@@ -172,7 +172,7 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
                 summary_writer.flush()
 
 
-def pretrain_discriminator(model, batcher, sess_context_manager, summary_writer):
+def pretrain_discriminator(sess_context_manager, model, vocab, batcher, summary_writer):
   """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
   with sess_context_manager as sess:
     # This is the training loop.
@@ -180,11 +180,13 @@ def pretrain_discriminator(model, batcher, sess_context_manager, summary_writer)
     current_step = 0
     eval_loss_best = sys.float_info.max
     previous_losses = [eval_loss_best]
+    if FLAGS.early_stop:
+        eval_batcher = DisBatcher(FLAGS.data_path, "eval", vocab, FLAGS.batch_size, single_pass=FLAGS.single_pass)
     while True:
       start_time = time.time()
       batch = batcher.next()
       inputs, conditions, targets = data.prepare_dis_pretraining_batch(batch)
-      step_loss = model.run_one_step(sess_context_manager, inputs, conditions, targets, update=True, do_profiling=False)
+      step_loss = model.run_one_step(sess_context_manager, inputs, conditions, targets, update=True)
       step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
       loss += step_loss / FLAGS.steps_per_checkpoint
       current_step += 1
@@ -201,15 +203,13 @@ def pretrain_discriminator(model, batcher, sess_context_manager, summary_writer)
           eval_losses = []
           for bucket_id_eval in range(len(_buckets)):
             while True:
-              encoder_inputs_eval, targets_eval, vflag = batcher.get_batch(dev_set[bucket_id_eval], put_back=False)
-              if vflag:
-                eval_losses.append(model.step(sess, encoder_inputs_eval, targets_eval, bucket_id_eval, update=False))
-              else:
-                break
+              batch = eval_batcher.next()
+              eval_inputs, eval_conditions, eval_targets = data.prepare_dis_pretraining_batch(batch)
+              step_loss = model.run_one_step(sess_context_manager, eval_inputs, eval_conditions, eval_targets, update=False)
+              eval_losses.append(step_loss)
           eval_loss = sum(eval_losses) / len(eval_losses)
           print("  eval loss %.4f" % eval_loss)
           previous_losses.append(eval_loss)
-          dev_set = read_data(dev_path, vocab, cmd_class)
           sys.stdout.flush()
           threshold = 10
           if eval_loss > 0.99 * previous_losses[-2]:
@@ -262,7 +262,7 @@ def main(argv):
     gen_batcher = GenBatcher(FLAGS.data_path, gen_vocab, hps, single_pass=FLAGS.single_pass)
 
     dis_vocab = Vocab(os.path.join(FLAGS.data_path, 'dis_vocab'), FLAGS.dis_vocab_size)
-    dis_batcher = DisBatcher(FLAGS.data_path, dis_vocab, hps, single_pass=FLAGS.single_pass)
+    dis_batcher = DisBatcher(FLAGS.data_path, "train", dis_vocab, FLAGS.batch_size, single_pass=FLAGS.single_pass)
     # TODO change to pass number
 
     if "train" in FLAGS.mode:
@@ -343,20 +343,20 @@ def main(argv):
             discriminator.init_emb(sess, hps.train_dir)
 
         # --------------- train generator ---------------
-        if "gen" in mode:
-            generator_training_model_hps = hps
-            pretrain_generator(generator, batcher, sess, summary_writer)
+        if "gen" in FLAGS.mode:
+            pretrain_generator(generator, gen_batcher, sess, summary_writer)
 
-        # --------------- train discriminator ---------------
-        elif "dis" in mode:
-            pretrain_discriminator(discriminator, batcher, sess, summary_writer)
+        # --------------- train discriminator -----------
+        elif "dis" in FLAGS.mode:
+            pretrain_discriminator(sess, discriminator, dis_vocab, dis_batcher, summary_writer)
 
-        # --------------- finetune the generator ---------------
+        # --------------- finetune the generator --------
         else:
             rollout = ROLLOUT(generator, 0.8)
-            for i_gan in range(gan_iter):
+            # get_reward, update_params
+            for i_gan in range(FLAGS.gan_iter):
                 # Train the generator for one step
-                for it in range(gan_gen_iter):
+                for it in range(FLAGS.gan_gen_iter):
                     samples = generator.generate(sess)
                     rewards = rollout.get_reward(sess, samples, 16, discriminator)
                     feed = {generator.x: samples, generator.rewards: rewards}
