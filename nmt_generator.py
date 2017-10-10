@@ -1325,9 +1325,7 @@ class GenNmt(object):
             # print('the dtype of i is ', i.dtype)
             # print('the shape of y is ', y.dtype)
             with tf.variable_scope('decoder'):
-                proj_y = cellDecoder_s(
-                    (emb_y, tf.ones([n_sample, self.dim])),
-                    init_state)
+                proj_y = cellDecoder_s((emb_y, tf.ones([n_sample, self.dim])), init_state)
 
             next_state = tf.slice(proj_y[0], [0, 0], [n_sample, self.dim])
             ctxs = tf.slice(proj_y[0], [0, self.dim], [n_sample, self.dim * 2])
@@ -1375,16 +1373,13 @@ class GenNmt(object):
             log_probs = tf.log(next_probs)
             next_sample = tf.multinomial(log_probs, 1)
 
-            next_sample_flat = tf.cast(
-                next_sample, tf.int32)  # convert to tf.int32
+            next_sample_flat = tf.cast(next_sample, tf.int32)  # convert to tf.int32
             next_sample_squeeze = tf.squeeze(next_sample_flat, [1])
 
             y_sample = y_sample.write(i, next_sample_squeeze)
-            next_emb = tf.nn.embedding_lookup(
-                self.vocabtable, next_sample_squeeze)
+            next_emb = tf.nn.embedding_lookup(self.vocabtable, next_sample_squeeze)
 
-            return (
-                i+1, next_sample_flat, next_emb, give_num, next_state, y_sample)
+            return (i+1, next_sample_flat, next_emb, give_num, next_state, y_sample)
 
         y0 = tf.zeros([n_sample, self.dim_word])
 

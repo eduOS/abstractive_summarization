@@ -315,8 +315,7 @@ class PointerGenerator(object):
             # Add the decoder.
             with tf.variable_scope('decoder'):
                 decoder_outputs, self._dec_out_state, \
-                    self.attn_dists, self.p_gens, self.coverage = \
-                    self._add_decoder(emb_dec_inputs)
+                    self.attn_dists, self.p_gens, self.coverage = self._add_decoder(emb_dec_inputs)
 
             # Add the output projection to obtain the vocabulary distribution
             with tf.variable_scope('output_projection'):
@@ -324,11 +323,7 @@ class PointerGenerator(object):
                     'w', [hps.hidden_dim, vsize],
                     dtype=tf.float32, initializer=self.trunc_norm_init)
                 w_t = tf.transpose(w)  # NOQA
-                v = tf.get_variable(
-                    'v',
-                    [vsize],
-                    dtype=tf.float32,
-                    initializer=self.trunc_norm_init)
+                v = tf.get_variable('v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
                 vocab_scores = []
                 # vocab_scores is the vocabulary distribution before applying
                 # softmax. Each entry on the list corresponds to one decoder
@@ -336,8 +331,7 @@ class PointerGenerator(object):
                 for i, output in enumerate(decoder_outputs):
                     if i > 0:
                         tf.get_variable_scope().reuse_variables()
-                    vocab_scores.append(
-                        tf.nn.xw_plus_b(output, w, v))
+                    vocab_scores.append(tf.nn.xw_plus_b(output, w, v))
                     # apply the linear layer
 
                 # The vocabulary distributions. List length max_dec_steps of
@@ -349,8 +343,7 @@ class PointerGenerator(object):
             # For pointer-generator model, calc final distribution from copy
             # distribution and vocabulary distribution, then take log
             if FLAGS.pointer_gen:
-                final_dists = self._calc_final_dist(
-                    vocab_dists, self.attn_dists)
+                final_dists = self._calc_final_dist(vocab_dists, self.attn_dists)
                 # Take log of final distribution
                 log_dists = [tf.log(dist) for dist in final_dists]
             else:  # just take log of vocab_dists

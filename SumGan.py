@@ -182,7 +182,7 @@ def pretrain_discriminator(sess_context_manager, model, vocab, batcher, summary_
     eval_loss_best = sys.float_info.max
     previous_losses = [eval_loss_best]
     if FLAGS.early_stop:
-        eval_batcher = DisBatcher(FLAGS.data_path, "eval", vocab, FLAGS.batch_size, single_pass=FLAGS.single_pass)
+      eval_batcher = DisBatcher(FLAGS.data_path, "eval", vocab, FLAGS.batch_size, single_pass=FLAGS.single_pass)
     while True:
       start_time = time.time()
       batch = batcher.next()
