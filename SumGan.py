@@ -362,8 +362,10 @@ def main(argv):
                 # Train the generator for one step
                 for it in range(FLAGS.gan_gen_iter):
                     batch = decoder._batcher.next_batch()
-                    enc_states, dec_in_state, sample = decoder.generate(batch)
-                    rewards = rollout.get_reward(sess, samples, 16, discriminator)
+                    enc_states, dec_in_state, samples = decoder.generate(batch)
+                    source = batch
+                    rollout.generate(enc_states, dec_in_state, samples)
+                    rewards = rollout.get_reward(sess, source, 16, discriminator)
                     feed = {generator.x: samples, generator.rewards: rewards}
                     _ = sess.run(generator.g_updates, feed_dict=feed)
 

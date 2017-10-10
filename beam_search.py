@@ -94,8 +94,25 @@ class Hypothesis(object):
         return self.log_prob / len(self.tokens)
 
 
-def run_beam_search(sess, model, vocab, batch):
-    """Performs beam search decoding on the given example.
+def run_beam_search():
+    """ For the true decoding
+    Performs beam search decoding on the given example.
+
+    Args:
+      sess: a tf.Session
+      model: a seq2seq model
+      vocab: Vocabulary object
+      batch: Batch object that is the same example repeated across the batch
+
+    Returns:
+      best_hyp: Hypothesis object; the best hypothesis found by beam search.
+    """
+    pass
+
+
+def beam_search(sess, model, vocab, batch):
+    """ For the GAN
+    Performs beam search decoding on the given example.
 
     Args:
       sess: a tf.Session
@@ -107,7 +124,6 @@ def run_beam_search(sess, model, vocab, batch):
       best_hyp: Hypothesis object; the best hypothesis found by beam search.
     """
     # Run the encoder to get the encoder hidden states and decoder initial state
-    enc_states, dec_in_state = model.run_encoder(sess, batch)
     # dec_in_state is a LSTMStateTuple
     # enc_states has shape [batch_size, <=max_enc_steps, 2*hidden_dim].
 
@@ -116,7 +132,7 @@ def run_beam_search(sess, model, vocab, batch):
         Hypothesis(
             tokens=[vocab.word2id(data.START_DECODING)],
             log_probs=[0.0],
-            state=dec_in_state,
+            state=model.dec_in_state,
             attn_dists=[],
             p_gens=[],
             # zero vector of length attention_length
@@ -147,7 +163,7 @@ def run_beam_search(sess, model, vocab, batch):
             attn_dists, p_gens, new_coverage
         ) = model.decode_onestep(
             sess=sess, batch=batch, latest_tokens=latest_tokens,
-            enc_states=enc_states, dec_init_states=states,
+            enc_states=model.enc_states, dec_init_states=states,
             prev_coverage=prev_coverage
         )
 
@@ -159,11 +175,10 @@ def run_beam_search(sess, model, vocab, batch):
         num_orig_hyps = 1 if steps == 0 else len(hyps)
         for i in range(num_orig_hyps):
             h, new_state, attn_dist, p_gen, new_coverage_i = \
-                hyps[i], new_states[i], attn_dists[i], \
-                p_gens[i], new_coverage[i]
+                hyps[i], new_states[i], attn_dists[i], p_gens[i], new_coverage[i]
             # take the ith hypothesis and new decoder state info
             # for each of the top 2*beam_size hyps:
-            for j in xrange(FLAGS.beam_size * 2):  # NOQA
+            for j in range(FLAGS.beam_size * 2):
                 # Extend the ith hypothesis with the jth option
                 new_hyp = h.extend(token=topk_ids[i, j],
                                    log_prob=topk_log_probs[i, j],
@@ -205,7 +220,7 @@ def run_beam_search(sess, model, vocab, batch):
     hyps_sorted = sort_hyps(results)
 
     # Return the hypothesis with highest average log prob
-    return enc_states, dec_in_state, hyps_sorted[0]
+    return hyps_sorted[0]
 
 
 def sort_hyps(hyps):

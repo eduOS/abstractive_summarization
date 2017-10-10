@@ -1274,43 +1274,15 @@ class GenNmt(object):
             ctxs = tf.slice(proj_y[0], [0, self.dim], [n_sample, self.dim * 2])
 
             logit_rnn = FCLayer(
-                next_state,
-                self.dim,
-                self.dim_word,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit_lstm',
-                prefix='ff_logit_lstm',
-                precision=self.precision)
+                next_state, self.dim, self.dim_word, is_3d=False, reuse_var=reuse_var, scope='ff_logit_lstm', prefix='ff_logit_lstm', precision=self.precision)
             logit_prev = FCLayer(
-                emb_y,
-                self.dim_word,
-                self.dim_word,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit_prev',
-                prefix='ff_logit_prev',
-                precision=self.precision)
+                emb_y, self.dim_word, self.dim_word, is_3d=False, reuse_var=reuse_var, scope='ff_logit_prev', prefix='ff_logit_prev', precision=self.precision)
             logit_ctx = FCLayer(
-                ctxs,
-                self.dim*2,
-                self.dim_word,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit_ctx',
-                prefix='ff_logit_ctx',
-                precision=self.precision)
+                ctxs, self.dim*2, self.dim_word, is_3d=False, reuse_var=reuse_var, scope='ff_logit_ctx', prefix='ff_logit_ctx', precision=self.precision)
 
             logit = tf.tanh(logit_rnn + logit_prev + logit_ctx)
             logit = FCLayer(
-                logit,
-                self.dim_word,
-                self.vocab_size,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit',
-                prefix='ff_logit',
-                precision=self.precision)
+                logit, self.dim_word, self.vocab_size, is_3d=False, reuse_var=reuse_var, scope='ff_logit', prefix='ff_logit', precision=self.precision)
             logit = tf.reshape(logit, [-1, self.vocab_size])
 
             next_y = y_index.read(i)
@@ -1331,47 +1303,20 @@ class GenNmt(object):
             ctxs = tf.slice(proj_y[0], [0, self.dim], [n_sample, self.dim * 2])
 
             logit_rnn = FCLayer(
-                next_state,
-                self.dim,
-                self.dim_word,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit_lstm',
-                prefix='ff_logit_lstm',
-                precision=self.precision)
+                next_state, self.dim, self.dim_word, is_3d=False, reuse_var=reuse_var, scope='ff_logit_lstm', prefix='ff_logit_lstm', precision=self.precision)
             logit_prev = FCLayer(
-                emb_y,
-                self.dim_word,
-                self.dim_word,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit_prev',
-                prefix='ff_logit_prev',
-                precision=self.precision)
+                emb_y, self.dim_word, self.dim_word, is_3d=False, reuse_var=reuse_var, scope='ff_logit_prev', prefix='ff_logit_prev', precision=self.precision)
             logit_ctx = FCLayer(
-                ctxs,
-                self.dim*2,
-                self.dim_word,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit_ctx',
-                prefix='ff_logit_ctx',
-                precision=self.precision)
+                ctxs, self.dim*2, self.dim_word, is_3d=False, reuse_var=reuse_var, scope='ff_logit_ctx', prefix='ff_logit_ctx', precision=self.precision)
             logit = tf.tanh(logit_rnn + logit_prev + logit_ctx)
             logit = FCLayer(
-                logit,
-                self.dim_word,
-                self.vocab_size,
-                is_3d=False,
-                reuse_var=reuse_var,
-                scope='ff_logit',
-                prefix='ff_logit',
-                precision=self.precision)
+                logit, self.dim_word, self.vocab_size, is_3d=False, reuse_var=reuse_var, scope='ff_logit', prefix='ff_logit', precision=self.precision)
             logit = tf.reshape(logit, [-1, self.vocab_size])
 
             next_probs = tf.nn.softmax(logit)
             log_probs = tf.log(next_probs)
             next_sample = tf.multinomial(log_probs, 1)
+            # this introduces the randomization
 
             next_sample_flat = tf.cast(next_sample, tf.int32)  # convert to tf.int32
             next_sample_squeeze = tf.squeeze(next_sample_flat, [1])
@@ -1396,6 +1341,8 @@ class GenNmt(object):
                               tf.TensorShape([None, self.dim]),
                               tf.TensorShape(None)))
 
+        # the recurrency_given is for generating the state, while the output
+        # y_sample is just the same as the original
         _, _, _, _, _, y_sample = tf.while_loop(
             cond=lambda i, _1, _2, _3, _4, _5: i < self.max_leng,
             body=recurrency,
@@ -1484,16 +1431,7 @@ class GenNmt(object):
                 outfile.write(y_str+'\n')
 
     def get_reward(
-        self,
-        x,
-        x_mask,
-        x_to_maxlen,
-        y_sample,
-        y_sample_mask,
-        rollnum,
-        discriminator,
-        bias_num=None
-    ):
+        self, x, x_mask, x_to_maxlen, y_sample, y_sample_mask, rollnum, discriminator, bias_num=None):
         rewards = []
         for i in range(rollnum):
             for give_num in numpy.arange(1, self.max_leng, dtype='int32'):

@@ -49,7 +49,7 @@ class Rollout(object):
 
         # When current index i < given_num, use the provided tokens as the input
         # at each time step
-        def _g_recurrence_1(i, x_t, h_tm1, given_num, gen_x):
+        def _g_recurrence_given(i, x_t, h_tm1, given_num, gen_x):
             h_t = self.g_recurrent_unit(x_t, h_tm1)  # hidden_memory_tuple
             x_tp1 = ta_emb_x.read(i)
             gen_x = gen_x.write(i, ta_x.read(i))
@@ -57,7 +57,7 @@ class Rollout(object):
 
         # When current index i >= given_num, start roll-out, use the output as
         # time step t as the input at time step t+1
-        def _g_recurrence_2(i, x_t, h_tm1, given_num, gen_x):
+        def _g_recurrence(i, x_t, h_tm1, given_num, gen_x):
             h_t = self.g_recurrent_unit(x_t, h_tm1)  # hidden_memory_tuple
             o_t = self.g_output_unit(h_t)  # batch x vocab , logits not prob
             log_prob = tf.log(tf.nn.softmax(o_t))
@@ -70,7 +70,7 @@ class Rollout(object):
 
         i, x_t, h_tm1, given_num, self.gen_x = control_flow_ops.while_loop(
             cond=lambda i, _1, _2, given_num, _4: i < given_num,
-            body=_g_recurrence_1,
+            body=_g_recurrence_given,
             loop_vars=(tf.constant(0, dtype=tf.int32),
                        tf.nn.embedding_lookup(
                            self.g_embeddings, self.start_token),
@@ -78,14 +78,14 @@ class Rollout(object):
 
         _, _, _, _, self.gen_x = control_flow_ops.while_loop(
             cond=lambda i, _1, _2, _3, _4: i < self.sequence_length,
-            body=_g_recurrence_2,
+            body=_g_recurrence,
             loop_vars=(i, x_t, h_tm1, given_num, self.gen_x))
 
         self.gen_x = self.gen_x.stack()  # seq_length x batch_size
         self.gen_x = tf.transpose(self.gen_x, perm=[1, 0])
         # batch_size x seq_length
 
-    def get_reward(self, sess, input_x, input_xs, rollout_num, discriminator):
+    def get_reward(self, sess, enc_states, dec_in_state, input_x, input_xs, rollout_num, discriminator):
         rewards = []
         for i in range(rollout_num):
             for given_num in range(1, 20):

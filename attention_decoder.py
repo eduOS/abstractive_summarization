@@ -29,15 +29,9 @@ from tensorflow.python.ops import math_ops
 # https://www.tensorflow.org/api_guides/python/contrib.seq2seq#Attention
 
 
-def attention_decoder(  # NOQA
-    decoder_inputs,
-    initial_state,
-    encoder_states,
-    cell,
-    initial_state_attention=False,
-    pointer_gen=True,
-    use_coverage=False,
-    prev_coverage=None):
+def attention_decoder(decoder_inputs, initial_state, encoder_states,
+                      cell, initial_state_attention=False, pointer_gen=True,
+                      use_coverage=False, prev_coverage=None):
     """
     Args:
       decoder_inputs: A list of 2D Tensors [batch_size x input_size].
