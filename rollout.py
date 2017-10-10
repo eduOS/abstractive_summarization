@@ -3,11 +3,12 @@ from tensorflow.python.ops import tensor_array_ops, control_flow_ops
 import numpy as np
 
 
-class ROLLOUT(object):
+class Rollout(object):
     def __init__(self, generator, update_rate):
         self.generator = generator
         self.update_rate = update_rate
 
+        # -------
         self.num_emb = self.generator.num_emb
         self.batch_size = self.generator.batch_size
         self.emb_dim = self.generator.emb_dim
@@ -15,11 +16,12 @@ class ROLLOUT(object):
         self.sequence_length = self.generator.sequence_length
         self.start_token = tf.identity(self.generator.start_token)
         self.learning_rate = self.generator.learning_rate
+        # -------
 
-        self.g_embeddings = tf.identity(self.generator.g_embeddings)
-        self.g_recurrent_unit = self.create_recurrent_unit()
+        self.g_embeddings = tf.identity(self.generator.embeddings)
+        self.g_recurrent_unit = tf.get_variable('generator/decoder_cell')
         # maps h_tm1 to h_t for generator
-        self.g_output_unit = self.create_output_unit()
+        self.g_output_unit = self.get_output_unit()
         # maps h_t to o_t (output token logits)
 
         #######################################################################
@@ -115,57 +117,6 @@ class ROLLOUT(object):
         rewards = np.transpose(np.array(rewards)) / (1.0 * rollout_num)
         # batch_size x seq_length
         return rewards
-
-    def create_recurrent_unit(self):
-        # Weights and Bias for input and hidden tensor
-        self.Wi = tf.identity(self.generator.Wi)
-        self.Ui = tf.identity(self.generator.Ui)
-        self.bi = tf.identity(self.generator.bi)
-
-        self.Wf = tf.identity(self.generator.Wf)
-        self.Uf = tf.identity(self.generator.Uf)
-        self.bf = tf.identity(self.generator.bf)
-
-        self.Wog = tf.identity(self.generator.Wog)
-        self.Uog = tf.identity(self.generator.Uog)
-        self.bog = tf.identity(self.generator.bog)
-
-        self.Wc = tf.identity(self.generator.Wc)
-        self.Uc = tf.identity(self.generator.Uc)
-        self.bc = tf.identity(self.generator.bc)
-
-        def unit(x, hidden_memory_tm1):
-            previous_hidden_state, c_prev = tf.unstack(hidden_memory_tm1)
-
-            # Input Gate
-            i = tf.sigmoid(tf.matmul(x, self.Wi) +
-                           tf.matmul(previous_hidden_state, self.Ui) +
-                           self.bi)
-
-            # Forget Gate
-            f = tf.sigmoid(tf.matmul(x, self.Wf) +
-                           tf.matmul(previous_hidden_state, self.Uf) +
-                           self.bf)
-
-            # Output Gate
-            o = tf.sigmoid(tf.matmul(x, self.Wog) +
-                           tf.matmul(previous_hidden_state, self.Uog) +
-                           self.bog)
-
-            # New Memory Cell
-            c_ = tf.nn.tanh(tf.matmul(x, self.Wc) +
-                            tf.matmul(previous_hidden_state, self.Uc) +
-                            self.bc)
-
-            # Final Memory cell
-            c = f * c_prev + i * c_
-
-            # Current Hidden state
-            current_hidden_state = o * tf.nn.tanh(c)
-
-            return tf.stack([current_hidden_state, c])
-
-        return unit
 
     def update_recurrent_unit(self):
         # Weights and Bias for input and hidden tensor

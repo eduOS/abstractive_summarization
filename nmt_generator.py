@@ -1392,9 +1392,7 @@ class GenNmt(object):
             cond=lambda i, _1, _2, give_num, _4, _5: i < give_num,
             body=recurrency_given,
             loop_vars=(tf.constant(0, dtype=tf.int32),
-                       tf.constant(
-                           -1, shape=[n_sample, 1],
-                           dtype=tf.int32),
+                       tf.constant(-1, shape=[n_sample, 1], dtype=tf.int32),
                        y0, give_num, init_state, y_sample),
             shape_invariants=(tf.TensorShape(None),
                               tf.TensorShape([n_sample, 1]),

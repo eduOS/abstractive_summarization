@@ -100,8 +100,8 @@ class PointerGenerator(object):
             ([batch_size,hidden_dim],[batch_size,hidden_dim])
         """
         with tf.variable_scope('encoder'):
-            cell_fw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
-            cell_bw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
+            cell_fw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True, name="cell_fw")
+            cell_bw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True, name="cell_bw")
             (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
             # concatenate the forwards and backwards states
@@ -142,12 +142,9 @@ class PointerGenerator(object):
             old_c = tf.concat(axis=1, values=[fw_st.c, bw_st.c])
             # Concatenation of fw and bw state
             old_h = tf.concat(axis=1, values=[fw_st.h, bw_st.h])
-            new_c = tf.nn.relu(tf.matmul(old_c, w_reduce_c) +
-                               bias_reduce_c)  # Get new cell from old cell
-            new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) +
-                               bias_reduce_h)  # Get new state from old state
-            return tf.contrib.rnn.LSTMStateTuple(
-                new_c, new_h)  # Return new cell and state
+            new_c = tf.nn.relu(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
+            new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
+            return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
 
     def _add_decoder(self, inputs):
         """Add attention decoder to the graph. In train or eval mode, you call
@@ -169,7 +166,7 @@ class PointerGenerator(object):
         cell = tf.contrib.rnn.LSTMCell(
             hps.hidden_dim,
             state_is_tuple=True,
-            initializer=self.rand_unif_init)
+            initializer=self.rand_unif_init, name='decoder_cell')
 
         # In decode mode, we run attention_decoder one step at a time and so
         # need to pass in the previous step's coverage vector each time

@@ -9,6 +9,7 @@ import re
 import data
 from batcher import GenBatcher, DisBatcher
 from decode import BeamSearchDecoder
+from model import SummarizationModel
 from pointer_generator import PointerGenerator
 from rollout import ROLLOUT
 
@@ -290,15 +291,15 @@ def main(argv):
             if key in hparam_gen:  # if it's in the list
                 hps_dict[key] = val  # add it to the dict
 
-        hps = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
+        hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
         if FLAGS.segment is not True:
-            hps = hps._replace(max_enc_steps=110)
-            hps = hps._replace(max_dec_steps=25)
+            hps_gen = hps_gen._replace(max_enc_steps=110)
+            hps_gen = hps_gen._replace(max_dec_steps=25)
         else:
-            assert hps.max_enc_steps == 80, "No segmentation, max_enc_steps wrong"
-            assert hps.max_dec_steps == 15, "No segmentation, max_dec_steps wrong"
+            assert hps_gen.max_enc_steps == 80, "No segmentation, max_enc_steps wrong"
+            assert hps_gen.max_dec_steps == 15, "No segmentation, max_dec_steps wrong"
         with tf.variable_scope("generator"):
-            generator = PointerGenerator(hps, gen_vocab)
+            generator = PointerGenerator(hps_gen, gen_vocab)
             generator.build_graph()
 
         hparam_dis = [
@@ -325,22 +326,22 @@ def main(argv):
             if key in hparam_dis:  # if it's in the list
                 hps_dict[key] = val  # add it to the dict
 
-        hps = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
+        hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
         with tf.variable_scope("discriminator"):
-            discriminator = Seq2ClassModel(hps)
+            discriminator = Seq2ClassModel(hps_dis)
             discriminator.build_graph()
 
         saver = tf.train.Saver()
 
-        sv = tf.train.Supervisor(logdir=hps.train_dir, is_chief=True, saver=saver, summary_op=None, save_summaries_secs=60, save_model_secs=60)
+        sv = tf.train.Supervisor(logdir=hps_dis.train_dir, is_chief=True, saver=saver, summary_op=None, save_summaries_secs=60, save_model_secs=60)
         summary_writer = sv.summary_writer
         tf.logging.info("Preparing or waiting for session...")
         sess = sv.prepare_or_wait_for_session(config=util.get_config())
 
         # initialize the embedding at the begging of training
-        ckpt = tf.train.get_checkpoint_state(hps.train_dir)
+        ckpt = tf.train.get_checkpoint_state(hps_dis.train_dir)
         if ckpt and not tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
-            discriminator.init_emb(sess, hps.train_dir)
+            discriminator.init_emb(sess, hps_dis.train_dir)
 
         # --------------- train generator ---------------
         if "gen" in FLAGS.mode:
@@ -352,12 +353,16 @@ def main(argv):
 
         # --------------- finetune the generator --------
         else:
+            decode_model_hps = hps_gen
+            model = SummarizationModel(decode_model_hps, gen_vocab)
+            decoder = BeamSearchDecoder(model, gen_batcher, gen_vocab)
             rollout = ROLLOUT(generator, 0.8)
             # get_reward, update_params
             for i_gan in range(FLAGS.gan_iter):
                 # Train the generator for one step
                 for it in range(FLAGS.gan_gen_iter):
-                    samples = generator.generate(sess)
+                    batch = decoder._batcher.next_batch()
+                    enc_states, dec_in_state, sample = decoder.generate(batch)
                     rewards = rollout.get_reward(sess, samples, 16, discriminator)
                     feed = {generator.x: samples, generator.rewards: rewards}
                     _ = sess.run(generator.g_updates, feed_dict=feed)

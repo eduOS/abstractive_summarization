@@ -157,7 +157,7 @@ def run_beam_search(sess, model, vocab, batch):
         # hypothesis). On subsequent steps, all original hypotheses are
         # distinct.
         num_orig_hyps = 1 if steps == 0 else len(hyps)
-        for i in xrange(num_orig_hyps):  # NOQA
+        for i in range(num_orig_hyps):
             h, new_state, attn_dist, p_gen, new_coverage_i = \
                 hyps[i], new_states[i], attn_dists[i], \
                 p_gens[i], new_coverage[i]
@@ -205,7 +205,7 @@ def run_beam_search(sess, model, vocab, batch):
     hyps_sorted = sort_hyps(results)
 
     # Return the hypothesis with highest average log prob
-    return hyps_sorted[0]
+    return enc_states, dec_in_state, hyps_sorted[0]
 
 
 def sort_hyps(hyps):
