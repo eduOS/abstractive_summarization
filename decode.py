@@ -89,13 +89,11 @@ class BeamSearchDecoder(object):
             return
 
         # Run beam search to get best Hypothesis
-        enc_states, dec_in_state, best_hyp = beam_search.run_beam_search(
-            self._sess, self._model, self._vocab, batch)
+        best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
 
         # Extract the output ids from the hypothesis and convert back to
         # words
-        output_ids = [int(t) for t in best_hyp.tokens[1:]]
-        return enc_states, dec_in_state, output_ids
+        self.output_ids = [int(t) for t in best_hyp.tokens[1:]]
 
     def decode(self):
         """Decode examples until data is exhausted (if FLAGS.single_pass) and

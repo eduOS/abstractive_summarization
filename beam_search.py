@@ -152,6 +152,7 @@ def beam_search(sess, model, vocab, batch):
             t if t in xrange(  # NOQA
                 vocab.size()) else vocab.word2id(
                 data.UNKNOWN_TOKEN) for t in latest_tokens]
+        # UNKNOWN_TOKEN will be replaced with a placeholder
         # list of current decoder states of the hypotheses
         states = [h.state for h in hyps]
         # list of coverage vectors (or None)

@@ -396,23 +396,6 @@ class PointerGenerator(object):
                             self._loss + hps.cov_loss_wt * self._coverage_loss
                         tf.summary.scalar('total_loss', self._total_loss)
 
-                # with tf.variable_scope('g_loss'):
-                #     self.g_loss = -tf.reduce_sum(
-                #         tf.reduce_sum(
-                #             tf.one_hot(
-                #                 tf.to_int32(tf.reshape(y_transpose, [-1])), self._hps.max_dec_steps, 1.0, 0.0
-                #             ) *
-                #             tf.reshape(
-                #                 g_predictions,
-                #                 [-1, self._hps.max_dec_steps]), 1
-                #         ) * tf.reshape(reward, [-1]), 0) / n_sample
-                #     # log is removed for WGAN
-
-                #     self.g_grad, _ = tf.clip_by_global_norm(
-                #         tf.gradients(self.g_loss, self.g_params),
-                #         self.grad_clip)
-                #     self.g_updates = g_opt.apply_gradients(zip(self.g_grad, self.g_params))
-
         if hps.mode == "decode":
             # We run decode beam search mode one decoder step at a time
             # log_dists is a singleton list containing shape (batch_size,
@@ -553,11 +536,74 @@ class PointerGenerator(object):
         )
         return enc_states, dec_in_state
 
-    def run_decode_onestep(self):
-        pass
+    def run_decode_onestep4rollout(self, sess, batch, latest_tokens, enc_states,
+                                   dec_init_states, prev_coverage):
 
-    def decode_onestep(self, batch, latest_tokens,
-                       enc_states, dec_init_states, prev_coverage):
+        beam_size = len(dec_init_states)
+
+        # Turn dec_init_states (a list of LSTMStateTuples) into a single
+        # LSTMStateTuple for the batch
+        # can this be added to the run_beam_search?
+        cells = [np.expand_dims(state.c, axis=0) for state in dec_init_states]
+        hiddens = [np.expand_dims(state.h, axis=0) for state in dec_init_states]
+        new_c = np.concatenate(cells, axis=0)  # shape [batch_size,hidden_dim]
+        new_h = np.concatenate(hiddens, axis=0)  # shape [batch_size,hidden_dim]
+        new_dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
+
+        feed = {
+            self._enc_states: enc_states,
+            self._dec_in_state: new_dec_in_state,
+            self._dec_batch: np.transpose(np.array([latest_tokens])),
+        }
+
+        to_return = {
+          "ids": self._topk_ids,
+          "probs": self._topk_log_probs,
+          "states": self._dec_out_state,
+          "attn_dists": self.attn_dists
+        }
+
+        if FLAGS.pointer_gen:
+            feed[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
+            feed[self._max_art_oovs] = batch.max_art_oovs
+            to_return['p_gens'] = self.p_gens
+
+        if self._hps.coverage:
+            feed[self.prev_coverage] = np.stack(prev_coverage, axis=0)
+            to_return['coverage'] = self.coverage
+
+        results = sess.run(to_return, feed_dict=feed)  # run the decoder step
+
+        # Convert results['states'] (a single LSTMStateTuple) into a list of
+        # LSTMStateTuple -- one for each hypothesis
+        new_states = [
+            tf.contrib.rnn.LSTMStateTuple(
+                results['states'].c[i, :], results['states'].h[i, :])
+            for i in xrange(beam_size)] # NOQA
+
+        # Convert singleton list containing a tensor to a list of k arrays
+        assert len(results['attn_dists']) == 1
+        attn_dists = results['attn_dists'][0].tolist()
+
+        if FLAGS.pointer_gen:
+            # Convert singleton list containing a tensor to a list of k arrays
+            assert len(results['p_gens']) == 1
+            p_gens = results['p_gens'][0].tolist()
+        else:
+            p_gens = [None for _ in xrange(beam_size)]  # NOQA
+
+        # Convert the coverage tensor to a list length k containing the coverage
+        # vector for each hypothesis
+        if FLAGS.coverage:
+            new_coverage = results['coverage'].tolist()
+            assert len(new_coverage) == beam_size
+        else:
+            new_coverage = [None for _ in xrange(beam_size)]  # NOQA
+
+        return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
+
+    def run_decode_onestep(self, sess, batch, latest_tokens, enc_states,
+                           dec_init_states, prev_coverage):
         """For beam search decoding. Run the decoder for one step.
 
         Args:
@@ -589,13 +635,12 @@ class PointerGenerator(object):
 
         # Turn dec_init_states (a list of LSTMStateTuples) into a single
         # LSTMStateTuple for the batch
+        # can this be added to the run_beam_search?
         cells = [np.expand_dims(state.c, axis=0) for state in dec_init_states]
-        # why a cell and a hidden?
         hiddens = [np.expand_dims(state.h, axis=0) for state in dec_init_states]
         new_c = np.concatenate(cells, axis=0)  # shape [batch_size,hidden_dim]
         new_h = np.concatenate(hiddens, axis=0)  # shape [batch_size,hidden_dim]
         new_dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
-        # change to tf form
 
         feed = {
             self._enc_states: enc_states,
@@ -610,9 +655,23 @@ class PointerGenerator(object):
           "attn_dists": self.attn_dists
         }
 
+        if FLAGS.pointer_gen:
+            feed[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
+            feed[self._max_art_oovs] = batch.max_art_oovs
+            to_return['p_gens'] = self.p_gens
+
+        if self._hps.coverage:
+            feed[self.prev_coverage] = np.stack(prev_coverage, axis=0)
+            to_return['coverage'] = self.coverage
+
+        results = sess.run(to_return, feed_dict=feed)  # run the decoder step
+
         # Convert results['states'] (a single LSTMStateTuple) into a list of
         # LSTMStateTuple -- one for each hypothesis
-        new_states = [tf.contrib.rnn.LSTMStateTuple(results['states'].c[i, :], results['states'].h[i, :]) for i in range(beam_size)]
+        new_states = [
+            tf.contrib.rnn.LSTMStateTuple(
+                results['states'].c[i, :], results['states'].h[i, :])
+            for i in xrange(beam_size)] # NOQA
 
         # Convert singleton list containing a tensor to a list of k arrays
         assert len(results['attn_dists']) == 1
@@ -623,7 +682,7 @@ class PointerGenerator(object):
             assert len(results['p_gens']) == 1
             p_gens = results['p_gens'][0].tolist()
         else:
-            p_gens = [None for _ in range(beam_size)]
+            p_gens = [None for _ in xrange(beam_size)]  # NOQA
 
         # Convert the coverage tensor to a list length k containing the coverage
         # vector for each hypothesis
@@ -631,7 +690,54 @@ class PointerGenerator(object):
             new_coverage = results['coverage'].tolist()
             assert len(new_coverage) == beam_size
         else:
-            new_coverage = [None for _ in range(beam_size)]
+            new_coverage = [None for _ in xrange(beam_size)]  # NOQA
+
+        return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
+
+    def decode_onestep(self, batch, latest_tokens, enc_states, dec_init_states, prev_coverage):
+
+        cells = [np.expand_dims(state.c, axis=0) for state in dec_init_states]
+        hiddens = [np.expand_dims(state.h, axis=0) for state in dec_init_states]
+        new_c = np.concatenate(cells, axis=0)  # shape [batch_size,hidden_dim]
+        new_h = np.concatenate(hiddens, axis=0)  # shape [batch_size,hidden_dim]
+        new_dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
+
+        if FLAGS.pointer_gen:
+            feed[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
+            feed[self._max_art_oovs] = batch.max_art_oovs
+            to_return['p_gens'] = self.p_gens
+
+        if self._hps.coverage:
+            feed[self.prev_coverage] = np.stack(prev_coverage, axis=0)
+            to_return['coverage'] = self.coverage
+
+        results = sess.run(to_return, feed_dict=feed)  # run the decoder step
+
+        # Convert results['states'] (a single LSTMStateTuple) into a list of
+        # LSTMStateTuple -- one for each hypothesis
+        new_states = [
+            tf.contrib.rnn.LSTMStateTuple(
+                results['states'].c[i, :], results['states'].h[i, :])
+            for i in xrange(beam_size)] # NOQA
+
+        # Convert singleton list containing a tensor to a list of k arrays
+        assert len(results['attn_dists']) == 1
+        attn_dists = results['attn_dists'][0].tolist()
+
+        if FLAGS.pointer_gen:
+            # Convert singleton list containing a tensor to a list of k arrays
+            assert len(results['p_gens']) == 1
+            p_gens = results['p_gens'][0].tolist()
+        else:
+            p_gens = [None for _ in xrange(beam_size)]  # NOQA
+
+        # Convert the coverage tensor to a list length k containing the coverage
+        # vector for each hypothesis
+        if FLAGS.coverage:
+            new_coverage = results['coverage'].tolist()
+            assert len(new_coverage) == beam_size
+        else:
+            new_coverage = [None for _ in xrange(beam_size)]  # NOQA
 
         return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
 
