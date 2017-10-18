@@ -94,23 +94,7 @@ class Hypothesis(object):
         return self.log_prob / len(self.tokens)
 
 
-def run_beam_search():
-    """ For the true decoding
-    Performs beam search decoding on the given example.
-
-    Args:
-      sess: a tf.Session
-      model: a seq2seq model
-      vocab: Vocabulary object
-      batch: Batch object that is the same example repeated across the batch
-
-    Returns:
-      best_hyp: Hypothesis object; the best hypothesis found by beam search.
-    """
-    pass
-
-
-def beam_search(sess, model, vocab, batch):
+def run_beam_search(sess, model, vocab, batch):
     """ For the GAN
     Performs beam search decoding on the given example.
 
@@ -126,6 +110,7 @@ def beam_search(sess, model, vocab, batch):
     # Run the encoder to get the encoder hidden states and decoder initial state
     # dec_in_state is a LSTMStateTuple
     # enc_states has shape [batch_size, <=max_enc_steps, 2*hidden_dim].
+    enc_states, dec_in_state = model.run_encoder(sess, batch)
 
     # Initialize beam_size-many hyptheses
     hyps = [
@@ -221,6 +206,8 @@ def beam_search(sess, model, vocab, batch):
     hyps_sorted = sort_hyps(results)
 
     # Return the hypothesis with highest average log prob
+    if FLAGS.mode == "gan":
+        return enc_states, dec_in_state, hyps_sorted[0]
     return hyps_sorted[0]
 
 

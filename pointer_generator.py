@@ -43,11 +43,11 @@ class PointerGenerator(object):
         hps = self._hps
 
         # encoder part
-        self._enc_batch = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch')
-        self._enc_lens = tf.placeholder(tf.int32, [hps.batch_size], name='enc_lens')
+        self.enc_batch = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch')
+        self.enc_lens = tf.placeholder(tf.int32, [hps.batch_size], name='enc_lens')
         if FLAGS.pointer_gen:
-            self._enc_batch_extend_vocab = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch_extend_vocab')
-            self._max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
+            self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch_extend_vocab')
+            self.max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
 
         # decoder part
         self._dec_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='dec_batch')
@@ -68,11 +68,11 @@ class PointerGenerator(object):
           encoder.
         """
         feed_dict = {}
-        feed_dict[self._enc_batch] = batch.enc_batch
-        feed_dict[self._enc_lens] = batch.enc_lens
+        feed_dict[self.enc_batch] = batch.enc_batch
+        feed_dict[self.enc_lens] = batch.enc_lens
         if FLAGS.pointer_gen:
-            feed_dict[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
-            feed_dict[self._max_art_oovs] = batch.max_art_oovs
+            feed_dict[self.enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
+            feed_dict[self.max_art_oovs] = batch.max_art_oovs
             # the unique feature for the pointer gen is the
             # enc_batch_extend_vocab and the max_art_oovs
         if not just_enc:
@@ -172,10 +172,10 @@ class PointerGenerator(object):
         # need to pass in the previous step's coverage vector each time
         # a placeholder, why not a variable?
         prev_coverage = self.prev_coverage if \
-            hps.mode == "decode" and hps.coverage else None
+            hps.mode in ["decode", "gan"] and hps.coverage else None
 
         outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
-            inputs, self._dec_in_state, self._enc_states, cell,
+            inputs, self.dec_in_state, self.enc_states, cell,
             initial_state_attention=(hps.mode == "decode"),
             pointer_gen=hps.pointer_gen, use_coverage=hps.coverage,
             prev_coverage=prev_coverage)
@@ -213,8 +213,8 @@ class PointerGenerator(object):
             # Concatenate some zeros to each vocabulary dist, to hold the
             # probabilities for in-article OOV words
             # the maximum (over the batch) size of the extended vocabulary
-            extended_vsize = self._vocab.size() + self._max_art_oovs
-            extra_zeros = tf.zeros((self._hps.batch_size, self._max_art_oovs))
+            extended_vsize = self._vocab.size() + self.max_art_oovs
+            extra_zeros = tf.zeros((self._hps.batch_size, self.max_art_oovs))
             vocab_dists_extended = [
                 tf.concat(axis=1, values=[dist, extra_zeros])
                 for dist in vocab_dists]
@@ -231,13 +231,13 @@ class PointerGenerator(object):
             # shape (batch_size)
             batch_nums = tf.expand_dims(batch_nums, 1)
             # shape (batch_size, 1)
-            attn_len = tf.shape(self._enc_batch_extend_vocab)[1]
+            attn_len = tf.shape(self.enc_batch_extend_vocab)[1]
             # number of states we attend over
             # this is too tedious
             # shape (batch_size, attn_len)
             batch_nums = tf.tile(batch_nums, [1, attn_len])
             indices = tf.stack(
-                (batch_nums, self._enc_batch_extend_vocab), axis=2)
+                (batch_nums, self.enc_batch_extend_vocab), axis=2)
             # shape (batch_size, enc_t, 2)
             # what is this enc_batch_extend_vocab?
             shape = [self._hps.batch_size, extended_vsize]
@@ -290,7 +290,6 @@ class PointerGenerator(object):
     def _add_seq2seq(self):
         """Add the whole sequence-to-sequence model to the graph."""
         hps = self._hps
-        vsize = self._vocab.size()  # size of the vocabulary
 
         self.embedding = tableLookup(self._vocab.size(), self.dim_word, scope='vocabtable')
 
@@ -299,54 +298,22 @@ class PointerGenerator(object):
             self.rand_unif_init = tf.random_uniform_initializer(-hps.rand_unif_init_mag, hps.rand_unif_init_mag, seed=123)
             self.trunc_norm_init = tf.truncated_normal_initializer(stddev=hps.trunc_norm_init_std)
 
-            emb_enc_inputs = tf.nn.embedding_lookup(self.embedding, self._enc_batch)
+            emb_enc_inputs = tf.nn.embedding_lookup(self.embedding, self.enc_batch)
             emb_dec_inputs = [tf.nn.embedding_lookup(self.embedding, x) for x in tf.unstack(self._dec_batch, axis=1)]
 
             # Add the encoder.
-            enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self._enc_lens)
-            self._enc_states = enc_outputs
+            enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
+            # those in the encoder should also be updated
+            self.enc_states = enc_outputs
+            # this is for the decode-one-step process: beam search and rollout
+            # this don't need a
 
             # Our encoder is bidirectional and our decoder is unidirectional so
             # we need to reduce the final encoder hidden state to the right size
             # to be the initial decoder hidden state
-            self._dec_in_state = self._reduce_states(fw_st, bw_st)
+            dec_in_state = self._reduce_states(fw_st, bw_st)
 
-            # Add the decoder.
-            with tf.variable_scope('decoder'):
-                decoder_outputs, self._dec_out_state, \
-                    self.attn_dists, self.p_gens, self.coverage = self._add_decoder(emb_dec_inputs)
-
-            # Add the output projection to obtain the vocabulary distribution
-            with tf.variable_scope('output_projection'):
-                w = tf.get_variable(
-                    'w', [hps.hidden_dim, vsize],
-                    dtype=tf.float32, initializer=self.trunc_norm_init)
-                w_t = tf.transpose(w)  # NOQA
-                v = tf.get_variable('v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
-                vocab_scores = []
-                # vocab_scores is the vocabulary distribution before applying
-                # softmax. Each entry on the list corresponds to one decoder
-                # step
-                for i, output in enumerate(decoder_outputs):
-                    if i > 0:
-                        tf.get_variable_scope().reuse_variables()
-                    vocab_scores.append(tf.nn.xw_plus_b(output, w, v))
-                    # apply the linear layer
-
-                # The vocabulary distributions. List length max_dec_steps of
-                # (batch_size, vsize) arrays. The words are in the order they
-                # appear in the vocabulary file.
-                vocab_dists = [tf.nn.softmax(s) for s in vocab_scores]
-                # is the oov included
-
-            # For pointer-generator model, calc final distribution from copy
-            # distribution and vocabulary distribution, then take log
-            if FLAGS.pointer_gen:
-                final_dists = self._calc_final_dist(vocab_dists, self.attn_dists)
-                # Take log of final distribution
-                log_dists = [tf.log(dist) for dist in final_dists]
-            else:  # just take log of vocab_dists
-                log_dists = [tf.log(dist) for dist in vocab_dists]
+            log_dists, self._dec_out_state = self.decode(emb_dec_inputs, dec_in_state)
 
             if hps.mode in ['train', 'eval']:
                 # Calculate the loss
@@ -374,13 +341,11 @@ class PointerGenerator(object):
                             loss_per_step.append(losses)
 
                         # Apply padding_mask mask and get loss
-                        self._loss = _mask_and_avg(
-                            loss_per_step, self._padding_mask)
+                        self._loss = _mask_and_avg(loss_per_step, self._padding_mask)
 
                     else:  # baseline model
                         self._loss = tf.contrib.seq2seq.sequence_loss(
-                            tf.stack(vocab_scores, axis=1),
-                            self._target_batch, self._padding_mask)
+                            tf.stack(self.vocab_scores, axis=1), self._target_batch, self._padding_mask)
                         # this applies softmax internally
 
                     tf.summary.scalar('loss', self._loss)
@@ -405,6 +370,58 @@ class PointerGenerator(object):
             self._topk_log_probs, self._topk_ids = tf.nn.top_k(
                 log_dists, hps.batch_size*2)
             # note batch_size=beam_size in decode mode
+
+    def decode(self, emb_dec_inputs, dec_in_state):
+        """
+        input:
+            enc_outputs, for the attention mechanism
+            dec_in_state, the state of the cell
+            emb_dec_inputs, the input of the cell
+        to get:
+            output log distribution
+            new state
+        """
+        vsize = self._vocab.size()  # size of the vocabulary
+        hps = self._hps
+        # Add the decoder.
+        with tf.variable_scope('decoder'):
+            decoder_outputs, dec_out_state, \
+                self.attn_dists, self.p_gens, self.coverage = self._add_decoder(emb_dec_inputs)
+
+        # Add the output projection to obtain the vocabulary distribution
+        with tf.variable_scope('output_projection'):
+            w = tf.get_variable(
+                'w', [hps.hidden_dim, vsize],
+                dtype=tf.float32, initializer=self.trunc_norm_init)
+            w_t = tf.transpose(w)  # NOQA
+            v = tf.get_variable('v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
+            vocab_scores = []
+            # vocab_scores is the vocabulary distribution before applying
+            # softmax. Each entry on the list corresponds to one decoder
+            # step
+            for i, output in enumerate(decoder_outputs):
+                if i > 0:
+                    tf.get_variable_scope().reuse_variables()
+                vocab_scores.append(tf.nn.xw_plus_b(output, w, v))
+                # apply the linear layer
+
+            # The vocabulary distributions. List length max_dec_steps of
+            # (batch_size, vsize) arrays. The words are in the order they
+            # appear in the vocabulary file.
+            vocab_dists = [tf.nn.softmax(s) for s in vocab_scores]
+            if not FLAGS.pointer_gen:  # calculate loss from log_dists
+                self.vocab_scores = vocab_scores
+            # is the oov included
+
+        # For pointer-generator model, calc final distribution from copy
+        # distribution and vocabulary distribution, then take log
+        if FLAGS.pointer_gen:
+            final_dists = self._calc_final_dist(vocab_dists, self.attn_dists)
+            # Take log of final distribution
+            log_dists = [tf.log(dist) for dist in final_dists]
+        else:  # just take log of vocab_dists
+            log_dists = [tf.log(dist) for dist in vocab_dists]
+        return log_dists, dec_out_state
 
     def _add_train_op(self):
         """Sets self._train_op, the op to run for training."""
@@ -520,8 +537,8 @@ class PointerGenerator(object):
         # feed the batch into the placeholders
         (enc_states, dec_in_state, global_step) = sess.run(
             [
-                self._enc_states,
-                self._dec_in_state,
+                self.enc_states,
+                self.dec_in_state,
                 self.global_step
             ],
             feed_dict
@@ -536,74 +553,18 @@ class PointerGenerator(object):
         )
         return enc_states, dec_in_state
 
-    def run_decode_onestep4rollout(self, sess, batch, latest_tokens, enc_states,
-                                   dec_init_states, prev_coverage):
+    def decode_onestep(self, emb_dec_inputs, dec_in_state):
+        """
+        function: decode onestep for rollout
+        inputs:
+            the embedded input
+        """
+        new_states, log_probs = self.decode(emb_dec_inputs, dec_in_state)
+        output_id = tf.cast(tf.multinomial(log_probs[0], 1), tf.int32)
+        # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
+        return new_states[0], output_id
 
-        beam_size = len(dec_init_states)
-
-        # Turn dec_init_states (a list of LSTMStateTuples) into a single
-        # LSTMStateTuple for the batch
-        # can this be added to the run_beam_search?
-        cells = [np.expand_dims(state.c, axis=0) for state in dec_init_states]
-        hiddens = [np.expand_dims(state.h, axis=0) for state in dec_init_states]
-        new_c = np.concatenate(cells, axis=0)  # shape [batch_size,hidden_dim]
-        new_h = np.concatenate(hiddens, axis=0)  # shape [batch_size,hidden_dim]
-        new_dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
-
-        feed = {
-            self._enc_states: enc_states,
-            self._dec_in_state: new_dec_in_state,
-            self._dec_batch: np.transpose(np.array([latest_tokens])),
-        }
-
-        to_return = {
-          "ids": self._topk_ids,
-          "probs": self._topk_log_probs,
-          "states": self._dec_out_state,
-          "attn_dists": self.attn_dists
-        }
-
-        if FLAGS.pointer_gen:
-            feed[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
-            feed[self._max_art_oovs] = batch.max_art_oovs
-            to_return['p_gens'] = self.p_gens
-
-        if self._hps.coverage:
-            feed[self.prev_coverage] = np.stack(prev_coverage, axis=0)
-            to_return['coverage'] = self.coverage
-
-        results = sess.run(to_return, feed_dict=feed)  # run the decoder step
-
-        # Convert results['states'] (a single LSTMStateTuple) into a list of
-        # LSTMStateTuple -- one for each hypothesis
-        new_states = [
-            tf.contrib.rnn.LSTMStateTuple(
-                results['states'].c[i, :], results['states'].h[i, :])
-            for i in xrange(beam_size)] # NOQA
-
-        # Convert singleton list containing a tensor to a list of k arrays
-        assert len(results['attn_dists']) == 1
-        attn_dists = results['attn_dists'][0].tolist()
-
-        if FLAGS.pointer_gen:
-            # Convert singleton list containing a tensor to a list of k arrays
-            assert len(results['p_gens']) == 1
-            p_gens = results['p_gens'][0].tolist()
-        else:
-            p_gens = [None for _ in xrange(beam_size)]  # NOQA
-
-        # Convert the coverage tensor to a list length k containing the coverage
-        # vector for each hypothesis
-        if FLAGS.coverage:
-            new_coverage = results['coverage'].tolist()
-            assert len(new_coverage) == beam_size
-        else:
-            new_coverage = [None for _ in xrange(beam_size)]  # NOQA
-
-        return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
-
-    def run_decode_onestep(self, sess, batch, latest_tokens, enc_states,
-                           dec_init_states, prev_coverage):
+    def run_decode_onestep(self, sess, batch, latest_tokens, enc_states, dec_init_states, prev_coverage):
         """For beam search decoding. Run the decoder for one step.
 
         Args:
@@ -643,8 +604,8 @@ class PointerGenerator(object):
         new_dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
 
         feed = {
-            self._enc_states: enc_states,
-            self._dec_in_state: new_dec_in_state,
+            self.enc_states: enc_states,
+            self.dec_in_state: new_dec_in_state,
             self._dec_batch: np.transpose(np.array([latest_tokens])),
         }
 
@@ -656,8 +617,8 @@ class PointerGenerator(object):
         }
 
         if FLAGS.pointer_gen:
-            feed[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
-            feed[self._max_art_oovs] = batch.max_art_oovs
+            feed[self.enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
+            feed[self.max_art_oovs] = batch.max_art_oovs
             to_return['p_gens'] = self.p_gens
 
         if self._hps.coverage:
@@ -690,54 +651,7 @@ class PointerGenerator(object):
             new_coverage = results['coverage'].tolist()
             assert len(new_coverage) == beam_size
         else:
-            new_coverage = [None for _ in xrange(beam_size)]  # NOQA
-
-        return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
-
-    def decode_onestep(self, batch, latest_tokens, enc_states, dec_init_states, prev_coverage):
-
-        cells = [np.expand_dims(state.c, axis=0) for state in dec_init_states]
-        hiddens = [np.expand_dims(state.h, axis=0) for state in dec_init_states]
-        new_c = np.concatenate(cells, axis=0)  # shape [batch_size,hidden_dim]
-        new_h = np.concatenate(hiddens, axis=0)  # shape [batch_size,hidden_dim]
-        new_dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
-
-        if FLAGS.pointer_gen:
-            feed[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
-            feed[self._max_art_oovs] = batch.max_art_oovs
-            to_return['p_gens'] = self.p_gens
-
-        if self._hps.coverage:
-            feed[self.prev_coverage] = np.stack(prev_coverage, axis=0)
-            to_return['coverage'] = self.coverage
-
-        results = sess.run(to_return, feed_dict=feed)  # run the decoder step
-
-        # Convert results['states'] (a single LSTMStateTuple) into a list of
-        # LSTMStateTuple -- one for each hypothesis
-        new_states = [
-            tf.contrib.rnn.LSTMStateTuple(
-                results['states'].c[i, :], results['states'].h[i, :])
-            for i in xrange(beam_size)] # NOQA
-
-        # Convert singleton list containing a tensor to a list of k arrays
-        assert len(results['attn_dists']) == 1
-        attn_dists = results['attn_dists'][0].tolist()
-
-        if FLAGS.pointer_gen:
-            # Convert singleton list containing a tensor to a list of k arrays
-            assert len(results['p_gens']) == 1
-            p_gens = results['p_gens'][0].tolist()
-        else:
-            p_gens = [None for _ in xrange(beam_size)]  # NOQA
-
-        # Convert the coverage tensor to a list length k containing the coverage
-        # vector for each hypothesis
-        if FLAGS.coverage:
-            new_coverage = results['coverage'].tolist()
-            assert len(new_coverage) == beam_size
-        else:
-            new_coverage = [None for _ in xrange(beam_size)]  # NOQA
+            new_coverage = [None for _ in range(beam_size)]
 
         return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
 

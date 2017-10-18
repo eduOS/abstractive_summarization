@@ -9,7 +9,6 @@ import re
 import data
 from batcher import GenBatcher, DisBatcher
 from decode import BeamSearchDecoder
-from model import SummarizationModel
 from pointer_generator import PointerGenerator
 from rollout import ROLLOUT
 
@@ -353,50 +352,49 @@ def main(argv):
 
         # --------------- finetune the generator --------
         else:
-            with tf.variable_scope("rollout"):
-                decode_model_hps = hps_gen
-                decode_model_hps = decode_model_hps._replace(mode="decode")
-                model = SummarizationModel(decode_model_hps, gen_vocab)
-                decoder = BeamSearchDecoder(model, gen_batcher, gen_vocab)
-                rollout = ROLLOUT(generator, 0.8)
-                # get_reward, update_params
-                for i_gan in range(FLAGS.gan_iter):
-                    # Train the generator for one step
-                    for it in range(FLAGS.gan_gen_iter):
-                        batch = decoder._batcher.next_batch()
-                        decoder.generate(batch)
-                        source = batch
-                        rewards = rollout.get_reward(sess, source, 16, discriminator)
-                        feed = {generator.x: samples, generator.rewards: rewards}
-                        _ = sess.run(generator.g_updates, feed_dict=feed)
+            decode_model_hps = hps_gen
+            # decode_model_hps = decode_model_hps._replace(mode="gan")
+            # model = PointerGenerator(decode_model_hps, gen_vocab)
+            decoder = BeamSearchDecoder(generator, gen_batcher, gen_vocab)
+            rollout = ROLLOUT(generator, 0.8)
+            # get_reward, update_params
+            for i_gan in range(FLAGS.gan_iter):
+                # Train the generator for one step
+                for it in range(FLAGS.gan_gen_iter):
+                    # can this be self.batch in decoder?
+                    source_batch, enc_states, dec_in_state, sample = decoder.generate()
+                    rewards = rollout.get_reward(sess, source_batch, enc_states, dec_in_state, sample, 16, discriminator)
+                    # only updates parameters without the rollout scope
+                    feed = {generator.x: samples, generator.rewards: rewards}
+                    _ = sess.run(generator.g_updates, feed_dict=feed)
 
-                    # Test
-                    if i_gan % 5 == 0 or i_gan == gan_iter - 1:
-                        generate_samples(sess, generator, gan_iter, generated_num, eval_file)
-                        likelihood_data_loader.create_batches(eval_file)
-                        test_loss = target_loss(sess, target_lstm, likelihood_data_loader)
-                        buffer = 'epoch:\t' + str(total_batch) + '\tnll:\t' + str(test_loss) + '\n'
-                        print('total_batch: ', total_batch, 'test_loss: ', test_loss)
-                        log.write(buffer)
+                # Test
+                if i_gan % 5 == 0 or i_gan == gan_iter - 1:
+                    generate_samples(sess, generator, gan_iter, generated_num, eval_file)
+                    likelihood_data_loader.create_batches(eval_file)
+                    test_loss = target_loss(sess, target_lstm, likelihood_data_loader)
+                    buffer = 'epoch:\t' + str(total_batch) + '\tnll:\t' + str(test_loss) + '\n'
+                    print('total_batch: ', total_batch, 'test_loss: ', test_loss)
+                    log.write(buffer)
 
-                    # Update roll-out parameters
-                    rollout.update_params()
+                # Update roll-out parameters
+                rollout.update_params()
 
-                    # Train the discriminator
-                    for _ in range(gan_dis_iter):
-                        generate_samples(sess, generator, BATCH_SIZE, generated_num, negative_file)
-                        dis_data_loader.load_train_data(positive_file, negative_file)
+                # Train the discriminator
+                for _ in range(gan_dis_iter):
+                    generate_samples(sess, generator, BATCH_SIZE, generated_num, negative_file)
+                    dis_data_loader.load_train_data(positive_file, negative_file)
 
-                        for _ in range(3):
-                            dis_data_loader.reset_pointer()
-                            for it in xrange(dis_data_loader.num_batch):
-                                x_batch, y_batch = dis_data_loader.next_batch()
-                                feed = {
-                                    discriminator.input_x: x_batch,
-                                    discriminator.input_y: y_batch,
-                                    discriminator.dropout_keep_prob: dis_dropout_keep_prob
-                                }
-                                _ = sess.run(discriminator.train_op, feed)
+                    for _ in range(3):
+                        dis_data_loader.reset_pointer()
+                        for it in xrange(dis_data_loader.num_batch):
+                            x_batch, y_batch = dis_data_loader.next_batch()
+                            feed = {
+                                discriminator.input_x: x_batch,
+                                discriminator.input_y: y_batch,
+                                discriminator.dropout_keep_prob: dis_dropout_keep_prob
+                            }
+                            _ = sess.run(discriminator.train_op, feed)
 
     elif FLAGS.mode == "decode":
         decode_model_hps = hps

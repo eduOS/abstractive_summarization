@@ -87,13 +87,15 @@ class BeamSearchDecoder(object):
     def generate(self, batch):
         if batch is None:
             return
+        batch = self._batcher.next_batch()
 
         # Run beam search to get best Hypothesis
-        best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+        enc_states, dec_in_state, best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
 
         # Extract the output ids from the hypothesis and convert back to
         # words
-        self.output_ids = [int(t) for t in best_hyp.tokens[1:]]
+        output_ids = [int(t) for t in best_hyp.tokens[1:]]
+        return batch, enc_states, dec_in_state, output_ids
 
     def decode(self):
         """Decode examples until data is exhausted (if FLAGS.single_pass) and
@@ -131,8 +133,7 @@ class BeamSearchDecoder(object):
 
             # Run beam search to get best Hypothesis
             best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
-
-            output_ids = self.generate(batch)
+            output_ids = [int(t) for t in best_hyp.tokens[1:]]
 
             decoded_words = data.outputids2words(
                 output_ids, self._vocab,
@@ -232,14 +233,7 @@ class BeamSearchDecoder(object):
 
         tf.logging.info("Wrote example %i to file" % ex_index)
 
-    def write_for_attnvis(
-        self,
-        article,
-        abstract,
-        decoded_words,
-        attn_dists,
-        p_gens
-    ):
+    def write_for_attnvis(self, article, abstract, decoded_words, attn_dists, p_gens):
         """Write some data to json file, which can be read into the in-browser
         attention visualizer tool:
           https://github.com/abisee/attn_vis
