@@ -330,6 +330,20 @@ def main(argv):
             discriminator = Seq2ClassModel(hps_dis)
             discriminator.build_graph()
 
+        hparam_gan = [
+            'mode',
+            'train_dir',
+            'gan_iter',
+            'gan_gen_iter',
+            'rollout_num',
+        ]
+        hps_dict = {}
+        for key, val in FLAGS.__flags.iteritems():  # for each flag
+            if key in hparam_gan:  # if it's in the list
+                hps_dict[key] = val  # add it to the dict
+
+        hps_gan = namedtuple("HParams4GAN", hps_dict.keys())(**hps_dict)
+
         saver = tf.train.Saver()
 
         sv = tf.train.Supervisor(logdir=hps_dis.train_dir, is_chief=True, saver=saver, summary_op=None, save_summaries_secs=60, save_model_secs=60)
@@ -365,7 +379,11 @@ def main(argv):
                     source_batch, enc_states, dec_in_state, sample = decoder.generate()
                     rewards = rollout.get_reward(sess, source_batch, enc_states, dec_in_state, sample, 16, discriminator)
                     # only updates parameters without the rollout scope
-                    feed = {generator.x: samples, generator.rewards: rewards}
+                    feed = {
+                        generator.enc_batch: source_batch,
+                        generator.g_predictions: sample,
+                        generator.rewards: rewards
+                    }
                     _ = sess.run(generator.g_updates, feed_dict=feed)
 
                 # Test

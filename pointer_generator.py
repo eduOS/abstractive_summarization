@@ -34,13 +34,13 @@ class PointerGenerator(object):
     Supports both baseline mode, pointer-generator mode, and coverage"""
 
     def __init__(self, hps, vocab):
-        self._hps = hps
+        self.hps = hps
         self._vocab = vocab
 
     def _add_placeholders(self):
         """Add placeholders to the graph. These are entry points for any input
         data."""
-        hps = self._hps
+        hps = self.hps
 
         # encoder part
         self.enc_batch = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch')
@@ -53,6 +53,8 @@ class PointerGenerator(object):
         self._dec_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='dec_batch')
         self._target_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='target_batch')
         self._padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_dec_steps], name='padding_mask')
+        self.rewards = tf.placeholder(tf.float32, shape=[self.batch_size, self.hps.max_dec_steps])
+        self.g_predictions = tf.placeholder(tf.float32, shape=[self.batch_size, self.hps.max_dec_steps])
 
         if hps.mode == "decode" and hps.coverage:
             self.prev_coverage = tf.placeholder(tf.float32, [hps.batch_size, None], name='prev_coverage')
@@ -100,8 +102,8 @@ class PointerGenerator(object):
             ([batch_size,hidden_dim],[batch_size,hidden_dim])
         """
         with tf.variable_scope('encoder'):
-            cell_fw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True, name="cell_fw")
-            cell_bw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True, name="cell_bw")
+            cell_fw = tf.contrib.rnn.LSTMCell(self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True, name="cell_fw")
+            cell_bw = tf.contrib.rnn.LSTMCell(self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True, name="cell_bw")
             (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
             # concatenate the forwards and backwards states
@@ -120,7 +122,7 @@ class PointerGenerator(object):
         Returns:
           state: LSTMStateTuple with hidden_dim units.
         """
-        hidden_dim = self._hps.hidden_dim
+        hidden_dim = self.hps.hidden_dim
         with tf.variable_scope('reduce_final_st'):
 
             # Define weights and biases to reduce the cell and reduce the state
@@ -142,6 +144,7 @@ class PointerGenerator(object):
             old_c = tf.concat(axis=1, values=[fw_st.c, bw_st.c])
             # Concatenation of fw and bw state
             old_h = tf.concat(axis=1, values=[fw_st.h, bw_st.h])
+            # batch_size * hidden_dim
             new_c = tf.nn.relu(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
             new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
             return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
@@ -291,7 +294,7 @@ class PointerGenerator(object):
         """Add the whole sequence-to-sequence model to the graph."""
         hps = self._hps
 
-        self.embedding = tableLookup(self._vocab.size(), self.dim_word, scope='vocabtable')
+        self.embedding = tableLookup(self._vocab.size(), self.hps.emb_dim, scope='vocabtable')
 
         with tf.variable_scope('seq2seq'):
             # Some initializers
@@ -370,6 +373,22 @@ class PointerGenerator(object):
             self._topk_log_probs, self._topk_ids = tf.nn.top_k(
                 log_dists, hps.batch_size*2)
             # note batch_size=beam_size in decode mode
+
+        g_predictions = tf.embedding_lookup(self.embedding, self.g_predictions)
+        self.g_loss = -tf.reduce_sum(
+            tf.reduce_sum(
+                tf.one_hot(tf.to_int32(tf.reshape(self.enc_batch, [-1])),
+                           self.emb_dim, 1.0, 0.0) * tf.clip_by_value(
+                               tf.reshape(g_predictions, [-1, self.emb_dim]), 1e-20, 1.0), 1
+            ) * tf.reshape(self.rewards, [-1])
+        )
+        # rewards and g_predictions should be placeholders
+
+        g_opt = self.g_optimizer(self.learning_rate)
+
+        trainable_variables = tf.trainable_variables()
+        self.g_grad, _ = tf.clip_by_global_norm(tf.gradients(self.g_loss, trainable_variables), self.grad_clip)
+        self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables))
 
     def decode(self, emb_dec_inputs, dec_in_state):
         """
