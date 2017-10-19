@@ -346,7 +346,9 @@ def main(argv):
 
         saver = tf.train.Saver()
 
-        sv = tf.train.Supervisor(logdir=hps_dis.train_dir, is_chief=True, saver=saver, summary_op=None, save_summaries_secs=60, save_model_secs=60)
+        sv = tf.train.Supervisor(
+            logdir=hps_dis.train_dir, is_chief=True, saver=saver,
+            summary_op=None, save_summaries_secs=60, save_model_secs=60)
         summary_writer = sv.summary_writer
         tf.logging.info("Preparing or waiting for session...")
         sess = sv.prepare_or_wait_for_session(config=util.get_config())
@@ -380,7 +382,7 @@ def main(argv):
                     rewards = rollout.get_reward(sess, source_batch, enc_states, dec_in_state, sample, 16, discriminator)
                     # only updates parameters without the rollout scope
                     feed = {
-                        generator.enc_batch: source_batch,
+                        generator.enc_batch: source_batch.enc_batch,
                         generator.g_predictions: sample,
                         generator.rewards: rewards
                     }
@@ -388,31 +390,27 @@ def main(argv):
 
                 # Test
                 if i_gan % 5 == 0 or i_gan == gan_iter - 1:
-                    generate_samples(sess, generator, gan_iter, generated_num, eval_file)
-                    likelihood_data_loader.create_batches(eval_file)
-                    test_loss = target_loss(sess, target_lstm, likelihood_data_loader)
-                    buffer = 'epoch:\t' + str(total_batch) + '\tnll:\t' + str(test_loss) + '\n'
-                    print('total_batch: ', total_batch, 'test_loss: ', test_loss)
+                    source_batch, enc_states, dec_in_state, sample = decoder.generate()
+                    # the true abstract is source_batch.dec_batch
+                    summary, test_loss, step = generator.run_eval_step(sess, source_batch)
+                    buffer = 'step:\t' + str(step) + '\tloss:\t' + str(test_loss) + '\n'
+                    print('step: ', step, 'test_loss: ', test_loss)
                     log.write(buffer)
 
                 # Update roll-out parameters
-                rollout.update_params()
+                # rollout.update_params()
 
                 # Train the discriminator
                 for _ in range(gan_dis_iter):
-                    generate_samples(sess, generator, BATCH_SIZE, generated_num, negative_file)
-                    dis_data_loader.load_train_data(positive_file, negative_file)
+                    source_batch, enc_states, dec_in_state, sample = decoder.generate()
 
                     for _ in range(3):
-                        dis_data_loader.reset_pointer()
                         for it in xrange(dis_data_loader.num_batch):
-                            x_batch, y_batch = dis_data_loader.next_batch()
-                            feed = {
-                                discriminator.input_x: x_batch,
-                                discriminator.input_y: y_batch,
-                                discriminator.dropout_keep_prob: dis_dropout_keep_prob
-                            }
-                            _ = sess.run(discriminator.train_op, feed)
+                            source_batch, enc_states, dec_in_state, sample = decoder.generate()
+                            inputs = np.concat([sample, source_batch.dec_batch], 0)
+                            conditions = np.concat([source_batch.dec_batch, source_batch.dec_batch], 0)
+                            targets = np.concat([np.zeros([batch_size]), np.ones([batch_size])], 0)
+                            discriminator.run_one_step(sess, inputs, conditions, targets)
 
     elif FLAGS.mode == "decode":
         decode_model_hps = hps

@@ -374,7 +374,7 @@ class PointerGenerator(object):
                 log_dists, hps.batch_size*2)
             # note batch_size=beam_size in decode mode
 
-        g_predictions = tf.embedding_lookup(self.embedding, self.g_predictions)
+        g_predictions = tf.nn.embedding_lookup(self.embedding, self.g_predictions)
         self.g_loss = -tf.reduce_sum(
             tf.reduce_sum(
                 tf.one_hot(tf.to_int32(tf.reshape(self.enc_batch, [-1])),

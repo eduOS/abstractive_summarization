@@ -84,10 +84,11 @@ class BeamSearchDecoder(object):
             if not os.path.exists(self._rouge_dec_dir):
                 os.mkdir(self._rouge_dec_dir)
 
-    def generate(self, batch):
+    def generate(self):
+        # the abstract should also be generated
+        batch = self._batcher.next_batch()
         if batch is None:
             return
-        batch = self._batcher.next_batch()
 
         # Run beam search to get best Hypothesis
         enc_states, dec_in_state, best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
@@ -155,16 +156,10 @@ class BeamSearchDecoder(object):
                     original_abstract_sents, decoded_words, counter)
                 counter += 1  # this is how many examples we've decoded
             else:
-                print_results(
-                    article_withunks,
-                    abstract_withunks,
-                    decoded_output)  # log output to screen
-                self.write_for_attnvis(
-                    article_withunks,
-                    abstract_withunks,
-                    decoded_words,
-                    best_hyp.attn_dists,
-                    best_hyp.p_gens)
+                print_results(article_withunks, abstract_withunks, decoded_output)
+                # log output to screen
+                self.write_for_attnvis(article_withunks, abstract_withunks,
+                                       decoded_words, best_hyp.attn_dists, best_hyp.p_gens)
                 # write info to .json file for visualization tool
 
                 # Check if SECS_UNTIL_NEW_CKPT has elapsed; if so return so we
