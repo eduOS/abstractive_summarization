@@ -331,7 +331,6 @@ def main(argv):
             discriminator.build_graph()
 
         hparam_gan = [
-            'mode',
             'train_dir',
             'gan_iter',
             'gan_gen_iter',
@@ -343,6 +342,7 @@ def main(argv):
                 hps_dict[key] = val  # add it to the dict
 
         hps_gan = namedtuple("HParams4GAN", hps_dict.keys())(**hps_dict)
+        hps_gan = hps_gan._replace(mode="gan")
 
         saver = tf.train.Saver()
 

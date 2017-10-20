@@ -55,7 +55,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states,
         If not None, a tensor with shape (batch_size, attn_length). The previous
         step's coverage vector. This is only not None in decode mode when using
         coverage.
-        is coverage only for decoding
+        is coverage only for decoding?
 
     Returns:
       outputs: A list of the same length as decoder_inputs of 2D Tensors of

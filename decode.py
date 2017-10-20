@@ -133,7 +133,7 @@ class BeamSearchDecoder(object):
                                                    (batch.art_oovs[0] if FLAGS.pointer_gen else None))  # string
 
             # Run beam search to get best Hypothesis
-            best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+            _, _, best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
             output_ids = [int(t) for t in best_hyp.tokens[1:]]
 
             decoded_words = data.outputids2words(

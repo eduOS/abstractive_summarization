@@ -122,7 +122,7 @@ def run_beam_search(sess, model, vocab, batch):
             p_gens=[],
             # zero vector of length attention_length
             coverage=np.zeros([batch.enc_batch.shape[1]])
-        ) for _ in xrange(FLAGS.beam_size)]  # NOQA
+        ) for _ in range(FLAGS.beam_size)]
     # this will contain finished hypotheses (those that have emitted the
     # [STOP] token)
     results = []
@@ -147,7 +147,7 @@ def run_beam_search(sess, model, vocab, batch):
         (
             topk_ids, topk_log_probs, new_states,
             attn_dists, p_gens, new_coverage
-        ) = model.decode_onestep(
+        ) = model.run_decode_onestep(
             sess=sess, batch=batch, latest_tokens=latest_tokens,
             enc_states=model.enc_states, dec_init_states=states,
             prev_coverage=prev_coverage
@@ -177,8 +177,8 @@ def run_beam_search(sess, model, vocab, batch):
         # Filter and collect any hypotheses that have produced the end token.
         hyps = []  # will contain hypotheses for the next step
         for h in sort_hyps(all_hyps):  # in order of most likely h
-            if h.latest_token == vocab.word2id(
-                    data.STOP_DECODING):  # if stop token is reached...
+            if h.latest_token == vocab.word2id(data.STOP_DECODING):
+                # if stop token is reached...
                 # If this hypothesis is sufficiently long, put in results.
                 # Otherwise discard.
                 if steps >= FLAGS.min_dec_steps:
@@ -206,9 +206,7 @@ def run_beam_search(sess, model, vocab, batch):
     hyps_sorted = sort_hyps(results)
 
     # Return the hypothesis with highest average log prob
-    if FLAGS.mode == "gan":
-        return enc_states, dec_in_state, hyps_sorted[0]
-    return hyps_sorted[0]
+    return enc_states, dec_in_state, hyps_sorted[0]
 
 
 def sort_hyps(hyps):

@@ -149,7 +149,7 @@ class PointerGenerator(object):
             new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
             return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
 
-    def _add_decoder(self, inputs):
+    def _add_decoder(self, inputs, for_beamsearch):
         """Add attention decoder to the graph. In train or eval mode, you call
         this once to get output on ALL steps. In decode (beam search) mode, you
         call this once for EACH decoder step.
@@ -174,8 +174,7 @@ class PointerGenerator(object):
         # In decode mode, we run attention_decoder one step at a time and so
         # need to pass in the previous step's coverage vector each time
         # a placeholder, why not a variable?
-        prev_coverage = self.prev_coverage if \
-            hps.mode in ["decode", "gan"] and hps.coverage else None
+        prev_coverage = self.prev_coverage if for_beamsearch and hps.coverage else None
 
         outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
             inputs, self.dec_in_state, self.enc_states, cell,
@@ -318,61 +317,61 @@ class PointerGenerator(object):
 
             log_dists, self._dec_out_state = self.decode(emb_dec_inputs, dec_in_state)
 
-            if hps.mode in ['train', 'eval']:
-                # Calculate the loss
-                with tf.variable_scope('train_loss'):
-                    if FLAGS.pointer_gen:  # calculate loss from log_dists
-                        # Calculate the loss per step
-                        # This is fiddly; we use tf.gather_nd to pick out the
-                        # log probabilities of the target words
-                        # will be list length max_dec_steps containing shape
+            # Calculate the loss
+            with tf.variable_scope('train_loss'):
+                if FLAGS.pointer_gen:  # calculate loss from log_dists
+                    # Calculate the loss per step
+                    # This is fiddly; we use tf.gather_nd to pick out the
+                    # log probabilities of the target words
+                    # will be list length max_dec_steps containing shape
+                    # (batch_size)
+                    loss_per_step = []
+                    batch_nums = tf.range(0, limit=hps.batch_size)
+                    # shape (batch_size)
+                    for dec_step, log_dist in enumerate(log_dists):
+                        # The indices of the target words. shape
                         # (batch_size)
-                        loss_per_step = []
-                        batch_nums = tf.range(0, limit=hps.batch_size)
-                        # shape (batch_size)
-                        for dec_step, log_dist in enumerate(log_dists):
-                            # The indices of the target words. shape
-                            # (batch_size)
-                            targets = self._target_batch[:, dec_step]
-                            indices = tf.stack((batch_nums, targets), axis=1)
-                            # why stack a batch_nums?
-                            # shape (batch_size, 2)
-                            # shape (batch_size). loss on this step for each
-                            # batch
-                            losses = tf.gather_nd(-log_dist, indices)
-                            # amazing!
-                            loss_per_step.append(losses)
+                        targets = self._target_batch[:, dec_step]
+                        indices = tf.stack((batch_nums, targets), axis=1)
+                        # why stack a batch_nums?
+                        # shape (batch_size, 2)
+                        # shape (batch_size). loss on this step for each
+                        # batch
+                        losses = tf.gather_nd(-log_dist, indices)
+                        # amazing!
+                        loss_per_step.append(losses)
 
-                        # Apply padding_mask mask and get loss
-                        self._loss = _mask_and_avg(loss_per_step, self._padding_mask)
+                    # Apply padding_mask mask and get loss
+                    self._loss = _mask_and_avg(loss_per_step, self._padding_mask)
 
-                    else:  # baseline model
-                        self._loss = tf.contrib.seq2seq.sequence_loss(
-                            tf.stack(self.vocab_scores, axis=1), self._target_batch, self._padding_mask)
-                        # this applies softmax internally
+                else:  # baseline model
+                    self._loss = tf.contrib.seq2seq.sequence_loss(
+                        tf.stack(self.vocab_scores, axis=1), self._target_batch, self._padding_mask)
+                    # this applies softmax internally
 
-                    tf.summary.scalar('loss', self._loss)
+                tf.summary.scalar('loss', self._loss)
 
-                    # Calculate coverage loss from the attention distributions
-                    if hps.coverage:
-                        with tf.variable_scope('coverage_loss'):
-                            self._coverage_loss = _coverage_loss(
-                                self.attn_dists, self._padding_mask)
-                            tf.summary.scalar(
-                                'coverage_loss', self._coverage_loss)
-                        self._total_loss = \
-                            self._loss + hps.cov_loss_wt * self._coverage_loss
-                        tf.summary.scalar('total_loss', self._total_loss)
+                # Calculate coverage loss from the attention distributions
+                if hps.coverage:
+                    with tf.variable_scope('coverage_loss'):
+                        self._coverage_loss = _coverage_loss(
+                            self.attn_dists, self._padding_mask)
+                        tf.summary.scalar(
+                            'coverage_loss', self._coverage_loss)
+                    self._total_loss = \
+                        self._loss + hps.cov_loss_wt * self._coverage_loss
+                    tf.summary.scalar('total_loss', self._total_loss)
 
-        if hps.mode == "decode":
-            # We run decode beam search mode one decoder step at a time
-            # log_dists is a singleton list containing shape (batch_size,
-            # extended_vsize)
+        # We run decode beam search mode one decoder step at a time
+        # log_dists is a singleton list containing shape (batch_size,
+        # extended_vsize)
+        if len(emb_dec_inputs) == 1:
+            # what is dimention of embe_dec_inputs while decoding?
             assert len(log_dists) == 1
             log_dists = log_dists[0]
             self._topk_log_probs, self._topk_ids = tf.nn.top_k(
                 log_dists, hps.batch_size*2)
-            # note batch_size=beam_size in decode mode
+        # note batch_size=beam_size in decode mode
 
         g_predictions = tf.nn.embedding_lookup(self.embedding, self.g_predictions)
         self.g_loss = -tf.reduce_sum(
@@ -390,7 +389,7 @@ class PointerGenerator(object):
         self.g_grad, _ = tf.clip_by_global_norm(tf.gradients(self.g_loss, trainable_variables), self.grad_clip)
         self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables))
 
-    def decode(self, emb_dec_inputs, dec_in_state):
+    def decode(self, emb_dec_inputs, dec_in_state, for_beamsearch):
         """
         input:
             enc_outputs, for the attention mechanism
@@ -405,7 +404,7 @@ class PointerGenerator(object):
         # Add the decoder.
         with tf.variable_scope('decoder'):
             decoder_outputs, dec_out_state, \
-                self.attn_dists, self.p_gens, self.coverage = self._add_decoder(emb_dec_inputs)
+                self.attn_dists, self.p_gens, self.coverage = self._add_decoder(emb_dec_inputs, for_beamsearch)
 
         # Add the output projection to obtain the vocabulary distribution
         with tf.variable_scope('output_projection'):
@@ -469,32 +468,6 @@ class PointerGenerator(object):
                 zip(grads, tvars),
                 global_step=self.global_step, name='train_step')
 
-    def _add_gen_op(self):
-        """Sets self._gen_op, the op to run for generator."""
-        # Take gradients of the trainable variables w.r.t. the loss function to
-        # minimize
-        loss_to_minimize = self.g_loss
-        tvars = tf.trainable_variables()
-        gradients = tf.gradients(
-            loss_to_minimize, tvars,
-            aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
-
-        # Clip the gradients
-        with tf.device("/gpu:0"):
-            grads, global_norm = tf.clip_by_global_norm(
-                gradients, self._hps.max_grad_norm)
-
-        # Add a summary
-        tf.summary.scalar('global_norm', global_norm)
-
-        # Apply adagrad optimizer
-        optimizer = tf.train.AdagradOptimizer(
-            self._hps.lr, initial_accumulator_value=self._hps.adagrad_init_acc)
-        with tf.device("/gpu:0"):
-            self._train_op = optimizer.apply_gradients(
-                zip(grads, tvars),
-                global_step=self.global_step, name='train_step')
-
     def build_graph(self):
         """Add the placeholders, model, global step, train_op and summaries to
         the graph"""
@@ -504,8 +477,7 @@ class PointerGenerator(object):
         with tf.device("/gpu:0"):
             self._add_seq2seq()
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
-        if self._hps.mode == 'train':
-            self._add_train_op()
+        self._add_train_op()
         self._summaries = tf.summary.merge_all()
         t1 = time.time()
         tf.logging.info('Time to build graph: %i seconds', t1 - t0)
@@ -578,7 +550,8 @@ class PointerGenerator(object):
         inputs:
             the embedded input
         """
-        new_states, log_probs = self.decode(emb_dec_inputs, dec_in_state)
+        new_states, log_probs = self.decode(emb_dec_inputs, dec_in_state, True)
+        # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         output_id = tf.cast(tf.multinomial(log_probs[0], 1), tf.int32)
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
         return new_states[0], output_id
