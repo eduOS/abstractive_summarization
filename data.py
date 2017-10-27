@@ -25,6 +25,7 @@ import csv
 import numpy as np
 from tensorflow.core.example import example_pb2
 from six.moves import xrange  # pylint: disable=redefined-builtin
+from cntk.tokenizer import text2charlist
 
 # <s> and </s> are used in the data files to segment the abstracts into
 # sentences. They don't receive vocab ids.
@@ -368,3 +369,16 @@ def prepare_dis_pretraining_batch(batch):
     targets = np.array(targets)
 
     return inputs, conditions, targets
+
+
+def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab, pointer_gen):
+    decoded_words = outputids2words(
+        gen_ids, gen_vocab, (article_oovs if pointer_gen else None))
+    try:
+        fst_stop_idx = decoded_words.index(STOP_DECODING)  # index of the (first) [STOP] symbol
+        decoded_words = decoded_words[:fst_stop_idx]
+    except ValueError:
+        decoded_words = decoded_words
+    decoded_output = ' '.join(decoded_words)  # single string
+    for
+    text2charlist()

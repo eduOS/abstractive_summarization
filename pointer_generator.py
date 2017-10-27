@@ -56,7 +56,7 @@ class PointerGenerator(object):
         self.rewards = tf.placeholder(tf.float32, shape=[self.batch_size, self.hps.max_dec_steps])
         self.g_predictions = tf.placeholder(tf.float32, shape=[self.batch_size, self.hps.max_dec_steps])
 
-        if hps.mode == "decode" and hps.coverage:
+        if hps.mode in ["decode", 'gan'] and hps.coverage:
             self.prev_coverage = tf.placeholder(tf.float32, [hps.batch_size, None], name='prev_coverage')
             # so this need not to be reloaded and taken gradient hps
 
@@ -149,7 +149,7 @@ class PointerGenerator(object):
             new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
             return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
 
-    def _add_decoder(self, inputs, for_beamsearch):
+    def _add_decoder(self, inputs, dec_in_state):
         """Add attention decoder to the graph. In train or eval mode, you call
         this once to get output on ALL steps. In decode (beam search) mode, you
         call this once for EACH decoder step.
@@ -165,21 +165,21 @@ class PointerGenerator(object):
           p_gens: A list of scalar tensors; the generation probabilities
           coverage: A tensor, the current coverage vector
         """
-        hps = self._hps
         cell = tf.contrib.rnn.LSTMCell(
-            hps.hidden_dim,
+            self.hps.hidden_dim,
             state_is_tuple=True,
             initializer=self.rand_unif_init, name='decoder_cell')
 
         # In decode mode, we run attention_decoder one step at a time and so
         # need to pass in the previous step's coverage vector each time
         # a placeholder, why not a variable?
-        prev_coverage = self.prev_coverage if for_beamsearch and hps.coverage else None
+        prev_coverage = self.prev_coverage if self.hps.coverage and self.hps.mode in ["gan", "decode"] else None
+        # coverage is for decoding in beam_search and gan training
 
         outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
-            inputs, self.dec_in_state, self.enc_states, cell,
-            initial_state_attention=(hps.mode == "decode"),
-            pointer_gen=hps.pointer_gen, use_coverage=hps.coverage,
+            inputs, dec_in_state, self.enc_states, cell,
+            initial_state_attention=(self.hps.mode in ["decode", 'gan']),
+            pointer_gen=self.hps.pointer_gen, use_coverage=self.hps.coverage,
             prev_coverage=prev_coverage)
 
         return outputs, out_state, attn_dists, p_gens, coverage
@@ -208,15 +208,15 @@ class PointerGenerator(object):
                 for (p_gen, dist) in zip(self.p_gens, vocab_dists)]
             # vocab_dists [max_dec_steps * (batch_size, vsize)]
             attn_dists = [
-                (1 - p_gen) * dist for (p_gen, dist) in zip(
-                    self.p_gens, attn_dists)]
+                (1 - p_gen) * dist
+                for (p_gen, dist) in zip(self.p_gens, attn_dists)]
             # vocab_dists [max_dec_steps * (batch_size, attn_len)]
 
             # Concatenate some zeros to each vocabulary dist, to hold the
             # probabilities for in-article OOV words
             # the maximum (over the batch) size of the extended vocabulary
             extended_vsize = self._vocab.size() + self.max_art_oovs
-            extra_zeros = tf.zeros((self._hps.batch_size, self.max_art_oovs))
+            extra_zeros = tf.zeros((self.hps.batch_size, self.max_art_oovs))
             vocab_dists_extended = [
                 tf.concat(axis=1, values=[dist, extra_zeros])
                 for dist in vocab_dists]
@@ -229,7 +229,7 @@ class PointerGenerator(object):
             # entry of the final distribution
             # This is done for each decoder timestep.
             # This is fiddly; we use tf.scatter_nd to do the projection
-            batch_nums = tf.range(0, limit=self._hps.batch_size)
+            batch_nums = tf.range(0, limit=self.hps.batch_size)
             # shape (batch_size)
             batch_nums = tf.expand_dims(batch_nums, 1)
             # shape (batch_size, 1)
@@ -238,11 +238,10 @@ class PointerGenerator(object):
             # this is too tedious
             # shape (batch_size, attn_len)
             batch_nums = tf.tile(batch_nums, [1, attn_len])
-            indices = tf.stack(
-                (batch_nums, self.enc_batch_extend_vocab), axis=2)
+            indices = tf.stack((batch_nums, self.enc_batch_extend_vocab), axis=2)
             # shape (batch_size, enc_t, 2)
             # what is this enc_batch_extend_vocab?
-            shape = [self._hps.batch_size, extended_vsize]
+            shape = [self.hps.batch_size, extended_vsize]
             attn_dists_projected = [
                 tf.scatter_nd(indices, copy_dist, shape)
                 for copy_dist in attn_dists]
@@ -313,9 +312,10 @@ class PointerGenerator(object):
             # Our encoder is bidirectional and our decoder is unidirectional so
             # we need to reduce the final encoder hidden state to the right size
             # to be the initial decoder hidden state
-            dec_in_state = self._reduce_states(fw_st, bw_st)
+            self.dec_in_state = self._reduce_states(fw_st, bw_st)
+            # where is the batch size
 
-            log_dists, self._dec_out_state = self.decode(emb_dec_inputs, dec_in_state)
+            log_dists, self._dec_out_state = self.decode(emb_dec_inputs, self.dec_in_state)
 
             # Calculate the loss
             with tf.variable_scope('train_loss'):
@@ -389,27 +389,24 @@ class PointerGenerator(object):
         self.g_grad, _ = tf.clip_by_global_norm(tf.gradients(self.g_loss, trainable_variables), self.grad_clip)
         self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables))
 
-    def decode(self, emb_dec_inputs, dec_in_state, for_beamsearch):
+    def decode(self, emb_dec_inputs, dec_in_state):
         """
         input:
-            enc_outputs, for the attention mechanism
-            dec_in_state, the state of the cell
             emb_dec_inputs, the input of the cell
         to get:
             output log distribution
             new state
         """
         vsize = self._vocab.size()  # size of the vocabulary
-        hps = self._hps
         # Add the decoder.
         with tf.variable_scope('decoder'):
             decoder_outputs, dec_out_state, \
-                self.attn_dists, self.p_gens, self.coverage = self._add_decoder(emb_dec_inputs, for_beamsearch)
+                self.attn_dists, self.p_gens, self.coverage = self._add_decoder(emb_dec_inputs, dec_in_state)
 
         # Add the output projection to obtain the vocabulary distribution
         with tf.variable_scope('output_projection'):
             w = tf.get_variable(
-                'w', [hps.hidden_dim, vsize],
+                'w', [self.hps.hidden_dim, vsize],
                 dtype=tf.float32, initializer=self.trunc_norm_init)
             w_t = tf.transpose(w)  # NOQA
             v = tf.get_variable('v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
@@ -446,7 +443,7 @@ class PointerGenerator(object):
         # Take gradients of the trainable variables w.r.t. the loss function to
         # minimize
         loss_to_minimize = \
-            self._total_loss if self._hps.coverage else self._loss
+            self._total_loss if self.hps.coverage else self._loss
         tvars = tf.trainable_variables()
         gradients = tf.gradients(
             loss_to_minimize, tvars,
@@ -455,14 +452,14 @@ class PointerGenerator(object):
         # Clip the gradients
         with tf.device("/gpu:0"):
             grads, global_norm = tf.clip_by_global_norm(
-                gradients, self._hps.max_grad_norm)
+                gradients, self.hps.max_grad_norm)
 
         # Add a summary
         tf.summary.scalar('global_norm', global_norm)
 
         # Apply adagrad optimizer
         optimizer = tf.train.AdagradOptimizer(
-            self._hps.lr, initial_accumulator_value=self._hps.adagrad_init_acc)
+            self.hps.lr, initial_accumulator_value=self.hps.adagrad_init_acc)
         with tf.device("/gpu:0"):
             self._train_op = optimizer.apply_gradients(
                 zip(grads, tvars),
@@ -492,7 +489,7 @@ class PointerGenerator(object):
             'loss': self._loss,
             'global_step': self.global_step,
         }
-        if self._hps.coverage:
+        if self.hps.coverage:
             to_return['coverage_loss'] = self._coverage_loss
         return sess.run(to_return, feed_dict)
 
@@ -505,7 +502,7 @@ class PointerGenerator(object):
             'loss': self._loss,
             'global_step': self.global_step,
         }
-        if self._hps.coverage:
+        if self.hps.coverage:
             to_return['coverage_loss'] = self._coverage_loss
         return sess.run(to_return, feed_dict)
 
@@ -550,7 +547,7 @@ class PointerGenerator(object):
         inputs:
             the embedded input
         """
-        new_states, log_probs = self.decode(emb_dec_inputs, dec_in_state, True)
+        new_states, log_probs = self.decode(emb_dec_inputs, dec_in_state)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         output_id = tf.cast(tf.multinomial(log_probs[0], 1), tf.int32)
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
@@ -613,7 +610,7 @@ class PointerGenerator(object):
             feed[self.max_art_oovs] = batch.max_art_oovs
             to_return['p_gens'] = self.p_gens
 
-        if self._hps.coverage:
+        if self.hps.coverage:
             feed[self.prev_coverage] = np.stack(prev_coverage, axis=0)
             to_return['coverage'] = self.coverage
 

@@ -75,7 +75,7 @@ tf.app.flags.DEFINE_integer('gen_batch_size', 16, 'minibatch size')
 tf.app.flags.DEFINE_integer('max_enc_steps', 80, 'max timesteps of encoder (max source text tokens)')  # 400
 tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 100
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
-tf.app.flags.DEFINE_integer('min_dec_steps', 35, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
+tf.app.flags.DEFINE_integer('min_dec_steps', 10, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('gen_vocab_size', 50000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
@@ -93,6 +93,7 @@ tf.app.flags.DEFINE_boolean('segment', True, 'If True, the source text is segmen
 tf.app.flags.DEFINE_boolean('coverage', True, 'Use coverage mechanism. Note, the experiments reported in the ACL '
                             'paper train WITHOUT coverage until converged, and then train for a short phase WITH coverage afterwards.'
                             'i.e. to reproduce the results in the ACL paper, turn this off for most of training then turn on for a short phase at the end.')
+# coverage can be only used while decoding either in the gan or in the pretraining
 tf.app.flags.DEFINE_float('cov_loss_wt', 1, 'Weight of coverage loss (lambda in the paper). If zero, then no incentive to minimize coverage loss.')
 tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-coverage model to a coverage model. '
                             'Turn this on and run in train mode. \ Your current model will be copied to a new version '
@@ -100,6 +101,14 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 
 FLAGS = tf.app.flags.FLAGS
 _buckets = map(int, re.split(' |,|;', FLAGS.buckets))
+
+
+if FLAGS.mode in ['decode', 'gan']:
+    # for generator in the decoding process samples are repeated in a batch
+    FLAGS.batch_size = FLAGS.beam_size
+
+if FLAGS.mode == "gan":
+    FLAGS.single_pass = False
 
 
 def generate_samples(sess, trainable_model, batch_size, generated_num, output_file):
@@ -119,6 +128,7 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
     summaries"""
     tf.logging.info("starting run_training")
     coverage_loss = None
+    hps = model.hps
     with sess_context_manager as sess:
         step = 0
         print_gap = 1000
@@ -135,7 +145,7 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
             loss = results['loss']
             # tf.logging.info('loss: %f', loss)  # print the loss to screen
             step += 1
-            if FLAGS.coverage:
+            if hps.coverage:
                 coverage_loss = results['coverage_loss']
                 # print the coverage loss to screen
                 # tf.logging.info("coverage_loss: %f", coverage_loss)
@@ -151,12 +161,12 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
                   "\tCurrent speed:\t%s seconds/article\n"
                   "\tCoverage loss\t%s\n" % (
                     step,
-                    FLAGS.batch_size,
+                    hps.batch_size,
                     loss,
-                    FLAGS.batch_size * step,
+                    hps.batch_size * step,
                     current_time - start_time,
                     (current_time - start_time) / 3600,
-                    (t1-t0) / FLAGS.batch_size,
+                    (t1-t0) / hps.batch_size,
                     coverage_loss,
                   )
                 )
@@ -174,30 +184,31 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
 
 def pretrain_discriminator(sess_context_manager, model, vocab, batcher, summary_writer):
   """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
+  hps = model.hps
   with sess_context_manager as sess:
     # This is the training loop.
     step_time, loss = 0.0, 0.0
     current_step = 0
     eval_loss_best = sys.float_info.max
     previous_losses = [eval_loss_best]
-    if FLAGS.early_stop:
-      eval_batcher = DisBatcher(FLAGS.data_path, "eval", vocab, FLAGS.batch_size, single_pass=FLAGS.single_pass)
+    if hps.early_stop:
+      eval_batcher = DisBatcher(hps.data_path, "eval", vocab, hps.batch_size, single_pass=hps.single_pass)
     while True:
       start_time = time.time()
       batch = batcher.next()
       inputs, conditions, targets = data.prepare_dis_pretraining_batch(batch)
       step_loss = model.run_one_step(sess_context_manager, inputs, conditions, targets, update=True)
-      step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
-      loss += step_loss / FLAGS.steps_per_checkpoint
+      step_time += (time.time() - start_time) / hps.steps_per_checkpoint
+      loss += step_loss / hps.steps_per_checkpoint
       current_step += 1
 
       # Once in a while, we save checkpoint, print statistics, and run evals.
-      if current_step % FLAGS.steps_per_checkpoint == 0:
+      if current_step % hps.steps_per_checkpoint == 0:
         # Print statistics for the previous epoch.
         print("global step %d learning rate %.4f step-time %.4f loss "
               "%.4f" % (model.global_step.eval(), model.learning_rate.eval(), step_time, loss))
         dump_model = True
-        if FLAGS.early_stop:
+        if hps.early_stop:
           dump_model = False
           # Run evals on development set and print their perplexity.
           eval_losses = []
@@ -213,7 +224,7 @@ def pretrain_discriminator(sess_context_manager, model, vocab, batcher, summary_
           sys.stdout.flush()
           threshold = 10
           if eval_loss > 0.99 * previous_losses[-2]:
-            sess.run(model.learning_rate.assign(tf.maximum(FLAGS.learning_rate_decay_factor*model.learning_rate, 1e-4)))
+            sess.run(model.learning_rate.assign(tf.maximum(hps.learning_rate_decay_factor*model.learning_rate, 1e-4)))
           if len(previous_losses) > threshold and eval_loss > max(previous_losses[-threshold-1:-1]) and eval_loss_best < min(previous_losses[-threshold:]):
             break
           if eval_loss < eval_loss_best:
@@ -221,10 +232,10 @@ def pretrain_discriminator(sess_context_manager, model, vocab, batcher, summary_
             eval_loss_best = eval_loss
         # Save checkpoint and zero timer and loss.
         if dump_model:
-          checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
+          checkpoint_path = os.path.join(hps.train_dir, "translate.ckpt")
           model.saver.save(sess, checkpoint_path, global_step=model.global_step)
         step_time, loss = 0.0, 0.0
-        if current_step >= FLAGS.max_steps:
+        if current_step >= hps.max_steps:
           break
 
 
@@ -258,11 +269,6 @@ def main(argv):
     tf.set_random_seed(111)  # a seed value for randomness
 
     # Create a batcher object that will create minibatches of data
-    gen_vocab = Vocab(os.path.join(FLAGS.data_path, 'gen_vocab'), FLAGS.gen_vocab_size)
-    gen_batcher = GenBatcher(FLAGS.data_path, gen_vocab, hps, single_pass=FLAGS.single_pass)
-
-    dis_vocab = Vocab(os.path.join(FLAGS.data_path, 'dis_vocab'), FLAGS.dis_vocab_size)
-    dis_batcher = DisBatcher(FLAGS.data_path, "train", dis_vocab, FLAGS.batch_size, single_pass=FLAGS.single_pass)
     # TODO change to pass number
 
     if "train" in FLAGS.mode:
@@ -279,10 +285,14 @@ def main(argv):
             'gen_lr',
             'max_dec_steps',
             'max_enc_steps',
+            'min_dec_steps',
             'gen_max_gradient',
             'pointer_gen',
             'rand_unif_init_mag',
             'trunc_norm_init_std',
+            'single_pass',
+            'log_root',
+            'data_path',
         ]
 
         hps_dict = {}
@@ -291,6 +301,9 @@ def main(argv):
                 hps_dict[key] = val  # add it to the dict
 
         hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
+        gen_vocab = Vocab(os.path.join(FLAGS.data_path, 'gen_vocab'), FLAGS.gen_vocab_size)
+        gen_batcher = GenBatcher(FLAGS.data_path, gen_vocab, hps_gen, single_pass=FLAGS.single_pass)
+
         if FLAGS.segment is not True:
             hps_gen = hps_gen._replace(max_enc_steps=110)
             hps_gen = hps_gen._replace(max_dec_steps=25)
@@ -326,11 +339,14 @@ def main(argv):
                 hps_dict[key] = val  # add it to the dict
 
         hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
+        dis_vocab = Vocab(os.path.join(FLAGS.data_path, 'dis_vocab'), FLAGS.dis_vocab_size)
+        dis_batcher = DisBatcher(FLAGS.data_path, "train", dis_vocab, FLAGS.batch_size, single_pass=FLAGS.single_pass)
         with tf.variable_scope("discriminator"):
             discriminator = Seq2ClassModel(hps_dis)
             discriminator.build_graph()
 
         hparam_gan = [
+            'gan',
             'train_dir',
             'gan_iter',
             'gan_gen_iter',
@@ -343,6 +359,9 @@ def main(argv):
 
         hps_gan = namedtuple("HParams4GAN", hps_dict.keys())(**hps_dict)
         hps_gan = hps_gan._replace(mode="gan")
+        with tf.variable_scope("rollout"):
+            decoder = BeamSearchDecoder(generator, gen_batcher, gen_vocab)
+            rollout = ROLLOUT(generator, 0.8)
 
         saver = tf.train.Saver()
 
@@ -368,17 +387,19 @@ def main(argv):
 
         # --------------- finetune the generator --------
         else:
-            decode_model_hps = hps_gen
+            # decode_model_hps = hps_gen
             # decode_model_hps = decode_model_hps._replace(mode="gan")
             # model = PointerGenerator(decode_model_hps, gen_vocab)
-            decoder = BeamSearchDecoder(generator, gen_batcher, gen_vocab)
-            rollout = ROLLOUT(generator, 0.8)
             # get_reward, update_params
             for i_gan in range(FLAGS.gan_iter):
                 # Train the generator for one step
                 for it in range(FLAGS.gan_gen_iter):
                     # can this be self.batch in decoder?
-                    source_batch, enc_states, dec_in_state, sample = decoder.generate()
+                    batch = []
+                    for i_b in range(FLAGS.batch_size):
+                        source_batch, enc_states, dec_in_state, sample = decoder.generate()
+                    # the sample is only one
+                    # I should create a new batch
                     rewards = rollout.get_reward(sess, source_batch, enc_states, dec_in_state, sample, 16, discriminator)
                     # only updates parameters without the rollout scope
                     feed = {

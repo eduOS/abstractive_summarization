@@ -40,7 +40,7 @@ class Seq2ClassModel(object):
       self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(hps.learning_rate))
     self.cell_type = hps.cell_type
     self.global_step = tf.Variable(0, trainable=False)
-    self.is_decoding = hps.is_decoding
+    self.mode = hps.mode
     self.num_models = hps.num_models
     self.batch_size = hps.dis_batch_size * self.num_models
     self.max_enc_steps = hps.max_enc_steps

@@ -596,3 +596,21 @@ class DisBatcher:
             raise StopIteration
 
         return source, positive, negative
+
+
+def create_batch(sample_list, gen_vocab, dis_vocab):
+    inputs = []
+    for _ in range(self._hps.batch_size * self._bucketing_cache_size):
+        inputs.append(self._example_queue.get())
+    # sort by length of encoder sequence
+    inputs = sorted(inputs, key=lambda inp: inp.enc_len)
+
+    # Group the sorted Examples into batches, optionally shuffle the
+    # batches, and place in the batch queue.
+    batches = []
+    for i in range(0, len(inputs), self._hps.batch_size):
+        batches.append(inputs[i:i + self._hps.batch_size])
+    if not self._single_pass:
+        shuffle(batches)
+    for b in batches:  # each b is a list of Example objects
+        self._batch_queue.put(Batch(b, self._hps, self._vocab))

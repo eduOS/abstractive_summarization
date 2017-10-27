@@ -29,8 +29,6 @@ import util
 import logging
 # import numpy as np
 
-FLAGS = tf.app.flags.FLAGS
-
 SECS_UNTIL_NEW_CKPT = 60  # max number of seconds before loading new checkpoint
 
 
@@ -52,29 +50,30 @@ class BeamSearchDecoder(object):
         self._saver = tf.train.Saver()
         # we use this to load checkpoints for decoding
         self._sess = tf.Session(config=util.get_config())
+        self._hps = model.hps
 
         # Load an initial checkpoint to use for decoding
         ckpt_path = util.load_ckpt(self._saver, self._sess)
 
-        if FLAGS.single_pass:
+        if self._hps.single_pass:
             # Make a descriptive decode directory name
             # this is something of the form "ckpt-123456"
             ckpt_name = "ckpt-" + ckpt_path.split('-')[-1]
             self._decode_dir = os.path.join(
-                FLAGS.log_root, get_decode_dir_name(ckpt_name))
+                self._hps.log_root, get_decode_dir_name(ckpt_name))
             if os.path.exists(self._decode_dir):
                 raise Exception(
                     "single_pass decode directory %s should not already exist" %
                     self._decode_dir)
 
         else:  # Generic decode dir name
-            self._decode_dir = os.path.join(FLAGS.log_root, "decode")
+            self._decode_dir = os.path.join(self._hps.log_root, "decode")
 
         # Make the decode dir if necessary
         if not os.path.exists(self._decode_dir):
             os.mkdir(self._decode_dir)
 
-        if FLAGS.single_pass:
+        if self._hps.single_pass:
             # Make the dirs to contain output written in the correct format for
             # pyrouge
             self._rouge_ref_dir = os.path.join(self._decode_dir, "reference")
@@ -99,7 +98,7 @@ class BeamSearchDecoder(object):
         return batch, enc_states, dec_in_state, output_ids
 
     def decode(self):
-        """Decode examples until data is exhausted (if FLAGS.single_pass) and
+        """Decode examples until data is exhausted (if self._hps.single_pass) and
         return, or decode indefinitely, loading latest checkpoint at regular
         intervals"""
         t0 = time.time()
@@ -109,7 +108,7 @@ class BeamSearchDecoder(object):
             # 1 example repeated across batch
             if batch is None:
                 # finished decoding dataset in single_pass mode
-                assert FLAGS.single_pass, (
+                assert self._hps.single_pass, (
                     "Dataset exhausted, but we are not in single_pass mode")
                 tf.logging.info(
                     "Decoder has finished reading dataset for single_pass.")
@@ -130,15 +129,16 @@ class BeamSearchDecoder(object):
 
             article_withunks = data.show_art_oovs(original_article, self._vocab)  # string
             abstract_withunks = data.show_abs_oovs(original_abstract, self._vocab,
-                                                   (batch.art_oovs[0] if FLAGS.pointer_gen else None))  # string
+                                                   (batch.art_oovs[0] if self._hps.pointer_gen else None))  # string
 
             # Run beam search to get best Hypothesis
             _, _, best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+            # is the beam_size here 1?
             output_ids = [int(t) for t in best_hyp.tokens[1:]]
 
             decoded_words = data.outputids2words(
                 output_ids, self._vocab,
-                (batch.art_oovs[0] if FLAGS.pointer_gen else None))
+                (batch.art_oovs[0] if self._hps.pointer_gen else None))
 
             # Remove the [STOP] token from decoded_words, if necessary
             try:
@@ -148,7 +148,7 @@ class BeamSearchDecoder(object):
                 decoded_words = decoded_words
             decoded_output = ' '.join(decoded_words)  # single string
 
-            if FLAGS.single_pass:
+            if self._hps.single_pass:
                 # write ref summary and decoded summary to file, to eval with
                 # pyrouge later
                 self.write_for_rouge(
@@ -249,7 +249,7 @@ class BeamSearchDecoder(object):
             'abstract_str': make_html_safe(abstract),
             'attn_dists': attn_dists
         }
-        if FLAGS.pointer_gen:
+        if self._hps.pointer_gen:
             to_write['p_gens'] = p_gens
         output_fname = os.path.join(self._decode_dir, 'attn_vis_data.json')
         with open(output_fname, 'w') as output_file:
@@ -318,19 +318,19 @@ def get_decode_dir_name(ckpt_name):
     """Make a descriptive name for the decode dir, including the name of the
     checkpoint we use to decode. This is called in single_pass mode."""
 
-    if "train" in FLAGS.data_path:
+    if "train" in hps.data_path:
         dataset = "train"
-    elif "val" in FLAGS.data_path:
+    elif "val" in hps.data_path:
         dataset = "val"
-    elif "test" in FLAGS.data_path:
+    elif "test" in hps.data_path:
         dataset = "test"
     else:
         raise ValueError(
-            "FLAGS.data_path %s should contain one of train, val or test" %
-            (FLAGS.data_path))
+            "hps.data_path %s should contain one of train, val or test" %
+            (hps.data_path))
     dirname = "decode_%s_%imaxenc_%ibeam_%imindec_%imaxdec" % (
-        dataset, FLAGS.max_enc_steps, FLAGS.beam_size, FLAGS.min_dec_steps,
-        FLAGS.max_dec_steps)
+        dataset, hps.max_enc_steps, hps.beam_size, hps.min_dec_steps,
+        hps.max_dec_steps)
     if ckpt_name is not None:
         dirname += "_%s" % ckpt_name
     return dirname
