@@ -396,8 +396,8 @@ def main(argv):
                 for it in range(FLAGS.gan_gen_iter):
                     # can this be self.batch in decoder?
                     batch = []
-                    for i_b in range(FLAGS.batch_size):
-                        source_batch, enc_states, dec_in_state, sample = decoder.generate()
+                    # batches[i], enc_states, dec_in_state, output_ids
+                    results = decoder.generate()
                     # the sample is only one
                     # I should create a new batch
                     rewards = rollout.get_reward(sess, source_batch, enc_states, dec_in_state, sample, 16, discriminator)

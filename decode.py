@@ -85,17 +85,20 @@ class BeamSearchDecoder(object):
 
     def generate(self):
         # the abstract should also be generated
-        batch = self._batcher.next_batch()
-        if batch is None:
-            return
+        # use the map function to generate a beam sized sample
+        batches = [self._batcher.next_batch() for _ in range(self._hps.batch_size)]
 
+        results = []
         # Run beam search to get best Hypothesis
-        enc_states, dec_in_state, best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+        for i in range(self._hps.batch_size):
+            # this can be distributed on different devices: machines or GPUs
+            enc_states, dec_in_state, best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batches[i])
+            # Extract the output ids from the hypothesis and convert back to
+            # words
+            output_ids = [int(t) for t in best_hyp.tokens[1:]]
+            results.append((batches[i], enc_states, dec_in_state, output_ids))
 
-        # Extract the output ids from the hypothesis and convert back to
-        # words
-        output_ids = [int(t) for t in best_hyp.tokens[1:]]
-        return batch, enc_states, dec_in_state, output_ids
+        return results
 
     def decode(self):
         """Decode examples until data is exhausted (if self._hps.single_pass) and
@@ -128,8 +131,9 @@ class BeamSearchDecoder(object):
             # list of strings
 
             article_withunks = data.show_art_oovs(original_article, self._vocab)  # string
-            abstract_withunks = data.show_abs_oovs(original_abstract, self._vocab,
-                                                   (batch.art_oovs[0] if self._hps.pointer_gen else None))  # string
+            abstract_withunks = data.show_abs_oovs(
+                original_abstract, self._vocab, (
+                    batch.art_oovs[0] if self._hps.pointer_gen else None))  # string
 
             # Run beam search to get best Hypothesis
             _, _, best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)

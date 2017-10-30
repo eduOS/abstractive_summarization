@@ -405,7 +405,7 @@ class GenBatcher(object):
         repeated.
         """
         while True:
-            if self._hps.mode != 'decode':
+            if self._hps.mode not in ["decode", "gan"]:
                 # Get bucketing_cache_size-many batches of Examples into a list,
                 # then sort
                 inputs = []
@@ -599,6 +599,9 @@ class DisBatcher:
 
 
 def create_batch(sample_list, gen_vocab, dis_vocab):
+    """
+    create a batch from some samples
+    """
     inputs = []
     for _ in range(self._hps.batch_size * self._bucketing_cache_size):
         inputs.append(self._example_queue.get())
