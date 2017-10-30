@@ -677,9 +677,9 @@ def stochastic_beam_dec(length,
     paths = tf.reshape(symbols, [-1, 1])
 
     mask = tf.expand_dims(
-        tf.nn.in_top_k(prev, tf.zeros([batch_size], dtype=tf.int32),
-                       beam_size),
+        tf.nn.in_top_k(prev, tf.zeros([batch_size], dtype=tf.int32), beam_size),
         1)
+    # mask is for jusding if the sentence should terminate
     candidates = [tf.to_int32(tf.zeros([batch_size, 1, length]))]
     scores = [tf.slice(prev, [0, 0], [-1, 1])]
 
@@ -735,15 +735,19 @@ def stochastic_beam_dec(length,
         beam_parent = indices // (vocab_size - 1)
         beam_parent = tf.reshape(tf.expand_dims(
             tf.range(batch_size) * beam_size, 1) + beam_parent, [-1])
+        # what is this? let's say it is the index of the beam of the sampls to
+        # get the corresponding state
         paths = tf.gather(paths, beam_parent)
         paths = tf.concat([paths, tf.reshape(symbols, [-1, 1])], 1)
 
     # pick the topk from the candidates in the lists
     candidates = tf.reshape(tf.concat(candidates, 1), [-1, length])
+    # the beam size of the first item is only 1
     scores = tf.concat(scores, 1)
     fillers = tf.tile(
         tf.expand_dims(tf.reduce_min(scores, 1) - 20.0, 1),
         [1, tf.shape(scores)[1]])
+    # what is the -20?
     scores = tf.where(mask, scores, fillers)
     indices = tf.to_int32(tf.multinomial(scores * (7**gamma), num_candidates))
     indices = tf.reshape(
