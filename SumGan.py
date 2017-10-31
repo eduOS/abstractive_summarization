@@ -103,10 +103,6 @@ FLAGS = tf.app.flags.FLAGS
 _buckets = map(int, re.split(' |,|;', FLAGS.buckets))
 
 
-if FLAGS.mode in ['decode', 'gan']:
-    # for generator in the decoding process samples are repeated in a batch
-    FLAGS.batch_size = FLAGS.beam_size
-
 if FLAGS.mode == "gan":
     FLAGS.single_pass = False
 

@@ -69,6 +69,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states,
       coverage: Coverage vector on the last step computed. None if
       use_coverage=False.
     """
+    # can this be applied to beam repetitive batch?
     with variable_scope.variable_scope("attention_decoder"):
         # if this line fails, it's because the batch size isn't defined
         batch_size = encoder_states.get_shape()[0].value
@@ -199,6 +200,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states,
             # in decode mode, this is what updates the coverage vector
             context_vector, _, coverage = attention(initial_state, coverage)
         for i, inp in enumerate(decoder_inputs):
+            # when should this terminate due to beam size
             tf.logging.info(
                 "Adding attention_decoder timestep %i of %i", i,
                 len(decoder_inputs))

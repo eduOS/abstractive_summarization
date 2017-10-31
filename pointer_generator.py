@@ -25,6 +25,7 @@ import tensorflow as tf
 from attention_decoder import attention_decoder
 from share_function import tableLookup
 from tensorflow.contrib.tensorboard.plugins import projector
+from six.move import xrange
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -43,21 +44,21 @@ class PointerGenerator(object):
         hps = self.hps
 
         # encoder part
-        self.enc_batch = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch')
-        self.enc_lens = tf.placeholder(tf.int32, [hps.batch_size], name='enc_lens')
+        self.enc_batch = tf.placeholder(tf.int32, [None, None], name='enc_batch')
+        self.enc_lens = tf.placeholder(tf.int32, [None], name='enc_lens')
         if FLAGS.pointer_gen:
-            self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch_extend_vocab')
+            self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [None, None], name='enc_batch_extend_vocab')
             self.max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
 
         # decoder part
-        self._dec_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='dec_batch')
-        self._target_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='target_batch')
-        self._padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_dec_steps], name='padding_mask')
-        self.rewards = tf.placeholder(tf.float32, shape=[self.batch_size, self.hps.max_dec_steps])
-        self.g_predictions = tf.placeholder(tf.float32, shape=[self.batch_size, self.hps.max_dec_steps])
+        self._dec_batch = tf.placeholder(tf.int32, [None, hps.max_dec_steps], name='dec_batch')
+        self._target_batch = tf.placeholder(tf.int32, [None, hps.max_dec_steps], name='target_batch')
+        self._padding_mask = tf.placeholder(tf.float32, [None, hps.max_dec_steps], name='padding_mask')
+        self.rewards = tf.placeholder(tf.float32, shape=[None, self.hps.max_dec_steps])
+        self.g_predictions = tf.placeholder(tf.float32, shape=[None, self.hps.max_dec_steps])
 
         if hps.mode in ["decode", 'gan'] and hps.coverage:
-            self.prev_coverage = tf.placeholder(tf.float32, [hps.batch_size, None], name='prev_coverage')
+            self.prev_coverage = tf.placeholder(tf.float32, [None, None], name='prev_coverage')
             # so this need not to be reloaded and taken gradient hps
 
     def _make_feed_dict(self, batch, just_enc=False):
@@ -370,7 +371,7 @@ class PointerGenerator(object):
             assert len(log_dists) == 1
             log_dists = log_dists[0]
             self._topk_log_probs, self._topk_ids = tf.nn.top_k(
-                log_dists, hps.batch_size*2)
+                log_dists, hps.beam_size)
         # note batch_size=beam_size in decode mode
 
         g_predictions = tf.nn.embedding_lookup(self.embedding, self.g_predictions)
@@ -536,9 +537,7 @@ class PointerGenerator(object):
         # ([batch_size,hidden_dim],[batch_size,hidden_dim])
         # Given that the batch is a single example repeated, dec_in_state is
         # identical across the batch so we just take the top row.
-        dec_in_state = tf.contrib.rnn.LSTMStateTuple(
-            dec_in_state.c[0], dec_in_state.h[0]
-        )
+        dec_in_state = np.array([tf.contrib.rnn.LSTMStateTuple(dec_in_state.c[i], dec_in_state.h[i] for i in xrange()]))
         return enc_states, dec_in_state
 
     def decode_onestep(self, emb_dec_inputs, dec_in_state):
@@ -581,8 +580,6 @@ class PointerGenerator(object):
           of None if coverage is not turned on.
         """
 
-        beam_size = len(dec_init_states)
-
         # Turn dec_init_states (a list of LSTMStateTuples) into a single
         # LSTMStateTuple for the batch
         # can this be added to the run_beam_search?
@@ -621,7 +618,7 @@ class PointerGenerator(object):
         new_states = [
             tf.contrib.rnn.LSTMStateTuple(
                 results['states'].c[i, :], results['states'].h[i, :])
-            for i in xrange(beam_size)] # NOQA
+            for i in xrange(FLAGS.beam_size * FLAGS.batch_size)]
 
         # Convert singleton list containing a tensor to a list of k arrays
         assert len(results['attn_dists']) == 1
@@ -632,15 +629,15 @@ class PointerGenerator(object):
             assert len(results['p_gens']) == 1
             p_gens = results['p_gens'][0].tolist()
         else:
-            p_gens = [None for _ in xrange(beam_size)]  # NOQA
+            p_gens = [None for _ in xrange(FLAGS.beam_size * FLAGS.batch_size)]
 
         # Convert the coverage tensor to a list length k containing the coverage
         # vector for each hypothesis
         if FLAGS.coverage:
             new_coverage = results['coverage'].tolist()
-            assert len(new_coverage) == beam_size
+            assert len(new_coverage) == FLAGS.beam_size * FLAGS.batch_size
         else:
-            new_coverage = [None for _ in range(beam_size)]
+            new_coverage = [None for _ in xrange(FLAGS.beam_size * FLAGS.batch_size)]
 
         return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
 
