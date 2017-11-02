@@ -406,34 +406,23 @@ class GenBatcher(object):
         repeated.
         """
         while True:
-            if self._hps.mode not in ['decode', 'gan']:
-                # Get bucketing_cache_size-many batches of Examples into a list,
-                # then sort
-                inputs = []
-                for _ in range(self._hps.batch_size * self._bucketing_cache_size):
-                    inputs.append(self._example_queue.get())
-                # sort by length of encoder sequence
-                inputs = sorted(inputs, key=lambda inp: inp.enc_len)
+            # Get bucketing_cache_size-many batches of Examples into a list,
+            # then sort
+            inputs = []
+            for _ in range(self._hps.batch_size * self._bucketing_cache_size):
+                inputs.append(self._example_queue.get())
+            # sort by length of encoder sequence
+            inputs = sorted(inputs, key=lambda inp: inp.enc_len)
 
-                # Group the sorted Examples into batches, optionally shuffle the
-                # batches, and place in the batch queue.
-                batches = []
-                for i in range(0, len(inputs), self._hps.batch_size):
-                    batches.append(inputs[i:i + self._hps.batch_size])
-                if not self._single_pass:
-                    shuffle(batches)
-                for b in batches:  # each b is a list of Example objects
-                    self._batch_queue.put(Batch(b, self._hps, self._vocab))
-            else:
-                b = []
-                for _ in range(self._hps.batch_size):
-                    ex = self._example_queue.get()
-                    b.extend([ex for _ in range(self._hps.beam_size)])
+            # Group the sorted Examples into batches, optionally shuffle the
+            # batches, and place in the batch queue.
+            batches = []
+            for i in range(0, len(inputs), self._hps.batch_size):
+                batches.append(inputs[i:i + self._hps.batch_size])
+            if not self._single_pass:
+                shuffle(batches)
+            for b in batches:  # each b is a list of Example objects
                 self._batch_queue.put(Batch(b, self._hps, self._vocab))
-            # else:  # beam search decode mode
-            #     ex = self._example_queue.get()
-            #     b = [ex for _ in range(self._hps.batch_size)]
-            #     self._batch_queue.put(Batch(b, self._hps, self._vocab))
 
     def watch_threads(self):
         """Watch example queue and batch queue threads and restart if dead."""

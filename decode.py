@@ -91,12 +91,12 @@ class BeamSearchDecoder(object):
             return
 
         # Run beam search to get best Hypothesis
-        enc_states, dec_in_state, best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+        enc_states, dec_in_state, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
 
         # Extract the output ids from the hypothesis and convert back to
         # words
-        output_ids = [int(t) for t in best_hyp.tokens[1:]]
-        return batch, enc_states, dec_in_state, output_ids
+        outputs_ids = [[int(t) for t in best_hyp.tokens[1:]] for best_hyp in best_hyps]
+        return batch, enc_states, dec_in_state, outputs_ids
 
     def decode(self):
         """Decode examples until data is exhausted (if self._hps.single_pass) and
@@ -123,10 +123,8 @@ class BeamSearchDecoder(object):
                 # rouge_log(results_dict, self._decode_dir)
                 return
 
-            original_articles = [batch.original_articles[i*self._hps.beam_size]
-                                 for i in xrange(self._hps.batch_size)]
-            original_abstracts = [batch.original_abstracts[i]
-                                  for i in xrange(self._hps.batch_size)]
+            original_articles = batch.original_articles
+            original_abstracts = batch.original_abstracts
             # original_abstract_sents = batch.original_abstracts_sents[0]
             # list of strings
 

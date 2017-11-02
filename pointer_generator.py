@@ -527,7 +527,7 @@ class PointerGenerator(object):
           enc_states: The encoder states. A tensor of shape [batch_size,
           <=max_enc_steps, 2*hidden_dim].
           dec_in_state: A LSTMStateTuple of shape
-          ([1,hidden_dim],[1,hidden_dim])
+          ([batch_size, hidden_dim],[batch_size, hidden_dim])
         """
         feed_dict = self._make_feed_dict(batch, just_enc=True)
         # feed the batch into the placeholders
@@ -546,8 +546,9 @@ class PointerGenerator(object):
         # ([batch_size,hidden_dim],[batch_size,hidden_dim])
         # Given that the batch is a single example repeated, dec_in_state is
         # identical across the batch so we just take the top row.
-        dec_in_state = [tf.contrib.rnn.LSTMStateTuple(
-            dec_in_state.c[i], dec_in_state.h[i] for i in xrange(len(dec_in_state.h))]
+        # dec_in_state = [tf.contrib.rnn.LSTMStateTuple(
+        #     dec_in_state.c[i], dec_in_state.h[i] for i in xrange(len(dec_in_state.h))]
+        #     # TODO: should this be changed to shape?
         return enc_states, dec_in_state
 
     def decode_onestep(self, emb_dec_inputs, dec_in_state):

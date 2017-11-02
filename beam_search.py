@@ -125,16 +125,15 @@ def run_beam_search(sess, model, vocab, batch):
 
     best_hyps = []
     batch_hyps = []
-    split_enc_states = tf.split(enc_states, batch_size)
     # seperated hyps for each beam
     for i in xrange(batch_size):
         hyps = [
             Hypothesis(
                 tokens=[vocab.word2id(data.START_DECODING)],
                 log_probs=[0.0],
-                enc_states=split_enc_states[i],
+                enc_states=enc_states[i],
                 state=tf.contrib.rnn.LSTMStateTuple(
-                    dec_in_state.c[i*beam_size], dec_in_state.h[i*beam_size]),
+                    dec_in_state.c[i], dec_in_state.h[i]),
                 attn_dists=[],
                 p_gens=[],
                 # zero vector of length attention_length
@@ -231,14 +230,7 @@ def run_beam_search(sess, model, vocab, batch):
         best_hyps.append(best_hyp)
 
     # Return the hypothesis with highest average log prob
-    enc_states = np.array([enc_states[i*beam_size] for i in xrange(batch_size)])
-    dec_in_state = [dec_in_state.c[i*beam_size] for i in xrange(batch_size)]
-    # cells = [np.expand_dims(state.c, axis=0) for state in dec_init_states]
-    # hiddens = [np.expand_dims(state.h, axis=0) for state in dec_init_states]
-    # new_c = np.concatenate(cells, axis=0)  # shape [batch_size,hidden_dim]
-    # new_h = np.concatenate(hiddens, axis=0)  # shape [batch_size,hidden_dim]
-    # new_dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
-    return enc_states, dec_in_state, np.array(best_hyps)
+    return enc_states, dec_in_state, best_hyps
 
 
 def sort_hyps(hyps):
