@@ -143,6 +143,7 @@ def run_beam_search(sess, model, vocab, batch):
     # this will contain finished hypotheses (those that have emitted the
     # [STOP] token)
 
+    # this can be optimized into multithread
     for k in xrange(batch_size):
         hyps = batch_hyps[k]
         results = []
@@ -157,6 +158,9 @@ def run_beam_search(sess, model, vocab, batch):
                     vocab.size()) else vocab.word2id(data.UNKNOWN_TOKEN)
                 for t in latest_tokens]
             # UNKNOWN_TOKEN will be replaced with a placeholder
+            enc_batch_extend_vocab = np.tile(batch.enc_batch_extend_vocab[k], (beam_size, 1))
+            max_art_oovs = np.tile(batch.max_art_oovs[k], (beam_size, 1))
+            enc_states = np.concatenate([hyp.enc_states for hyp in hyps], 0)
             # list of current decoder states of the hypotheses
             states = [h.state for h in hyps]
             # list of coverage vectors (or None)
@@ -168,8 +172,9 @@ def run_beam_search(sess, model, vocab, batch):
                 topk_ids, topk_log_probs, new_states,
                 attn_dists, p_gens, new_coverage
             ) = model.run_decode_onestep(
-                sess=sess, batch=batch, latest_tokens=latest_tokens,
-                enc_states=hyps[0].enc_states, dec_init_states=states,
+                sess=sess, enc_batch_extend_vocab=enc_batch_extend_vocab,
+                max_art_oovs=max_art_oovs, latest_tokens=latest_tokens,
+                enc_states=enc_states, dec_init_states=states,
                 prev_coverage=prev_coverage
             )
 

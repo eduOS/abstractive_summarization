@@ -563,13 +563,14 @@ class PointerGenerator(object):
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
         return new_states[0], output_id
 
-    def run_decode_onestep(self, sess, batch, latest_tokens, enc_states, dec_init_states, prev_coverage):
+    def run_decode_onestep(self, sess, enc_batch_extend_vocab, max_art_oovs,
+                           latest_tokens, enc_states, dec_init_states, prev_coverage):
         """For beam search decoding. Run the decoder for one step.
 
         Args:
           sess: Tensorflow session.
-          batch: Batch object containing single example repeated across the
-          batch
+          enc_batch_extend_vocab: the encode batch with extended vocabulary
+          max_art_oovs: the max article out of vocabulary
           latest_tokens: Tokens to be fed as input into the decoder for this
           timestep
           enc_states: The encoder states.
@@ -613,8 +614,8 @@ class PointerGenerator(object):
         }
 
         if FLAGS.pointer_gen:
-            feed[self.enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
-            feed[self.max_art_oovs] = batch.max_art_oovs
+            feed[self.enc_batch_extend_vocab] = enc_batch_extend_vocab
+            feed[self.max_art_oovs] = max_art_oovs
             to_return['p_gens'] = self.p_gens
 
         if self.hps.coverage:

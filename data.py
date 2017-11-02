@@ -250,7 +250,7 @@ def outputsids2words(id_lists, vocab, articles_oovs):
     Returns:
       words: list of words (strings)
     """
-    words_list = []
+    words_lists = []
     for j, id_list in enumerate(id_lists):
         words = []
         for i in id_list:
@@ -269,8 +269,8 @@ def outputsids2words(id_lists, vocab, articles_oovs):
                         article OOV %i but this example only has %i article OOVs' %
                         (i, article_oov_idx, len(articles_oovs[j])))
             words.append(w)
-        words_list.append(words)
-    return words_list
+        words_lists.append(words)
+    return words_lists
 
 
 def show_art_oovs(articles, vocab):
@@ -381,13 +381,12 @@ def prepare_dis_pretraining_batch(batch):
 
 
 def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab, pointer_gen):
-    decoded_words = outputids2words(
+    samples = outputsids2words(
         gen_ids, gen_vocab, (article_oovs if pointer_gen else None))
-    try:
-        fst_stop_idx = decoded_words.index(STOP_DECODING)  # index of the (first) [STOP] symbol
-        decoded_words = decoded_words[:fst_stop_idx]
-    except ValueError:
-        decoded_words = decoded_words
-    decoded_output = ' '.join(decoded_words)  # single string
-    for
-    text2charlist()
+    for i in xrange(len(samples)):
+        try:
+            fst_stop_idx = samples[i].index(STOP_DECODING)  # index of the (first) [STOP] symbol
+            samples[i] = ''.join(samples[i][:fst_stop_idx]).replace(' ', '')
+        except ValueError:
+            samples[i] = ''.join(samples[i]).replace(' ', '')
+        samples = text2charlist()
