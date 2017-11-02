@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow.python.ops import tensor_array_ops, control_flow_ops
 import numpy as np
+from data import gen_vocab2dis_vocab
 
 
 class Rollout(object):
@@ -75,14 +76,23 @@ class Rollout(object):
         self.gen_summ = tf.stop_gradient(self.gen_summ)
         # batch_size x seq_length
 
-    def get_reward(self, sess, source_batch, enc_states, dec_in_state, sample, rollout_num, discriminator):
+    def get_reward(self, sess, gen_vocab, dis_vocab, source_batch,
+                   enc_states, dec_in_state, samples, rollout_num, discriminator):
         # dec_in_state is [batch_size, hidden_dim * 2] and that should be
         # changed to [batch_size, hidden_dim] for the attention_decoder
         rewards = []
+
+        enc_inputs_words = source_batch.enc_batch_extend_vocab \
+            if self._gen_hps.pointer_gen else source_batch.enc_batch
+        enc_inputs_chars = gen_vocab2dis_vocab(
+            enc_inputs_words.tolist(), gen_vocab,
+            (source_batch.art_oovs if self._gen_hps.pointer_gen else None),
+            dis_vocab, )
+
         for i in range(rollout_num):
             for given_num in range(1, self._gen_hps.max_dec_steps):
                 feed_dict = {}
-                feed_dict[self.summ] = sample
+                feed_dict[self.summ] = samples
                 feed_dict[self.generator.enc_batch] = source_batch.enc_batch
                 # this is the source
                 feed_dict[self.generator.enc_lens] = source_batch.enc_lens
@@ -100,12 +110,16 @@ class Rollout(object):
                 # enc_batch_extend_vocab and the max_art_oovs
                 # self._enc_batch_extend_vocab = batch.enc_batch_extend_vocab
                 # self._max_art_oovs = batch.max_art_oovs
-                rollout_sample = sess.run(self.gen_summ, feed_dict)
+                rollout_samples_words = sess.run(self.gen_summ, feed_dict)
                 # how about multiple generators for one discriminator?
-                exchange_vocabulary()
+                rollout_samples_chars = gen_vocab2dis_vocab(
+                    rollout_samples_words.tolist(), gen_vocab
+                    (source_batch.art_oovs if self._gen_hps.pointer_gen else None),
+                    dis_vocab, )
+
                 feed = {
-                    discriminator.dis_input_x: rollout_sample,
-                    discriminator.dis_input_xs: source_batch.enc_batch,
+                    discriminator.dis_input_x: rollout_samples_chars,
+                    discriminator.dis_input_xs: enc_inputs_chars,
                     discriminator.dropout_keep_prob: 1.0}
                 ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
                 ypred = np.array([item[1] for item in ypred_for_auc])
@@ -115,9 +129,13 @@ class Rollout(object):
                     rewards[given_num - 1] += ypred
 
             # the last token reward
+            samples_chars = gen_vocab2dis_vocab(
+                samples.tolist(), gen_vocab
+                (source_batch.art_oovs if self._gen_hps.pointer_gen else None),
+                dis_vocab, )
             feed = {
-                discriminator.dis_input_x: sample,
-                discriminator.dis_input_xs: source_batch.enc_batch,
+                discriminator.dis_input_x: samples_chars,
+                discriminator.dis_input_xs: enc_inputs_chars,
                 discriminator.dropout_keep_prob: 1.0}
             ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
             ypred = np.array([item[1] for item in ypred_for_auc])

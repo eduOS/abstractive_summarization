@@ -344,7 +344,10 @@ def puresentence2ids(text, vocab):
     """encode a sentence in plain text into a sequence of token ids
         token_ids are one-based
     """
-    text = text.strip()
+    try:
+        text = text.strip()
+    except:
+        pass
     seq = [vocab.word2id(word) for word in text]
     return seq
 
@@ -355,7 +358,7 @@ def pureids2sentence(token_ids, vocab):
     """
     token_ids = filter(lambda i: i > 0, token_ids)
     token_ids = map(lambda i: i-1 if vocab.idx2key(i-1) else vocab.key2idx("_UNK"), token_ids)
-    text = "".join([vocab.idx2key(i) for i in token_ids])
+    text = " ".join([vocab.idx2key(i) for i in token_ids])
     return text
 
 
@@ -380,13 +383,15 @@ def prepare_dis_pretraining_batch(batch):
     return inputs, conditions, targets
 
 
-def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab, pointer_gen):
-    samples = outputsids2words(
-        gen_ids, gen_vocab, (article_oovs if pointer_gen else None))
-    for i in xrange(len(samples)):
+def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab):
+    samples_ids = []
+    samples_words = outputsids2words(gen_ids, gen_vocab, article_oovs)
+    for sample_words in samples_words:
         try:
-            fst_stop_idx = samples[i].index(STOP_DECODING)  # index of the (first) [STOP] symbol
-            samples[i] = ''.join(samples[i][:fst_stop_idx]).replace(' ', '')
+            fst_stop_idx = sample_words.index(STOP_DECODING)  # index of the (first) [STOP] symbol
+            sample_chars = text2charlist(sample_words[:fst_stop_idx])
         except ValueError:
-            samples[i] = ''.join(samples[i]).replace(' ', '')
-        samples = text2charlist()
+            sample_chars = text2charlist(sample_words)
+        samples_ids.append([dis_vocab.word2id(char) for char in sample_chars])
+    assert len(samples_words) == len(samples_ids)
+    return samples_ids

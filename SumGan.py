@@ -393,21 +393,24 @@ def main(argv):
                 # Train the generator for one step
                 for it in range(FLAGS.gan_gen_iter):
                     # can this be self.batch in decoder?
-                    batch = []
                     for i_b in range(FLAGS.batch_size):
-                        source_batch, enc_states, dec_in_state, best_sample = decoder.generate()
-                    rewards = rollout.get_reward(sess, source_batch, enc_states, dec_in_state, best_sample, 16, discriminator)
+                        source_batch, enc_states, dec_in_state, best_samples = decoder.generate()
+                    rewards = rollout.get_reward(sess, source_batch, enc_states, dec_in_state, best_samples, 16, discriminator)
                     # only updates parameters without the rollout scope
-                    feed = {
-                        generator.enc_batch: source_batch.enc_batch,
-                        generator.g_predictions: sample,
-                        generator.rewards: rewards
-                    }
-                    _ = sess.run(generator.g_updates, feed_dict=feed)
+                    feed_dict = {}
+                    feed_dict[generator.enc_batch] = source_batch.enc_batch
+                    feed_dict[generator.g_predictions] = best_samples
+                    feed_dict[generator.rewards] = rewards
+
+                    if FLAGS.pointer_gen:
+                        feed_dict[generator.enc_batch_extend_vocab] = source_batch.enc_batch_extend_vocab
+                        # this is the source
+                        feed_dict[generator.max_art_oovs] = source_batch.max_art_oovs
+                    _ = sess.run(generator.g_updates, feed_dict=feed_dict)
 
                 # Test
                 if i_gan % 5 == 0 or i_gan == gan_iter - 1:
-                    source_batch, enc_states, dec_in_state, sample = decoder.generate()
+                    source_batch, enc_states, dec_in_state, best_samples = decoder.generate()
                     # the true abstract is source_batch.dec_batch
                     summary, test_loss, step = generator.run_eval_step(sess, source_batch)
                     buffer = 'step:\t' + str(step) + '\tloss:\t' + str(test_loss) + '\n'
