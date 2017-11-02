@@ -27,6 +27,7 @@ import json
 import pyrouge
 import util
 import logging
+from six.move import xrange
 # import numpy as np
 
 SECS_UNTIL_NEW_CKPT = 60  # max number of seconds before loading new checkpoint
@@ -122,43 +123,49 @@ class BeamSearchDecoder(object):
                 # rouge_log(results_dict, self._decode_dir)
                 return
 
-            original_article = batch.original_articles[0]  # string
-            original_abstract = batch.original_abstracts[0]  # string
-            original_abstract_sents = batch.original_abstracts_sents[0]
+            original_articles = [batch.original_articles[i*self._hps.beam_size]
+                                 for i in xrange(self._hps.batch_size)]
+            original_abstracts = [batch.original_abstracts[i]
+                                  for i in xrange(self._hps.batch_size)]
+            # original_abstract_sents = batch.original_abstracts_sents[0]
             # list of strings
 
-            article_withunks = data.show_art_oovs(original_article, self._vocab)  # string
-            abstract_withunks = data.show_abs_oovs(original_abstract, self._vocab,
-                                                   (batch.art_oovs[0] if self._hps.pointer_gen else None))  # string
+            art_oovs = [batch.art_oovs[i]
+                        for i in xrange(self._hps.batch_size)]
+            articles_withunks = data.show_art_oovs(original_articles, self._vocab)
+            abstracts_withunks = data.show_abs_oovs(original_abstracts, self._vocab,
+                                                    (art_oovs if self._hps.pointer_gen else None))
 
             # Run beam search to get best Hypothesis
-            _, _, best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+            _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
             # is the beam_size here 1?
-            output_ids = [int(t) for t in best_hyp.tokens[1:]]
+            outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps]
 
-            decoded_words = data.outputids2words(
-                output_ids, self._vocab,
-                (batch.art_oovs[0] if self._hps.pointer_gen else None))
+            decoded_words_list = data.outputsids2words(
+                outputs_ids, self._vocab, (art_oovs if self._hps.pointer_gen else None))
+            # art_oovs[0] should be changed, batch size examples should be
+            # concluded
+            decoded_outputs = []
 
             # Remove the [STOP] token from decoded_words, if necessary
-            try:
-                fst_stop_idx = decoded_words.index(data.STOP_DECODING)  # index of the (first) [STOP] symbol
-                decoded_words = decoded_words[:fst_stop_idx]
-            except ValueError:
-                decoded_words = decoded_words
-            decoded_output = ' '.join(decoded_words)  # single string
+            for decoded_words in decoded_words_list:
+                try:
+                    fst_stop_idx = decoded_words.index(data.STOP_DECODING)  # index of the (first) [STOP] symbol
+                    decoded_words = decoded_words[:fst_stop_idx]
+                except ValueError:
+                    pass
+                decoded_outputs.append(' '.join(decoded_words))
 
             if self._hps.single_pass:
                 # write ref summary and decoded summary to file, to eval with
                 # pyrouge later
                 self.write_for_rouge(
-                    original_article,
-                    original_abstract_sents, decoded_words, counter)
+                    original_articles, original_abstracts, decoded_outputs, counter)
                 counter += 1  # this is how many examples we've decoded
             else:
-                print_results(article_withunks, abstract_withunks, decoded_output)
+                print_results(articles_withunks, abstracts_withunks, decoded_outputs)
                 # log output to screen
-                self.write_for_attnvis(article_withunks, abstract_withunks,
+                self.write_for_attnvis(articles_withunks, abstracts_withunks,
                                        decoded_words, best_hyp.attn_dists, best_hyp.p_gens)
                 # write info to .json file for visualization tool
 
@@ -173,33 +180,21 @@ class BeamSearchDecoder(object):
                     _ = util.load_ckpt(self._saver, self._sess)  # NOQA
                     t0 = time.time()
 
-    def write_for_rouge(self, artcl, reference_sents, decoded_words, ex_index):
+    def write_for_rouge(self, artcls, original_abstracts, decoded_outputs, ex_index):
         """Write output to file in correct format for eval with pyrouge. This is
         called in single_pass mode.
 
         Args:
-          reference_sents: list of strings
           decoded_words: list of strings
           ex_index: int, the index with which to label the files
         """
         # First, divide decoded output into sentences
-        decoded_sents = []
-        while len(decoded_words) > 0:
-            try:
-                fst_period_idx = decoded_words.index(".")
-            except ValueError:
-                # there is text remaining that doesn't end in "."
-                fst_period_idx = len(decoded_words)
-            # sentence up to and including the period
-            sent = decoded_words[:fst_period_idx+1]
-            decoded_words = decoded_words[fst_period_idx+1:]  # everything else
-            decoded_sents.append(' '.join(sent))
-            # only splitted by the period
 
         # pyrouge calls a perl script that puts the data into HTML files.
         # Therefore we need to make our output HTML safe.
-        decoded_sents = [make_html_safe(w) for w in decoded_sents]
-        reference_sents = [make_html_safe(w) for w in reference_sents]
+        decoded_sents = [make_html_safe(w) for w in decoded_outputs]
+        reference_sents = [make_html_safe(w) for w in original_abstracts]
+        artcls = [make_html_safe(w) for w in artcls]
 
         # Write to file
         ref_file = os.path.join(
@@ -219,15 +214,15 @@ class BeamSearchDecoder(object):
             for idx, sent in enumerate(decoded_sents):
                 f.write(sent+"\n")
         with open(overview_file, "a") as f:
-            f.write("article: "+artcl+"\n")
-            for idx, sent in enumerate(reference_sents):
-                f.write("reference: "+sent+"\n")
-            for idx, sent in enumerate(decoded_sents):
-                f.write("hypothesis: "+sent+"\n")
-            f.write("\n")
+            for artc, refe, hypo in zip(artcls, reference_sents, decoded_sents):
+                f.write("article: "+artc+"\n")
+                f.write("reference: "+refe+"\n")
+                f.write("hypothesis: "+hypo+"\n")
+                f.write("\n")
 
         tf.logging.info("Wrote example %i to file" % ex_index)
 
+    # TODO: this should be modified
     def write_for_attnvis(self, article, abstract, decoded_words, attn_dists, p_gens):
         """Write some data to json file, which can be read into the in-browser
         attention visualizer tool:
@@ -257,14 +252,15 @@ class BeamSearchDecoder(object):
         tf.logging.info('Wrote visualization data to %s', output_fname)
 
 
-def print_results(article, abstract, decoded_output):
+def print_results(articles, abstracts, decoded_outputs):
     """Prints the article, the reference summmary and the decoded summary to
     screen"""
     print("")
-    tf.logging.info('ARTICLE:  %s', article)
-    tf.logging.info('REFERENCE SUMMARY: %s', abstract)
-    tf.logging.info('GENERATED SUMMARY: %s', decoded_output)
-    print("")
+    for article, abstract, decoded_output in zip(articles, abstracts, decoded_outputs):
+        tf.logging.info('ARTICLE:  %s', article)
+        tf.logging.info('REFERENCE SUMMARY: %s', abstract)
+        tf.logging.info('GENERATED SUMMARY: %s', decoded_output)
+        print("")
 
 
 def make_html_safe(s):

@@ -72,6 +72,8 @@ tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be sa
 tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 128, 'dimension of word embeddings')
 tf.app.flags.DEFINE_integer('gen_batch_size', 16, 'minibatch size')
+# if batch_size is one and beam size is not one in the decode mode then the beam
+# search is the same as the original beam search
 tf.app.flags.DEFINE_integer('max_enc_steps', 80, 'max timesteps of encoder (max source text tokens)')  # 400
 tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 100
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
@@ -393,10 +395,8 @@ def main(argv):
                     # can this be self.batch in decoder?
                     batch = []
                     for i_b in range(FLAGS.batch_size):
-                        source_batch, enc_states, dec_in_state, sample = decoder.generate()
-                    # the sample is only one
-                    # I should create a new batch
-                    rewards = rollout.get_reward(sess, source_batch, enc_states, dec_in_state, sample, 16, discriminator)
+                        source_batch, enc_states, dec_in_state, best_sample = decoder.generate()
+                    rewards = rollout.get_reward(sess, source_batch, enc_states, dec_in_state, best_sample, 16, discriminator)
                     # only updates parameters without the rollout scope
                     feed = {
                         generator.enc_batch: source_batch.enc_batch,

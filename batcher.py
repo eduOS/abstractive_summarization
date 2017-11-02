@@ -39,7 +39,7 @@ def fopen(filename, mode='r'):
 class Example(object):
     """Class representing a train/val/test example for text summarization."""
 
-    def __init__(self, article, abstract, abstract_sentences, vocab, hps):
+    def __init__(self, article, abstract, vocab, hps):
         """Initializes the Example, performing tokenization and truncation to
         produce the encoder, decoder and target sequences, which are stored in
         self.
@@ -47,8 +47,6 @@ class Example(object):
         Args:
           article: source text; a string. each token is separated by a single
           space.
-          abstract_sentences: list of strings, one per abstract sentence. In
-          each sentence, each token is separated by a single space.
           vocab: Vocabulary object
           hps: hyperparameters
         """
@@ -101,7 +99,7 @@ class Example(object):
         # Store the original strings
         self.original_article = article
         self.original_abstract = abstract
-        self.original_abstract_sents = abstract_sentences
+        # self.original_abstract_sents = abstract_sentences
 
     def get_dec_inp_targ_seqs(self, sequence, max_len, start_id, stop_id):
         """Given the reference summary as a sequence of tokens, return the input
@@ -166,6 +164,8 @@ class Batch(object):
         # initialize the input and targets for the decoder
         self.init_decoder_seq(example_list, hps)
         self.store_orig_strings(example_list)  # store the original strings
+        self.batch_size = len(example_list)
+        # the batch size may be not the same as the hp.batch_size
 
     def init_encoder_seq(self, example_list, hps):
         """Initializes the following:
@@ -190,6 +190,7 @@ class Batch(object):
         # Determine the maximum length of the encoder input sequence in this
         # batch
         max_enc_seq_len = max([ex.enc_len for ex in example_list])
+        # the  length for each batch is different
 
         # Pad the encoder input sequences up to the length of the longest
         # sequence
@@ -199,8 +200,8 @@ class Batch(object):
         # Initialize the numpy arrays
         # Note: our enc_batch can have different length (second dimension) for
         # each batch because we use dynamic_rnn for the encoder.
-        self.enc_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
-        self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
+        self.enc_batch = np.zeros((self.batch_size, max_enc_seq_len), dtype=np.int32)
+        self.enc_lens = np.zeros((self.batch_size), dtype=np.int32)
 
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):
@@ -214,7 +215,7 @@ class Batch(object):
             # Store the in-article OOVs themselves
             self.art_oovs = [ex.article_oovs for ex in example_list]
             # Store the version of the enc_batch that uses the article OOV ids
-            self.enc_batch_extend_vocab = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
+            self.enc_batch_extend_vocab = np.zeros((self.batch_size, max_enc_seq_len), dtype=np.int32)
             for i, ex in enumerate(example_list):
                 self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
 
@@ -243,9 +244,9 @@ class Batch(object):
         # dynamic_rnn for decoding. However I believe this is possible, or will
         # soon be possible, with Tensorflow 1.0, in which case it may be best to
         # upgrade to that.
-        self.dec_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
-        self.target_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
-        self.padding_mask = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.float32)
+        self.dec_batch = np.zeros((self.batch_size, hps.max_dec_steps), dtype=np.int32)
+        self.target_batch = np.zeros((self.batch_size, hps.max_dec_steps), dtype=np.int32)
+        self.padding_mask = np.zeros((self.batch_size, hps.max_dec_steps), dtype=np.float32)
 
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):
@@ -291,7 +292,7 @@ class GenBatcher(object):
         # Examples waiting to be batched
         self._batch_queue = Queue.Queue(self.BATCH_QUEUE_MAX)
         self._example_queue = Queue.Queue(
-            self.BATCH_QUEUE_MAX * self._hps.batch_size)
+            self.BATCH_QUEUE_MAX * self._hps.batch_size * self._hps.beam_size)
 
         # Different settings depending on whether we're in single_pass mode or
         # not
@@ -385,14 +386,14 @@ class GenBatcher(object):
                         "single_pass mode is off but the example generator is\
                         out of data; error.")
 
-            abstract_sentences = [
-                abstract
+            # abstract_sentences = [
+            #     abstract
                 # sent.strip() for sent in data.abstract2sents(abstract)
-            ]
+            # ]
             # Use the <s> and </s> tags in abstract to get a list of sentences.
             # Process into an Example.
             example = Example(
-                article, abstract, abstract_sentences, self._vocab, self._hps)
+                article, abstract, self._vocab, self._hps)
             # what is the vocab here? the extended vocab?
             # place the Example in the example queue.
             self._example_queue.put(example)
@@ -423,16 +424,16 @@ class GenBatcher(object):
                     shuffle(batches)
                 for b in batches:  # each b is a list of Example objects
                     self._batch_queue.put(Batch(b, self._hps, self._vocab))
-            elif self._hps.mode == "gan":
+            else:
                 b = []
                 for _ in range(self._hps.batch_size):
                     ex = self._example_queue.get()
                     b.extend([ex for _ in range(self._hps.beam_size)])
                 self._batch_queue.put(Batch(b, self._hps, self._vocab))
-            else:  # beam search decode mode
-                ex = self._example_queue.get()
-                b = [ex for _ in range(self._hps.batch_size)]
-                self._batch_queue.put(Batch(b, self._hps, self._vocab))
+            # else:  # beam search decode mode
+            #     ex = self._example_queue.get()
+            #     b = [ex for _ in range(self._hps.batch_size)]
+            #     self._batch_queue.put(Batch(b, self._hps, self._vocab))
 
     def watch_threads(self):
         """Watch example queue and batch queue threads and restart if dead."""

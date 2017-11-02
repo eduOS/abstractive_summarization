@@ -235,53 +235,59 @@ def abstract2ids(abstract_words, vocab, article_oovs):
     return ids
 
 
-def outputids2words(id_list, vocab, article_oovs):
+def outputsids2words(id_lists, vocab, articles_oovs):
     """Maps output ids to words, including mapping in-article OOVs from their
     temporary ids to the original OOV string (applicable in pointer-generator
     mode).
 
     Args:
-      id_list: list of ids (integers)
+      id_lists: a list of list of ids (integers)
       vocab: Vocabulary object
-      article_oovs: list of OOV words (strings) in the order corresponding to
+      articles_oovs: a list of list of OOV words (strings) in the order corresponding to
       their temporary article OOV ids (that have been assigned in
       pointer-generator mode), or None (in baseline mode)
 
     Returns:
       words: list of words (strings)
     """
-    words = []
-    for i in id_list:
-        try:
-            w = vocab.id2word(i)  # might be [UNK]
-        except ValueError:  # w is OOV
-            assert article_oovs is not None, (
-                "Error: model produced a word ID that isn't in the vocabulary.\
-                This should not happen in baseline (no pointer-generator) mode")
-            article_oov_idx = i - vocab.size()
+    words_list = []
+    for j, id_list in enumerate(id_lists):
+        words = []
+        for i in id_list:
             try:
-                w = article_oovs[article_oov_idx]
-            except ValueError:  # i doesn't correspond to an article oov
-                raise ValueError(
-                    'Error: model produced word ID %i which corresponds to\
-                    article OOV %i but this example only has %i article OOVs' %
-                    (i, article_oov_idx, len(article_oovs)))
-        words.append(w)
-    return words
+                w = vocab.id2word(i)  # might be [UNK]
+            except ValueError:  # w is OOV
+                assert articles_oovs is not None, (
+                    "Error: model produced a word ID that isn't in the vocabulary.\
+                    This should not happen in baseline (no pointer-generator) mode")
+                article_oov_idx = i - vocab.size()
+                try:
+                    w = articles_oovs[j][article_oov_idx]
+                except ValueError:  # i doesn't correspond to an article oov
+                    raise ValueError(
+                        'Error: model produced word ID %i which corresponds to\
+                        article OOV %i but this example only has %i article OOVs' %
+                        (i, article_oov_idx, len(articles_oovs[j])))
+            words.append(w)
+        words_list.append(words)
+    return words_list
 
 
-def show_art_oovs(article, vocab):
+def show_art_oovs(articles, vocab):
     """Returns the article string, highlighting the OOVs by placing
     __underscores__ around them"""
     unk_token = vocab.word2id(UNKNOWN_TOKEN)
-    words = article.split(' ')
-    words = [("__%s__" % w) if vocab.word2id(
-        w) == unk_token else w for w in words]
-    out_str = ' '.join(words)
-    return out_str
+    out_articles = []
+    for article in articles:
+        words = article.split(' ')
+        words = [("__%s__" % w) if vocab.word2id(
+            w) == unk_token else w for w in words]
+        out_str = ' '.join(words)
+        out_articles.append(out_str)
+    return out_articles
 
 
-def show_abs_oovs(abstract, vocab, article_oovs):
+def show_abs_oovs(abstracts, vocab, article_oovs):
     """Returns the abstract string, highlighting the article OOVs with
     __underscores__.
 
@@ -291,24 +297,27 @@ def show_abs_oovs(abstract, vocab, article_oovs):
     Args:
       abstract: string
       vocab: Vocabulary object
-      article_oovs: list of words (strings), or None (in baseline mode)
+      article_oovs: list of list of words (strings), or None (in baseline mode)
     """
     unk_token = vocab.word2id(UNKNOWN_TOKEN)
-    words = abstract.split(' ')
-    new_words = []
-    for w in words:
-        if vocab.word2id(w) == unk_token:  # w is oov
-            if article_oovs is None:  # baseline mode
-                new_words.append("__%s__" % w)
-            else:  # pointer-generator mode
-                if w in article_oovs:
+    out_abstracts = []
+    for i, abstract in enumerate(abstracts):
+        words = abstract.split(' ')
+        new_words = []
+        for w in words:
+            if vocab.word2id(w) == unk_token:  # w is oov
+                if article_oovs is None:  # baseline mode
                     new_words.append("__%s__" % w)
-                else:
-                    new_words.append("!!__%s__!!" % w)
-        else:  # w is in-vocab word
-            new_words.append(w)
-    out_str = ' '.join(new_words)
-    return out_str
+                else:  # pointer-generator mode
+                    if w in article_oovs[i]:
+                        new_words.append("__%s__" % w)
+                    else:
+                        new_words.append("!!__%s__!!" % w)
+            else:  # w is in-vocab word
+                new_words.append(w)
+        out_str = ' '.join(new_words)
+        out_abstracts.append(out_str)
+    return out_abstracts
 
 
 def abstract2sents(abstract):

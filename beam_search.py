@@ -28,7 +28,7 @@ class Hypothesis(object):
     """Class to represent a hypothesis during beam search. Holds all the
     information needed for the hypothesis."""
 
-    def __init__(self, tokens, log_probs, state, attn_dists, p_gens, coverage):
+    def __init__(self, tokens, log_probs, enc_states, state, attn_dists, p_gens, coverage):
         """Hypothesis constructor.
 
         Args:
@@ -48,6 +48,7 @@ class Hypothesis(object):
         self.tokens = tokens
         self.log_probs = log_probs
         self.state = state
+        self.enc_states = enc_states
         self.attn_dists = attn_dists
         self.p_gens = p_gens
         self.coverage = coverage
@@ -124,14 +125,15 @@ def run_beam_search(sess, model, vocab, batch):
 
     best_hyps = []
     batch_hyps = []
+    split_enc_states = tf.split(enc_states, batch_size)
     # seperated hyps for each beam
     for i in xrange(batch_size):
         hyps = [
             Hypothesis(
                 tokens=[vocab.word2id(data.START_DECODING)],
                 log_probs=[0.0],
-                enc_states=enc_states[i*beam_size:(i+1)*beam_size],
-                state=model.dec_in_state[i*beam_size:(i+1)*beam_size],
+                enc_states=split_enc_states[i],
+                state=dec_in_state[i*beam_size],
                 attn_dists=[],
                 p_gens=[],
                 # zero vector of length attention_length
@@ -141,7 +143,7 @@ def run_beam_search(sess, model, vocab, batch):
     # this will contain finished hypotheses (those that have emitted the
     # [STOP] token)
 
-    for k in xrange(FLAGS.batch_size):
+    for k in xrange(batch_size):
         hyps = batch_hyps[k]
         results = []
         steps = 0
@@ -167,7 +169,7 @@ def run_beam_search(sess, model, vocab, batch):
                 attn_dists, p_gens, new_coverage
             ) = model.run_decode_onestep(
                 sess=sess, batch=batch, latest_tokens=latest_tokens,
-                enc_states=model.enc_states, dec_init_states=states,
+                enc_states=hyps[0].enc_states, dec_init_states=states,
                 prev_coverage=prev_coverage
             )
 
@@ -183,14 +185,15 @@ def run_beam_search(sess, model, vocab, batch):
                 )
                 # take the ith hypothesis and new decoder state info
                 # for each of the top 2*beam_size hyps:
-                for j in range(beam_size):
+                for j in range(beam_size * 2):
                     # Extend the ith hypothesis with the jth option
-                    new_hyp = h.extend(token=topk_ids[i, j],
-                                    log_prob=topk_log_probs[i, j],
-                                    state=new_state,
-                                    attn_dist=attn_dist,
-                                    p_gen=p_gen,
-                                    coverage=new_coverage_i)
+                    new_hyp = h.extend(
+                        token=topk_ids[i, j],
+                        log_prob=topk_log_probs[i, j],
+                        state=new_state,
+                        attn_dist=attn_dist,
+                        p_gen=p_gen,
+                        coverage=new_coverage_i)
                     all_hyps.append(new_hyp)
 
             # Filter and collect any hypotheses that have produced the end token.
@@ -227,6 +230,8 @@ def run_beam_search(sess, model, vocab, batch):
         best_hyps.append(best_hyp)
 
     # Return the hypothesis with highest average log prob
+    enc_states = np.array([enc_states[i*beam_size] for i in xrange(batch_size)])
+    dec_in_state = np.array([dec_in_state[i*beam_size] for i in xrange(batch_size)])
     return enc_states, dec_in_state, np.array(best_hyps)
 
 

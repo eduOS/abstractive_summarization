@@ -109,6 +109,8 @@ class PointerGenerator(object):
                 cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
             # concatenate the forwards and backwards states
             encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
+            # encoder_outputs: [batch_size * beam_size, max_time, output_size*2]
+            # fw_st & bw_st: [batch_size * beam_size, num_hidden]
         return encoder_outputs, fw_st, bw_st
 
     def _reduce_states(self, fw_st, bw_st):
@@ -145,7 +147,7 @@ class PointerGenerator(object):
             old_c = tf.concat(axis=1, values=[fw_st.c, bw_st.c])
             # Concatenation of fw and bw state
             old_h = tf.concat(axis=1, values=[fw_st.h, bw_st.h])
-            # batch_size * hidden_dim
+            # [batch_size * beam_size, hidden_dim]
             new_c = tf.nn.relu(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
             new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
             return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
@@ -305,6 +307,8 @@ class PointerGenerator(object):
 
             # Add the encoder.
             enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
+            # encoder_outputs: [batch_size * beam_size, max_time, output_size*2]
+            # fw_st & bw_st: [batch_size * beam_size, num_hidden]
             # those in the encoder should also be updated
             self.enc_states = enc_outputs
             # this is for the decode-one-step process: beam search and rollout
@@ -314,6 +318,9 @@ class PointerGenerator(object):
             # we need to reduce the final encoder hidden state to the right size
             # to be the initial decoder hidden state
             self.dec_in_state = self._reduce_states(fw_st, bw_st)
+            # tf.contrib.rnn.LSTMStateTuple(
+            # [batch_size * beam_size, hidden_dim], [batch_size * beam_size, hidden_dim])
+            # a lstm tuple with each item being: [batch_size * beam_size, hidden_dim]
             # where is the batch size
 
             log_dists, self._dec_out_state = self.decode(emb_dec_inputs, self.dec_in_state)
@@ -371,7 +378,7 @@ class PointerGenerator(object):
             assert len(log_dists) == 1
             log_dists = log_dists[0]
             self._topk_log_probs, self._topk_ids = tf.nn.top_k(
-                log_dists, hps.beam_size)
+                log_dists, hps.beam_size * 2)
         # note batch_size=beam_size in decode mode
 
         g_predictions = tf.nn.embedding_lookup(self.embedding, self.g_predictions)
@@ -532,12 +539,15 @@ class PointerGenerator(object):
             ],
             feed_dict
         )  # run the encoder
+        # enc_states: [batch_size * beam_size, <=max_enc_steps, 2*hidden_dim]
+        # dec_in_state: [batch_size * beam_size, ]
 
         # dec_in_state is LSTMStateTuple shape
         # ([batch_size,hidden_dim],[batch_size,hidden_dim])
         # Given that the batch is a single example repeated, dec_in_state is
         # identical across the batch so we just take the top row.
-        dec_in_state = np.array([tf.contrib.rnn.LSTMStateTuple(dec_in_state.c[i], dec_in_state.h[i] for i in xrange()]))
+        dec_in_state = [tf.contrib.rnn.LSTMStateTuple(
+            dec_in_state.c[i], dec_in_state.h[i] for i in xrange(len(dec_in_state.h))]
         return enc_states, dec_in_state
 
     def decode_onestep(self, emb_dec_inputs, dec_in_state):
@@ -618,7 +628,7 @@ class PointerGenerator(object):
         new_states = [
             tf.contrib.rnn.LSTMStateTuple(
                 results['states'].c[i, :], results['states'].h[i, :])
-            for i in xrange(FLAGS.beam_size * FLAGS.batch_size)]
+            for i in xrange(FLAGS.beam_size)]
 
         # Convert singleton list containing a tensor to a list of k arrays
         assert len(results['attn_dists']) == 1
@@ -629,15 +639,15 @@ class PointerGenerator(object):
             assert len(results['p_gens']) == 1
             p_gens = results['p_gens'][0].tolist()
         else:
-            p_gens = [None for _ in xrange(FLAGS.beam_size * FLAGS.batch_size)]
+            p_gens = [None for _ in xrange(FLAGS.beam_size)]
 
         # Convert the coverage tensor to a list length k containing the coverage
         # vector for each hypothesis
         if FLAGS.coverage:
             new_coverage = results['coverage'].tolist()
-            assert len(new_coverage) == FLAGS.beam_size * FLAGS.batch_size
+            assert len(new_coverage) == FLAGS.beam_size
         else:
-            new_coverage = [None for _ in xrange(FLAGS.beam_size * FLAGS.batch_size)]
+            new_coverage = [None for _ in xrange(FLAGS.beam_size)]
 
         return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
 
