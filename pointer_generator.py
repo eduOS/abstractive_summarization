@@ -592,7 +592,6 @@ class PointerGenerator(object):
 
         # Turn dec_init_states (a list of LSTMStateTuples) into a single
         # LSTMStateTuple for the batch
-        # can this be added to the run_beam_search?
         cells = [np.expand_dims(state.c, axis=0) for state in dec_init_states]
         hiddens = [np.expand_dims(state.h, axis=0) for state in dec_init_states]
         new_c = np.concatenate(cells, axis=0)  # shape [batch_size,hidden_dim]
