@@ -14,9 +14,14 @@ from rollout import ROLLOUT
 
 from res_discriminator import Seq2ClassModel
 from data import Vocab
+PAD_TOKEN = "[PAD]"
+STOP_DECODING = '[STOP]'
 
 
 tf.app.flags.DEFINE_string('mode', 'train', 'must be one of pretrain_gen/pretrain_dis/train_gan/decode')
+# ------------------------------------- common
+tf.app.flags.DEFINE_integer("batch_size", 64, "Batch size to use during training.")
+
 # ------------------------------------- discriminator
 
 # Model parameters
@@ -34,7 +39,6 @@ tf.app.flags.DEFINE_string("buckets", "9,12,20,40", "buckets of different length
 tf.app.flags.DEFINE_float("dis_lr", 0.01, "Learning rate.")
 tf.app.flags.DEFINE_float("lr_decay_factor", 0.5, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("dis_max_gradient", 5.0, "Clip gradients to this norm.")
-tf.app.flags.DEFINE_integer("dis_batch_size", 64, "Batch size to use during training.")
 tf.app.flags.DEFINE_boolean("early_stop", False, "Set to True to turn on early stop.")
 tf.app.flags.DEFINE_integer("max_steps", -1, "max number of steps to train")
 
@@ -71,7 +75,6 @@ tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be sa
 # Hyperparameters
 tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 128, 'dimension of word embeddings')
-tf.app.flags.DEFINE_integer('gen_batch_size', 16, 'minibatch size')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
 tf.app.flags.DEFINE_integer('max_enc_steps', 80, 'max timesteps of encoder (max source text tokens)')  # 400
@@ -275,7 +278,7 @@ def main(argv):
         hparam_gen = [
             'mode',
             'adagrad_init_acc',
-            'gen_batch_size',
+            'batch_size',
             'cov_loss_wt',
             'coverage',
             'emb_dim',
@@ -299,8 +302,8 @@ def main(argv):
                 hps_dict[key] = val  # add it to the dict
 
         hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
-        gen_vocab = Vocab(os.path.join(FLAGS.data_path, 'gen_vocab'), FLAGS.gen_vocab_size)
-        gen_batcher = GenBatcher(FLAGS.data_path, gen_vocab, hps_gen, single_pass=FLAGS.single_pass)
+        gen_vocab = Vocab(os.path.join(hps_gen.data_path, 'gen_vocab'), hps_gen.gen_vocab_size)
+        gen_batcher = GenBatcher(hps_gen.data_path, gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
 
         if FLAGS.segment is not True:
             hps_gen = hps_gen._replace(max_enc_steps=110)
@@ -324,7 +327,7 @@ def main(argv):
             'pool_size',
             'pool_layers',
             'dis_max_gradient',
-            'dis_batch_size',
+            'batch_size',
             'dis_lr',
             'lr_decay_factor',
             'cell_type',
@@ -337,8 +340,8 @@ def main(argv):
                 hps_dict[key] = val  # add it to the dict
 
         hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
-        dis_vocab = Vocab(os.path.join(FLAGS.data_path, 'dis_vocab'), FLAGS.dis_vocab_size)
-        dis_batcher = DisBatcher(FLAGS.data_path, "train", dis_vocab, FLAGS.batch_size, single_pass=FLAGS.single_pass)
+        dis_vocab = Vocab(os.path.join(hps_dis.data_path, 'dis_vocab'), hps_dis.dis_vocab_size)
+        dis_batcher = DisBatcher(hps_dis.data_path, "train", dis_vocab, hps_dis.batch_size, single_pass=hps_dis.single_pass)
         with tf.variable_scope("discriminator"):
             discriminator = Seq2ClassModel(hps_dis)
             discriminator.build_graph()
@@ -389,20 +392,22 @@ def main(argv):
             # decode_model_hps = decode_model_hps._replace(mode="gan")
             # model = PointerGenerator(decode_model_hps, gen_vocab)
             # get_reward, update_params
-            for i_gan in range(FLAGS.gan_iter):
+            for i_gan in range(hps_gan.gan_iter):
                 # Train the generator for one step
-                for it in range(FLAGS.gan_gen_iter):
+                for it in range(hps_gan.gan_gen_iter):
                     # can this be self.batch in decoder?
-                    for i_b in range(FLAGS.batch_size):
-                        source_batch, enc_states, dec_in_state, best_samples = decoder.generate()
-                    rewards = rollout.get_reward(sess, source_batch, enc_states, dec_in_state, best_samples, 16, discriminator)
+                    source_batch, enc_states, dec_in_state, best_samples = decoder.generate()
+                    rewards = rollout.get_reward(
+                        sess, source_batch, enc_states, dec_in_state, best_samples, 16, discriminator)
                     # only updates parameters without the rollout scope
                     feed_dict = {}
                     feed_dict[generator.enc_batch] = source_batch.enc_batch
+                    feed_dict[generator.enc_lens] = source_batch.enc_lens
+                    # TODO: enc_lens should be added in rollout
                     feed_dict[generator.g_predictions] = best_samples
                     feed_dict[generator.rewards] = rewards
 
-                    if FLAGS.pointer_gen:
+                    if hps_gen.pointer_gen:
                         feed_dict[generator.enc_batch_extend_vocab] = source_batch.enc_batch_extend_vocab
                         # this is the source
                         feed_dict[generator.max_art_oovs] = source_batch.max_art_oovs
@@ -415,21 +420,35 @@ def main(argv):
                     summary, test_loss, step = generator.run_eval_step(sess, source_batch)
                     buffer = 'step:\t' + str(step) + '\tloss:\t' + str(test_loss) + '\n'
                     print('step: ', step, 'test_loss: ', test_loss)
+                    # print out some samples
                     log.write(buffer)
 
                 # Update roll-out parameters
                 # rollout.update_params()
 
                 # Train the discriminator
-                for _ in range(gan_dis_iter):
-                    source_batch, enc_states, dec_in_state, sample = decoder.generate()
-
+                for _ in range(hps_gan.gan_dis_iter):
                     for _ in range(3):
                         for it in xrange(dis_data_loader.num_batch):
-                            source_batch, enc_states, dec_in_state, sample = decoder.generate()
-                            inputs = np.concat([sample, source_batch.dec_batch], 0)
-                            conditions = np.concat([source_batch.dec_batch, source_batch.dec_batch], 0)
+                            source_batch, enc_states, dec_in_state, samples_words = decoder.generate()
+                            article_oov = source_batch.art_oovs if hps_gen.pointer_gen else None
+
+                            samples_chars = gen_vocab2dis_vocab(
+                                samples_words, gen_vocab, articles_oovs,
+                                dis_vocab, 25, STOP_DECODING)
+                            dec_batch_words = source_batch.abs_ids_extend_vocab \
+                                if hps_gen.pointer_gen else source_batch.abs_ids
+                            dec_batch_chars = gen_vocab2dis_vocab(
+                                dec_batch_words, gen_vocab, articles_oovs, dis_vocab, 25, PAD_TOKEN)
+                            conditions_words = source_batch.enc_batch_extend_vocab \
+                                if hps_gen.pointer_gen else source_batch.enc_batch
+                            conditions_chars = gen_vocab2dis_vocab(
+                                conditions_words, gen_vocab, article_oov,
+                                dis_vocab, 110, PAD_TOKEN)
+                            inputs = np.concat([samples_chars, dec_batch_chars], 0)
+                            conditions = np.concat([conditions_chars, conditions_chars], 0)
                             targets = np.concat([np.zeros([batch_size]), np.ones([batch_size])], 0)
+
                             discriminator.run_one_step(sess, inputs, conditions, targets)
 
     elif FLAGS.mode == "decode":

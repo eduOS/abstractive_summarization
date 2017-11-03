@@ -383,15 +383,36 @@ def prepare_dis_pretraining_batch(batch):
     return inputs, conditions, targets
 
 
-def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab):
+def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab,
+                        max_len, STOP_MARK=STOP_DECODING):
+    """
+    transfer the generator vocabulary which is word based to discriminator
+    vocabualry which is char based
+
+    args:
+        gen_ids: a list of list of ids (integers)
+        gen_vocab: the vocabulary of the generatorj:w
+        articles_oovs, if pointer_gen is true this is the temporary out of vocabulary
+        dis_vocab: the vocabulary of the discriminator
+        max_len: since the inputs of the discriminator can only be length fixed,
+                 pads and stop_decoding all are set as 0(which is the convention in the
+                 discriminator)
+        STOP_MARK: the stop symbol, which is important for the sample, it may be
+                   the pad symbol and etc.
+
+    return: a two dimensional numpy array with the ids of the discriminator vocabulary
+    """
     samples_ids = []
     samples_words = outputsids2words(gen_ids, gen_vocab, article_oovs)
     for sample_words in samples_words:
         try:
-            fst_stop_idx = sample_words.index(STOP_DECODING)  # index of the (first) [STOP] symbol
+            fst_stop_idx = sample_words.index(STOP_MARK)  # index of the (first) [STOP] symbol
             sample_chars = text2charlist(sample_words[:fst_stop_idx])
         except ValueError:
             sample_chars = text2charlist(sample_words)
-        samples_ids.append([dis_vocab.word2id(char) for char in sample_chars])
+        sample_ids = [dis_vocab.word2id(char) for char in sample_chars]
+        while len(sample_ids) < max_len:
+            sample_ids.append(0)
+        samples_ids.append(sample_ids)
     assert len(samples_words) == len(samples_ids)
-    return samples_ids
+    return np.array(samples_ids)

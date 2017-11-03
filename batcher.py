@@ -68,11 +68,11 @@ class Example(object):
         # Process the abstract
         abstract_words = abstract.split()  # list of strings
         # list of word ids; OOVs are represented by the id for UNK token
-        abs_ids = [vocab.word2id(w) for w in abstract_words]
+        self.abs_ids = [vocab.word2id(w) for w in abstract_words]
 
         # Get the decoder input sequence and target sequence
         self.dec_input, self.target = self.get_dec_inp_targ_seqs(
-            abs_ids, hps.max_dec_steps, start_decoding, stop_decoding)
+            self.abs_ids, hps.max_dec_steps, start_decoding, stop_decoding)
         self.dec_len = len(self.dec_input)
 
         # If using pointer-generator mode, we need to store some extra info
@@ -85,13 +85,13 @@ class Example(object):
 
             # Get a verison of the reference summary where in-article OOVs are
             # represented by their temporary article OOV id
-            abs_ids_extend_vocab = data.abstract2ids(
+            self.abs_ids_extend_vocab = data.abstract2ids(
                 abstract_words, vocab, self.article_oovs)
 
             # Overwrite decoder target sequence so it uses the temp article OOV
             # ids
             _, self.target = self.get_dec_inp_targ_seqs(
-                abs_ids_extend_vocab,
+                self.abs_ids_extend_vocab,
                 hps.max_dec_steps,
                 start_decoding,
                 stop_decoding)
@@ -143,6 +143,14 @@ class Example(object):
         if self.hps.pointer_gen:
             while len(self.enc_input_extend_vocab) < max_len:
                 self.enc_input_extend_vocab.append(pad_id)
+
+    def pad_abs(self, max_len, pad_id):
+        """Pad the encoder input sequence with pad_id up to max_len."""
+        while len(self.abs_ids) < max_len:
+            self.abs_ids.append(pad_id)
+        if self.hps.pointer_gen:
+            while len(self.abs_ids_extend_vocab) < max_len:
+                self.abs_ids_extend_vocab.append(pad_id)
 
 
 class Batch(object):
@@ -196,6 +204,9 @@ class Batch(object):
         # sequence
         for ex in example_list:
             ex.pad_encoder_input(max_enc_seq_len, self.pad_id)
+
+        for ex in example_list:
+            ex.pad_abs(hps.max_enc_steps, self.pad_id)
 
         # Initialize the numpy arrays
         # Note: our enc_batch can have different length (second dimension) for

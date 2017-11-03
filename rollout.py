@@ -2,6 +2,8 @@ import tensorflow as tf
 from tensorflow.python.ops import tensor_array_ops, control_flow_ops
 import numpy as np
 from data import gen_vocab2dis_vocab
+PAD_TOKEN = "[PAD]"
+STOP_DECODING = '[STOP]'
 
 
 class Rollout(object):
@@ -82,12 +84,12 @@ class Rollout(object):
         # changed to [batch_size, hidden_dim] for the attention_decoder
         rewards = []
 
+        article_oovs = source_batch.art_oovs if self._gen_hps.pointer_gen else None
         enc_inputs_words = source_batch.enc_batch_extend_vocab \
             if self._gen_hps.pointer_gen else source_batch.enc_batch
         enc_inputs_chars = gen_vocab2dis_vocab(
-            enc_inputs_words.tolist(), gen_vocab,
-            (source_batch.art_oovs if self._gen_hps.pointer_gen else None),
-            dis_vocab, )
+            enc_inputs_words, gen_vocab, article_oovs,
+            dis_vocab, self._gen_hp.max_enc_steps, PAD_TOKEN)
 
         for i in range(rollout_num):
             for given_num in range(1, self._gen_hps.max_dec_steps):
@@ -113,9 +115,8 @@ class Rollout(object):
                 rollout_samples_words = sess.run(self.gen_summ, feed_dict)
                 # how about multiple generators for one discriminator?
                 rollout_samples_chars = gen_vocab2dis_vocab(
-                    rollout_samples_words.tolist(), gen_vocab
-                    (source_batch.art_oovs if self._gen_hps.pointer_gen else None),
-                    dis_vocab, )
+                    rollout_samples_words, gen_vocab, article_oovs,
+                    dis_vocab, self._gen_hps.max_dec_steps, STOP_DECODING)
 
                 feed = {
                     discriminator.dis_input_x: rollout_samples_chars,
@@ -130,9 +131,8 @@ class Rollout(object):
 
             # the last token reward
             samples_chars = gen_vocab2dis_vocab(
-                samples.tolist(), gen_vocab
-                (source_batch.art_oovs if self._gen_hps.pointer_gen else None),
-                dis_vocab, )
+                samples, gen_vocab, article_oovs,
+                dis_vocab, self._gen_hps.max_dec_steps, STOP_DECODING)
             feed = {
                 discriminator.dis_input_x: samples_chars,
                 discriminator.dis_input_xs: enc_inputs_chars,

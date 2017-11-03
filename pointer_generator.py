@@ -107,6 +107,10 @@ class PointerGenerator(object):
             cell_bw = tf.contrib.rnn.LSTMCell(self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True, name="cell_bw")
             (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
+            # the sequence length of the encoder_inputs varies depending on the
+            # batch, which will make the second dimension of the
+            # encoder_outputs different in different batches
+
             # concatenate the forwards and backwards states
             encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
             # encoder_outputs: [batch_size * beam_size, max_time, output_size*2]
