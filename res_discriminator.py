@@ -2,8 +2,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import random
-import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 from tensorflow.python.client import timeline
@@ -17,7 +15,9 @@ class Seq2ClassModel(object):
   """
 
   def __init__(self, hps):
-  # model, vocab_size, num_class, buckets, size, num_layers, max_gradient, batch_size, learning_rate, learning_rate_decay_factor, cell_type="GRU", is_decoding=False):
+    # model, vocab_size, num_class, buckets, size, num_layers, max_gradient,
+    # batch_size, learning_rate, learning_rate_decay_factor, cell_type="GRU",
+    # is_decoding=False):
     """Create the model.
 
     Args:
@@ -35,6 +35,8 @@ class Seq2ClassModel(object):
       cell_type: choose between LSTM cells and GRU cells.
       is_decoding: if set, we do decoding instead of training.
     """
+    # TODO: is_decoding affects the graph loading? since the graph is differenct
+    # if this differs
     self.vocab_size = hps.dis_vocab_size
     with tf.variable_scope("OptimizeLoss"):
       self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(hps.learning_rate))
