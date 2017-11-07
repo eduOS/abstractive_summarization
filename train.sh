@@ -1,6 +1,6 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES="0"
-python  tfGan.py --is_decode False \
+# export CUDA_VISIBLE_DEVICES="0"
+python  SumGan.py --is_decode False \
   --is_generator_train True \
   --is_gan_train False \
   --is_discriminator_train False \

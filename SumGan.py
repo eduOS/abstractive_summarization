@@ -11,6 +11,7 @@ from batcher import GenBatcher, DisBatcher
 from decode import BeamSearchDecoder
 from pointer_generator import PointerGenerator
 from rollout import ROLLOUT
+from data import gen_vocab2dis_vocab
 
 from res_discriminator import Seq2ClassModel
 from data import Vocab
@@ -18,7 +19,9 @@ PAD_TOKEN = "[PAD]"
 STOP_DECODING = '[STOP]'
 
 
-tf.app.flags.DEFINE_string('mode', 'train', 'must be one of pretrain_gen/pretrain_dis/train_gan/decode')
+tf.app.flags.DEFINE_string(
+    'mode', 'train',
+    'must be one of pretrain_gen/pretrain_dis/train_gan/decode')
 # ------------------------------------- common
 tf.app.flags.DEFINE_integer("batch_size", 64, "Batch size to use during training.")
 
@@ -53,11 +56,15 @@ tf.app.flags.DEFINE_boolean("test", False, "Run a test on the eval set.")
 
 # ------------------------------------- generator
 
-# the GAN training setting
-tf.app.flags.DEFINE_boolean('teacher_forcing', False, 'whether to do use teacher forcing for training the generator')
-
 # Where to find data
-tf.app.flags.DEFINE_string('data_path', '', 'Path expression to tf.Example datafiles. Can include wildcards to access multiple datafiles.')
+tf.app.flags.DEFINE_string(
+    'data_path', './data/', 'Path expression to tf.Example datafiles and vocabulary \
+    Can include wildcards to access multiple datafiles.')
+
+#  data_path/gen_vocab: vocabulary for the generator
+#  data_path/dis_vocab: vocabulary for the generator
+#  data_path/[train/eval]_[positive/negative/source]: the data for the discriminator
+#  data_path/[train/val/test]_\d+.bin: the data for the generator
 
 # Important settings
 tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True, run eval on the full dataset using a'
@@ -69,7 +76,7 @@ tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True
                             'log the results to screen, indefinitely.')
 
 # Where to save output
-tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
+tf.app.flags.DEFINE_string('log_root', './log/', 'Root directory for all logging.')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in adirectory with this name, under log_root.')
 
 # Hyperparameters
@@ -80,7 +87,7 @@ tf.app.flags.DEFINE_integer('emb_dim', 128, 'dimension of word embeddings')
 tf.app.flags.DEFINE_integer('max_enc_steps', 80, 'max timesteps of encoder (max source text tokens)')  # 400
 tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 100
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
-tf.app.flags.DEFINE_integer('min_dec_steps', 10, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
+tf.app.flags.DEFINE_integer('min_dec_steps', 8, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('gen_vocab_size', 50000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
@@ -274,11 +281,11 @@ def main(argv):
 
     if "train" in FLAGS.mode:
         # --------------- build graph ---------------
-
         hparam_gen = [
             'mode',
             'adagrad_init_acc',
             'batch_size',
+            'beam_size',
             'cov_loss_wt',
             'coverage',
             'emb_dim',
@@ -287,9 +294,7 @@ def main(argv):
             'max_dec_steps',
             'max_enc_steps',
             'min_dec_steps',
-            'gen_max_gradient',
             'pointer_gen',
-            'rand_unif_init_mag',
             'trunc_norm_init_std',
             'single_pass',
             'log_root',
@@ -414,14 +419,12 @@ def main(argv):
                     _ = sess.run(generator.g_updates, feed_dict=feed_dict)
 
                 # Test
-                if i_gan % 5 == 0 or i_gan == gan_iter - 1:
+                if hps_gan.i_gan % 5 == 0 or hps_gan.i_gan == hps_gan.gan_iter - 1:
                     source_batch, enc_states, dec_in_state, best_samples = decoder.generate()
                     # the true abstract is source_batch.dec_batch
                     summary, test_loss, step = generator.run_eval_step(sess, source_batch)
                     buffer = 'step:\t' + str(step) + '\tloss:\t' + str(test_loss) + '\n'
-                    print('step: ', step, 'test_loss: ', test_loss)
-                    # print out some samples
-                    log.write(buffer)
+                    print(buffer)
 
                 # Update roll-out parameters
                 # rollout.update_params()
@@ -429,32 +432,55 @@ def main(argv):
                 # Train the discriminator
                 for _ in range(hps_gan.gan_dis_iter):
                     for _ in range(3):
-                        for it in xrange(dis_data_loader.num_batch):
-                            source_batch, enc_states, dec_in_state, samples_words = decoder.generate()
-                            article_oov = source_batch.art_oovs if hps_gen.pointer_gen else None
+                        source_batch, enc_states, dec_in_state, samples_words = decoder.generate()
+                        article_oov = source_batch.art_oovs if hps_gen.pointer_gen else None
 
-                            samples_chars = gen_vocab2dis_vocab(
-                                samples_words, gen_vocab, articles_oovs,
-                                dis_vocab, 25, STOP_DECODING)
-                            dec_batch_words = source_batch.abs_ids_extend_vocab \
-                                if hps_gen.pointer_gen else source_batch.abs_ids
-                            dec_batch_chars = gen_vocab2dis_vocab(
-                                dec_batch_words, gen_vocab, articles_oovs, dis_vocab, 25, PAD_TOKEN)
-                            conditions_words = source_batch.enc_batch_extend_vocab \
-                                if hps_gen.pointer_gen else source_batch.enc_batch
-                            conditions_chars = gen_vocab2dis_vocab(
-                                conditions_words, gen_vocab, article_oov,
-                                dis_vocab, 110, PAD_TOKEN)
-                            inputs = np.concat([samples_chars, dec_batch_chars], 0)
-                            conditions = np.concat([conditions_chars, conditions_chars], 0)
-                            targets = np.concat([np.zeros([batch_size]), np.ones([batch_size])], 0)
+                        samples_chars = gen_vocab2dis_vocab(
+                            samples_words, gen_vocab, articles_oovs,
+                            dis_vocab, 25, STOP_DECODING)
+                        dec_batch_words = source_batch.abs_ids_extend_vocab \
+                            if hps_gen.pointer_gen else source_batch.abs_ids
+                        dec_batch_chars = gen_vocab2dis_vocab(
+                            dec_batch_words, gen_vocab, articles_oovs, dis_vocab, 25, PAD_TOKEN)
+                        conditions_words = source_batch.enc_batch_extend_vocab \
+                            if hps_gen.pointer_gen else source_batch.enc_batch
+                        conditions_chars = gen_vocab2dis_vocab(
+                            conditions_words, gen_vocab, article_oov,
+                            dis_vocab, 110, PAD_TOKEN)
+                        inputs = np.concat([samples_chars, dec_batch_chars], 0)
+                        conditions = np.concat([conditions_chars, conditions_chars], 0)
+                        targets = np.concat([np.zeros([batch_size]), np.ones([batch_size])], 0)
 
-                            discriminator.run_one_step(sess, inputs, conditions, targets)
+                        discriminator.run_one_step(sess, inputs, conditions, targets)
 
     elif FLAGS.mode == "decode":
-        decode_model_hps = hps
-        decode_model_hps = decode_model_hps._replace(mode="decode")
-        decode_model_hps = decode_model_hps._replace(max_dec_steps=1)
-        generator = PointerGenerator(decode_model_hps, vocab)
+        hparam_gen = [
+            'mode',
+            'rand_unif_init_mag',
+            'adagrad_init_acc',
+            'batch_size',
+            'beam_size',
+            'cov_loss_wt',
+            'coverage',
+            'emb_dim',
+            'hidden_dim',
+            'gen_lr',
+            'max_dec_steps',
+            'max_enc_steps',
+            'min_dec_steps',
+            'pointer_gen',
+            'trunc_norm_init_std',
+            'single_pass',
+            'log_root',
+            'data_path',
+        ]
+        hps_dict = {}
+        for key, val in FLAGS.__flags.iteritems():  # for each flag
+            if key in hparam_gen:  # if it's in the list
+                hps_dict[key] = val  # add it to the dict
+
+        hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
+
+        generator = PointerGenerator(hps_gen, vocab)
         decoder = BeamSearchDecoder(generator, batcher, vocab)
         decoder.decode()

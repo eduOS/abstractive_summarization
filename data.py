@@ -17,7 +17,6 @@
 """This file contains code to read the train/eval/test data from file and
 process it, and read the vocab data from file and process it"""
 
-import os
 import glob
 import random
 import struct
@@ -62,9 +61,9 @@ class Vocab(object):
         self._word_to_id = {}
         self._id_to_word = {}
 
-        # [UNK], [PAD], [START] and [STOP] get the ids 0,1,2,3.
-        for w in [PAD_TOKEN, UNKNOWN_TOKEN, START_DECODING, STOP_DECODING]:
-            self._word_to_id[w], self._id_to_word[len(self._id_to_word)] = len(self._word_to_id), w
+        # # [UNK], [PAD], [START] and [STOP] get the ids 0,1,2,3.
+        # for w in [PAD_TOKEN, UNKNOWN_TOKEN, START_DECODING, STOP_DECODING]:
+        #     self._word_to_id[w], self._id_to_word[len(self._id_to_word)] = len(self._word_to_id), w
 
         # Read the vocab file and add words up to max_size
         with open(vocab_file, 'r') as vocab_f:
@@ -74,11 +73,13 @@ class Vocab(object):
                     print('Warning: incorrectly formatted line in vocabulary file: %s\n' % line)
                     continue
                 w = pieces[0]
-                if w in [SENTENCE_START, SENTENCE_END, UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING]:
-                    raise Exception(
-                        '<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t be in the vocab file, but %s is' % w)
+                # if w in [SENTENCE_START, SENTENCE_END, UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING]:
+                #     continue
+                #   # raise Exception(
+                #   #     '<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t be in the vocab file, but %s is' % w)
                 if w in self._word_to_id:
-                    raise Exception('Duplicated word in vocabulary file: %s' % w)
+                    continue
+                    # raise Exception('Duplicated word in vocabulary file: %s' % w)
                 self._word_to_id[w], self._id_to_word[len(self._id_to_word)] = len(self._word_to_id), w
                 if max_size != 0 and len(self._word_to_id) >= max_size:
                     print("max_size of vocab was specified as %i; we now have %i words. Stopping reading." % (max_size, len(self._word_to_id)))
