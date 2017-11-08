@@ -60,6 +60,7 @@ class Vocab(object):
           max_size: integer. The maximum size of the resulting Vocabulary."""
         self._word_to_id = {}
         self._id_to_word = {}
+        self._count = 0
 
         # # [UNK], [PAD], [START] and [STOP] get the ids 0,1,2,3.
         # for w in [PAD_TOKEN, UNKNOWN_TOKEN, START_DECODING, STOP_DECODING]:
@@ -81,6 +82,7 @@ class Vocab(object):
                     continue
                     # raise Exception('Duplicated word in vocabulary file: %s' % w)
                 self._word_to_id[w], self._id_to_word[len(self._id_to_word)] = len(self._word_to_id), w
+                self._count += 1
                 if max_size != 0 and len(self._word_to_id) >= max_size:
                     print("max_size of vocab was specified as %i; we now have %i words. Stopping reading." % (max_size, len(self._word_to_id)))
                     break

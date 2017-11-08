@@ -24,10 +24,10 @@ import tensorflow as tf
 import beam_search
 import data
 import json
-import pyrouge
-import util
+# import pyrouge
+import gen_utils
 import logging
-from six.move import xrange
+from six.moves import xrange
 # import numpy as np
 
 SECS_UNTIL_NEW_CKPT = 60  # max number of seconds before loading new checkpoint
@@ -50,11 +50,11 @@ class BeamSearchDecoder(object):
         self._vocab = vocab
         self._saver = tf.train.Saver()
         # we use this to load checkpoints for decoding
-        self._sess = tf.Session(config=util.get_config())
+        self._sess = tf.Session(config=gen_utils.get_config())
         self._hps = model.hps
 
         # Load an initial checkpoint to use for decoding
-        ckpt_path = util.load_ckpt(self._saver, self._sess)
+        ckpt_path = gen_utils.load_ckpt(self._saver, self._sess)
 
         if self._hps.single_pass:
             # Make a descriptive decode directory name
@@ -159,12 +159,14 @@ class BeamSearchDecoder(object):
                 # pyrouge later
                 self.write_for_rouge(
                     original_articles, original_abstracts, decoded_outputs, counter)
+                self.write_for_discriminator(
+                    original_articles, original_abstracts, decoded_outputs)
                 counter += 1  # this is how many examples we've decoded
             else:
                 print_results(articles_withunks, abstracts_withunks, decoded_outputs)
                 # log output to screen
                 self.write_for_attnvis(articles_withunks, abstracts_withunks,
-                                       decoded_words, best_hyp.attn_dists, best_hyp.p_gens)
+                                       decoded_words, best_hyps.attn_dists, best_hyps.p_gens)
                 # write info to .json file for visualization tool
 
                 # Check if SECS_UNTIL_NEW_CKPT has elapsed; if so return so we
@@ -175,8 +177,17 @@ class BeamSearchDecoder(object):
                         'We\'ve been decoding with same checkpoint for %i \
                         seconds. Time to load new checkpoint',
                         t1-t0)
-                    _ = util.load_ckpt(self._saver, self._sess)  # NOQA
+                    _ = gen_utils.load_ckpt(self._saver, self._sess)  # NOQA
                     t0 = time.time()
+
+    def write_for_discriminator(self, artcls, reference_sents, decoded_outputs):
+        for artc, refe, hypo in zip(artcls, reference_sents, decoded_outputs):
+            with open(os.path.join(self._hps.data_path, self._hps.mode + "_negative"), "a") as f:
+                f.write(hypo)
+            with open(os.path.join(self._hps.data_path, self._hps.mode + "_positive"), "a") as f:
+                f.write(refe)
+            with open(os.path.join(self._hps.data_path, self._hps.mode + "_source"), "a") as f:
+                f.write(artc)
 
     def write_for_rouge(self, artcls, original_abstracts, decoded_outputs, ex_index):
         """Write output to file in correct format for eval with pyrouge. This is

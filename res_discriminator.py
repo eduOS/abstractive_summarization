@@ -37,6 +37,7 @@ class Seq2ClassModel(object):
     """
     # TODO: is_decoding affects the graph loading? since the graph is differenct
     # if this differs
+    self.is_decoding = 'gan' in hps.mode
     self.vocab_size = hps.dis_vocab_size
     with tf.variable_scope("OptimizeLoss"):
       self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(hps.learning_rate))
@@ -95,7 +96,7 @@ class Seq2ClassModel(object):
       self.indicators.append(loss_cv)
       self.losses.append(loss_train)
       dis_utils.params_decay(1.0 - self.learning_rate)
-      self.updates.append(tf.contrib.layers.optimize_loss(self.losses[i], self.global_step,
+      self.updates.append(tf.contrib.layers.optimize_loss(self.losses, self.global_step,
                                                           tf.identity(self.learning_rate), 'Adam', gradient_noise_scale=None, clip_gradients=None,
                                                           name="OptimizeLoss"))
       del tf.get_collection_ref(tf.GraphKeys.UPDATE_OPS)[:]
@@ -188,13 +189,13 @@ class Seq2ClassModel(object):
 
     if do_profiling:
       self.run_metadata = tf.RunMetadata()
-      outputs = session.run(output_feed, input_feed,
-                            options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE), run_metadata=self.run_metadata)
+      outputs = sess.run(output_feed, input_feed,
+                         options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE), run_metadata=self.run_metadata)
       trace = timeline.Timeline(step_stats=self.run_metadata.step_stats)
       trace_file = open('timeline.ctf.json', 'w')
       trace_file.write(trace.generate_chrome_trace_format())
       trace_file.close()
     else:
-      outputs = session.run(output_feed, input_feed)
+      outputs = sess.run(output_feed, input_feed)
 
     return outputs[0]

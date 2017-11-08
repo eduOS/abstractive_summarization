@@ -1,18 +1,20 @@
 import numpy
-import cPickle as pkl
 # import ipdb
 import sys
-from cntk.tokenizer import text2charslist
+from cntk.tokenizer import text2charlist
 from cntk.tokenizer import JiebaTokenizer
-from cntk import Standardizor
+from cntk.standardizer import Standardizer
+from codecs import open
 
 from collections import OrderedDict
 tokenizer = JiebaTokenizer()
-standardizor = Standardizor()
+standardizor = Standardizer()
 
 """
 build vocabulary from
 """
+# traditional chinese
+# nonprintable characters
 
 
 def main():
@@ -30,15 +32,15 @@ def main():
     assert len(sys.argv) > 3, "numbers of args must be more then 4"
     for filename in sys.argv[2:-1]:
         print('Processing', filename)
-        with open(filename, 'r') as f:
+        with open(filename, 'r', 'utf-8') as f:
             for line in f:
-                if line.startswith("<"):
+                if line.strip().startswith("<"):
                     continue
-                line = standardizor.set_sentence(line).standardize('all').sentence
+                line = standardizor.set_sentence(line).standardize('all').digits().sentence
                 if mode == "word":
-                    words_in = tokenizer(line, punc=False)
-                if mode == "char":
-                    words_in = text2charslist(line)
+                    words_in = tokenizer.sentence2words(line, punc=False)
+                elif mode == "char":
+                    words_in = text2charlist(line)
                 for w in words_in:
                     if w not in word_freqs:
                         word_freqs[w] = 0
@@ -52,11 +54,10 @@ def main():
     # print sorted_idx
     sorted_words = [words[ii] for ii in sorted_idx[::-1]]
 
-    for ii, ww in enumerate(sorted_words):
-        worddict[ww] = ii
-
-    with open('%s.pkl' % sys.argv[-1], 'wb') as f:
-        pkl.dump(worddict, f)
+    with open('%s' % sys.argv[-1], 'w', 'utf-8') as f:
+        for ii, ww in enumerate(sorted_words):
+            worddict[ww] = ii
+            f.write(ww + " " + str(ii) + "\n")
 
     print('Done')
 

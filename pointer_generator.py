@@ -25,7 +25,7 @@ import tensorflow as tf
 from attention_decoder import attention_decoder
 from share_function import tableLookup
 from tensorflow.contrib.tensorboard.plugins import projector
-from six.move import xrange
+from six.moves import xrange
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -297,7 +297,7 @@ class PointerGenerator(object):
 
     def _add_seq2seq(self):
         """Add the whole sequence-to-sequence model to the graph."""
-        hps = self._hps
+        hps = self.hps
 
         self.embedding = tableLookup(self._vocab.size(), self.hps.emb_dim, scope='vocabtable')
 

@@ -19,7 +19,7 @@
 import tensorflow as tf
 import numpy as np
 import data
-from six.move import xrange
+from six.moves import xrange
 
 FLAGS = tf.app.flags.FLAGS
 

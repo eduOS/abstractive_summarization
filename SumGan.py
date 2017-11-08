@@ -3,14 +3,14 @@ from collections import namedtuple
 import numpy as np
 import sys
 import os
-import util
+import gen_utils
 import time
 import re
 import data
 from batcher import GenBatcher, DisBatcher
 from decode import BeamSearchDecoder
 from pointer_generator import PointerGenerator
-from rollout import ROLLOUT
+from rollout import Rollout
 from data import gen_vocab2dis_vocab
 
 from res_discriminator import Seq2ClassModel
@@ -63,7 +63,7 @@ tf.app.flags.DEFINE_string(
 
 #  data_path/gen_vocab: vocabulary for the generator
 #  data_path/dis_vocab: vocabulary for the generator
-#  data_path/[train/eval]_[positive/negative/source]: the data for the discriminator
+#  data_path/[decode/eval]_[positive/negative/source]: the data for the discriminator
 #  data_path/[train/val/test]_\d+.bin: the data for the generator
 
 # Important settings
@@ -114,8 +114,9 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 FLAGS = tf.app.flags.FLAGS
 _buckets = map(int, re.split(' |,|;', FLAGS.buckets))
 
+assert FLAGS.mode in ["pretrain_gen", "pretrain_dis", "train_gan", "decode"]
 
-if FLAGS.mode == "gan":
+if FLAGS.mode == "train_gan":
     FLAGS.single_pass = False
 
 
@@ -253,14 +254,14 @@ def convert_to_coverage_model():
     tf.logging.info("converting non-coverage model to coverage model..")
 
     # initialize an entire coverage model from scratch
-    sess = tf.Session(config=util.get_config())
+    sess = tf.Session(config=gen_utils.get_config())
     print("initializing everything...")
     sess.run(tf.global_variables_initializer())
 
     # load all non-coverage weights from checkpoint
     saver = tf.train.Saver([v for v in tf.global_variables() if "coverage" not in v.name and "Adagrad" not in v.name])
     print("restoring non-coverage variables...")
-    curr_ckpt = util.load_ckpt(saver, sess)
+    curr_ckpt = gen_utils.load_ckpt(saver, sess)
     print("restored.")
 
     # save this model and quit
@@ -279,179 +280,181 @@ def main(argv):
     # Create a batcher object that will create minibatches of data
     # TODO change to pass number
 
-    if "train" in FLAGS.mode:
-        # --------------- build graph ---------------
-        hparam_gen = [
-            'mode',
-            'adagrad_init_acc',
-            'batch_size',
-            'beam_size',
-            'cov_loss_wt',
-            'coverage',
-            'emb_dim',
-            'hidden_dim',
-            'gen_lr',
-            'max_dec_steps',
-            'max_enc_steps',
-            'min_dec_steps',
-            'pointer_gen',
-            'trunc_norm_init_std',
-            'single_pass',
-            'log_root',
-            'data_path',
-        ]
+    # --------------- build graph ---------------
+    hparam_gen = [
+        'mode',
+        'adagrad_init_acc',
+        'batch_size',
+        'beam_size',
+        'cov_loss_wt',
+        'coverage',
+        'emb_dim',
+        'gen_vocab_size',
+        'hidden_dim',
+        'gen_lr',
+        'max_dec_steps',
+        'max_enc_steps',
+        'min_dec_steps',
+        'pointer_gen',
+        'trunc_norm_init_std',
+        'single_pass',
+        'log_root',
+        'data_path',
+    ]
 
-        hps_dict = {}
-        for key, val in FLAGS.__flags.iteritems():  # for each flag
-            if key in hparam_gen:  # if it's in the list
-                hps_dict[key] = val  # add it to the dict
+    hps_dict = {}
+    for key, val in FLAGS.__flags.iteritems():  # for each flag
+        if key in hparam_gen:  # if it's in the list
+            hps_dict[key] = val  # add it to the dict
 
-        hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
-        gen_vocab = Vocab(os.path.join(hps_gen.data_path, 'gen_vocab'), hps_gen.gen_vocab_size)
-        gen_batcher = GenBatcher(hps_gen.data_path, gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
+    hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
+    gen_vocab = Vocab(os.path.join(hps_gen.data_path, 'gen_vocab'), hps_gen.gen_vocab_size)
+    gen_batcher = GenBatcher(hps_gen.data_path, gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
 
-        if FLAGS.segment is not True:
-            hps_gen = hps_gen._replace(max_enc_steps=110)
-            hps_gen = hps_gen._replace(max_dec_steps=25)
-        else:
-            assert hps_gen.max_enc_steps == 80, "No segmentation, max_enc_steps wrong"
-            assert hps_gen.max_dec_steps == 15, "No segmentation, max_dec_steps wrong"
-        with tf.variable_scope("generator"):
-            generator = PointerGenerator(hps_gen, gen_vocab)
-            generator.build_graph()
+    if FLAGS.segment is not True:
+        hps_gen = hps_gen._replace(max_enc_steps=110)
+        hps_gen = hps_gen._replace(max_dec_steps=25)
+    else:
+        assert hps_gen.max_enc_steps == 80, "No segmentation, max_enc_steps wrong"
+        assert hps_gen.max_dec_steps == 15, "No segmentation, max_dec_steps wrong"
+    with tf.variable_scope("generator"):
+        generator = PointerGenerator(hps_gen, gen_vocab)
+        generator.build_graph()
 
-        hparam_dis = [
-            'mode',
-            'train_dir',
-            'dis_vocab_size',
-            'num_class',
-            'buckets',
-            'layer_size',
-            'conv_layers',
-            'kernel_size',
-            'pool_size',
-            'pool_layers',
-            'dis_max_gradient',
-            'batch_size',
-            'dis_lr',
-            'lr_decay_factor',
-            'cell_type',
-            'max_enc_steps',
-            'max_dec_steps',
-        ]
-        hps_dict = {}
-        for key, val in FLAGS.__flags.iteritems():  # for each flag
-            if key in hparam_dis:  # if it's in the list
-                hps_dict[key] = val  # add it to the dict
+    hparam_dis = [
+        'mode',
+        'train_dir',
+        'dis_vocab_size',
+        'num_class',
+        'buckets',
+        'layer_size',
+        'conv_layers',
+        'kernel_size',
+        'pool_size',
+        'pool_layers',
+        'dis_max_gradient',
+        'batch_size',
+        'dis_lr',
+        'lr_decay_factor',
+        'cell_type',
+        'max_enc_steps',
+        'max_dec_steps',
+    ]
+    hps_dict = {}
+    for key, val in FLAGS.__flags.iteritems():  # for each flag
+        if key in hparam_dis:  # if it's in the list
+            hps_dict[key] = val  # add it to the dict
 
-        hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
-        dis_vocab = Vocab(os.path.join(hps_dis.data_path, 'dis_vocab'), hps_dis.dis_vocab_size)
-        dis_batcher = DisBatcher(hps_dis.data_path, "train", dis_vocab, hps_dis.batch_size, single_pass=hps_dis.single_pass)
-        with tf.variable_scope("discriminator"):
-            discriminator = Seq2ClassModel(hps_dis)
-            discriminator.build_graph()
+    hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
+    dis_vocab = Vocab(os.path.join(hps_dis.data_path, 'dis_vocab'), hps_dis.dis_vocab_size)
+    dis_batcher = DisBatcher(hps_dis.data_path, "decode", dis_vocab, hps_dis.batch_size, single_pass=hps_dis.single_pass)
+    # the decode mode is refering to the decoding process of the generator
+    with tf.variable_scope("discriminator"):
+        discriminator = Seq2ClassModel(hps_dis)
+        discriminator.build_graph()
 
-        hparam_gan = [
-            'gan',
-            'train_dir',
-            'gan_iter',
-            'gan_gen_iter',
-            'rollout_num',
-        ]
-        hps_dict = {}
-        for key, val in FLAGS.__flags.iteritems():  # for each flag
-            if key in hparam_gan:  # if it's in the list
-                hps_dict[key] = val  # add it to the dict
+    hparam_gan = [
+        'gan',
+        'train_dir',
+        'gan_iter',
+        'gan_gen_iter',
+        'rollout_num',
+    ]
+    hps_dict = {}
+    for key, val in FLAGS.__flags.iteritems():  # for each flag
+        if key in hparam_gan:  # if it's in the list
+            hps_dict[key] = val  # add it to the dict
 
-        hps_gan = namedtuple("HParams4GAN", hps_dict.keys())(**hps_dict)
-        hps_gan = hps_gan._replace(mode="gan")
-        with tf.variable_scope("rollout"):
-            decoder = BeamSearchDecoder(generator, gen_batcher, gen_vocab)
-            rollout = ROLLOUT(generator, 0.8)
+    hps_gan = namedtuple("HParams4GAN", hps_dict.keys())(**hps_dict)
+    hps_gan = hps_gan._replace(mode="gan")
+    with tf.variable_scope("rollout"):
+        decoder = BeamSearchDecoder(generator, gen_batcher, gen_vocab)
+        rollout = Rollout(generator, 0.8)
 
-        saver = tf.train.Saver()
+    saver = tf.train.Saver()
 
-        sv = tf.train.Supervisor(
-            logdir=hps_dis.train_dir, is_chief=True, saver=saver,
-            summary_op=None, save_summaries_secs=60, save_model_secs=60)
-        summary_writer = sv.summary_writer
-        tf.logging.info("Preparing or waiting for session...")
-        sess = sv.prepare_or_wait_for_session(config=util.get_config())
+    sv = tf.train.Supervisor(
+        logdir=hps_dis.train_dir, is_chief=True, saver=saver,
+        summary_op=None, save_summaries_secs=60, save_model_secs=60)
+    summary_writer = sv.summary_writer
+    tf.logging.info("Preparing or waiting for session...")
+    sess = sv.prepare_or_wait_for_session(config=gen_utils.get_config())
 
-        # initialize the embedding at the begging of training
-        ckpt = tf.train.get_checkpoint_state(hps_dis.train_dir)
-        if ckpt and not tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
-            discriminator.init_emb(sess, hps_dis.train_dir)
+    # initialize the embedding at the begging of training
+    ckpt = tf.train.get_checkpoint_state(hps_dis.train_dir)
+    if ckpt and not tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
+        discriminator.init_emb(sess, hps_dis.train_dir)
 
-        # --------------- train generator ---------------
-        if "gen" in FLAGS.mode:
-            pretrain_generator(generator, gen_batcher, sess, summary_writer)
+    # --------------- train generator ---------------
+    if FLAGS.mode == "pretrain_gen":
+        pretrain_generator(generator, gen_batcher, sess, summary_writer)
 
-        # --------------- train discriminator -----------
-        elif "dis" in FLAGS.mode:
-            pretrain_discriminator(sess, discriminator, dis_vocab, dis_batcher, summary_writer)
+    # --------------- train discriminator -----------
+    elif FLAGS.mode == "pretrain_dis":
+        pretrain_discriminator(sess, discriminator, dis_vocab, dis_batcher, summary_writer)
 
-        # --------------- finetune the generator --------
-        else:
-            # decode_model_hps = hps_gen
-            # decode_model_hps = decode_model_hps._replace(mode="gan")
-            # model = PointerGenerator(decode_model_hps, gen_vocab)
-            # get_reward, update_params
-            for i_gan in range(hps_gan.gan_iter):
-                # Train the generator for one step
-                for it in range(hps_gan.gan_gen_iter):
-                    # can this be self.batch in decoder?
-                    source_batch, enc_states, dec_in_state, best_samples = decoder.generate()
-                    rewards = rollout.get_reward(
-                        sess, source_batch, enc_states, dec_in_state, best_samples, 16, discriminator)
-                    # only updates parameters without the rollout scope
-                    feed_dict = {}
-                    feed_dict[generator.enc_batch] = source_batch.enc_batch
-                    feed_dict[generator.enc_lens] = source_batch.enc_lens
-                    # TODO: enc_lens should be added in rollout
-                    feed_dict[generator.g_predictions] = best_samples
-                    feed_dict[generator.rewards] = rewards
+    # --------------- finetune the generator --------
+    elif FLAGS.mode == "train_gan":
+        # decode_model_hps = hps_gen
+        # decode_model_hps = decode_model_hps._replace(mode="gan")
+        # model = PointerGenerator(decode_model_hps, gen_vocab)
+        # get_reward, update_params
+        for i_gan in range(hps_gan.gan_iter):
+            # Train the generator for one step
+            for it in range(hps_gan.gan_gen_iter):
+                # can this be self.batch in decoder?
+                source_batch, enc_states, dec_in_state, best_samples = decoder.generate()
+                rewards = rollout.get_reward(
+                    sess, source_batch, enc_states, dec_in_state, best_samples, 16, discriminator)
+                # only updates parameters without the rollout scope
+                feed_dict = {}
+                feed_dict[generator.enc_batch] = source_batch.enc_batch
+                feed_dict[generator.enc_lens] = source_batch.enc_lens
+                # TODO: enc_lens should be added in rollout
+                feed_dict[generator.g_predictions] = best_samples
+                feed_dict[generator.rewards] = rewards
 
-                    if hps_gen.pointer_gen:
-                        feed_dict[generator.enc_batch_extend_vocab] = source_batch.enc_batch_extend_vocab
-                        # this is the source
-                        feed_dict[generator.max_art_oovs] = source_batch.max_art_oovs
-                    _ = sess.run(generator.g_updates, feed_dict=feed_dict)
+                if hps_gen.pointer_gen:
+                    feed_dict[generator.enc_batch_extend_vocab] = source_batch.enc_batch_extend_vocab
+                    # this is the source
+                    feed_dict[generator.max_art_oovs] = source_batch.max_art_oovs
+                _ = sess.run(generator.g_updates, feed_dict=feed_dict)
 
-                # Test
-                if hps_gan.i_gan % 5 == 0 or hps_gan.i_gan == hps_gan.gan_iter - 1:
-                    source_batch, enc_states, dec_in_state, best_samples = decoder.generate()
-                    # the true abstract is source_batch.dec_batch
-                    summary, test_loss, step = generator.run_eval_step(sess, source_batch)
-                    buffer = 'step:\t' + str(step) + '\tloss:\t' + str(test_loss) + '\n'
-                    print(buffer)
+            # Test
+            if hps_gan.i_gan % 5 == 0 or hps_gan.i_gan == hps_gan.gan_iter - 1:
+                source_batch, enc_states, dec_in_state, best_samples = decoder.generate()
+                # the true abstract is source_batch.dec_batch
+                summary, test_loss, step = generator.run_eval_step(sess, source_batch)
+                buffer = 'step:\t' + str(step) + '\tloss:\t' + str(test_loss) + '\n'
+                print(buffer)
 
-                # Update roll-out parameters
-                # rollout.update_params()
+            # Update roll-out parameters
+            # rollout.update_params()
 
-                # Train the discriminator
-                for _ in range(hps_gan.gan_dis_iter):
-                    for _ in range(3):
-                        source_batch, enc_states, dec_in_state, samples_words = decoder.generate()
-                        article_oov = source_batch.art_oovs if hps_gen.pointer_gen else None
+            # Train the discriminator
+            for _ in range(hps_gan.gan_dis_iter):
+                for _ in range(3):
+                    source_batch, enc_states, dec_in_state, samples_words = decoder.generate()
+                    articles_oovs = source_batch.art_oovs if hps_gen.pointer_gen else None
 
-                        samples_chars = gen_vocab2dis_vocab(
-                            samples_words, gen_vocab, articles_oovs,
-                            dis_vocab, 25, STOP_DECODING)
-                        dec_batch_words = source_batch.abs_ids_extend_vocab \
-                            if hps_gen.pointer_gen else source_batch.abs_ids
-                        dec_batch_chars = gen_vocab2dis_vocab(
-                            dec_batch_words, gen_vocab, articles_oovs, dis_vocab, 25, PAD_TOKEN)
-                        conditions_words = source_batch.enc_batch_extend_vocab \
-                            if hps_gen.pointer_gen else source_batch.enc_batch
-                        conditions_chars = gen_vocab2dis_vocab(
-                            conditions_words, gen_vocab, article_oov,
-                            dis_vocab, 110, PAD_TOKEN)
-                        inputs = np.concat([samples_chars, dec_batch_chars], 0)
-                        conditions = np.concat([conditions_chars, conditions_chars], 0)
-                        targets = np.concat([np.zeros([batch_size]), np.ones([batch_size])], 0)
+                    samples_chars = gen_vocab2dis_vocab(
+                        samples_words, gen_vocab, articles_oovs,
+                        dis_vocab, 25, STOP_DECODING)
+                    dec_batch_words = source_batch.abs_ids_extend_vocab \
+                        if hps_gen.pointer_gen else source_batch.abs_ids
+                    dec_batch_chars = gen_vocab2dis_vocab(
+                        dec_batch_words, gen_vocab, articles_oovs, dis_vocab, 25, PAD_TOKEN)
+                    conditions_words = source_batch.enc_batch_extend_vocab \
+                        if hps_gen.pointer_gen else source_batch.enc_batch
+                    conditions_chars = gen_vocab2dis_vocab(
+                        conditions_words, gen_vocab, articles_oovs,
+                        dis_vocab, 110, PAD_TOKEN)
+                    inputs = np.concat([samples_chars, dec_batch_chars], 0)
+                    conditions = np.concat([conditions_chars, conditions_chars], 0)
+                    targets = np.concat(
+                        [np.zeros([hps_gan.batch_size]), np.ones([hps_gan.batch_size])], 0)
 
-                        discriminator.run_one_step(sess, inputs, conditions, targets)
+                    discriminator.run_one_step(sess, inputs, conditions, targets)
 
     elif FLAGS.mode == "decode":
         hparam_gen = [
@@ -480,7 +483,12 @@ def main(argv):
                 hps_dict[key] = val  # add it to the dict
 
         hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
+        gen_batcher = GenBatcher(hps_gen.data_path, gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
 
-        generator = PointerGenerator(hps_gen, vocab)
-        decoder = BeamSearchDecoder(generator, batcher, vocab)
+        generator = PointerGenerator(hps_gen, gen_vocab)
+        decoder = BeamSearchDecoder(generator, gen_batcher, gen_vocab)
         decoder.decode()
+
+
+if __name__ == '__main__':
+  tf.app.run()

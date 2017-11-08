@@ -294,10 +294,10 @@ class GenBatcher(object):
           when you want to run evaluation on the dev or test set). Otherwise
           generate random batches indefinitely (useful for training).
         """
-        self._data_path = data_path
         self._vocab = vocab
         self._hps = hps
         self._single_pass = single_pass
+        self._data_path = os.path.join(data_path, self._hps.mode) + "*.bin"
 
         # Initialize a queue of Batches waiting to be used, and a queue of
         # Examples waiting to be batched
