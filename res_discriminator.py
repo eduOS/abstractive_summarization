@@ -40,18 +40,20 @@ class Seq2ClassModel(object):
     self.is_decoding = 'gan' in hps.mode
     self.vocab_size = hps.dis_vocab_size
     with tf.variable_scope("OptimizeLoss"):
-      self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(hps.learning_rate))
+      self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(hps.dis_lr))
     self.cell_type = hps.cell_type
     self.global_step = tf.Variable(0, trainable=False)
     self.mode = hps.mode
     self.num_models = hps.num_models
-    self.batch_size = hps.dis_batch_size * self.num_models
+    self.batch_size = hps.batch_size * self.num_models
     self.max_enc_steps = hps.max_enc_steps
     self.max_dec_steps = hps.max_dec_steps
     self.layer_size = hps.layer_size
     self.conv_layers = hps.conv_layers
+    self.pool_layers = hps.pool_layers
     self.kernel_size = hps.kernel_size
     self.pool_size = hps.pool_size
+    self.num_class = hps.num_class
 
   def init_emb(self, sess, emb_dir):
     for ld in self.loaders:
@@ -70,13 +72,13 @@ class Seq2ClassModel(object):
   def build_graph(self):
     self._add_placeholders()
     # build the buckets
-    self.outputs, self.losses, self.updates, self.indicators = [], [], [], []
+    # self.outputs, self.losses, self.updates, self.indicators = [], [], [], []
     if self.is_decoding:
       probs = []
       for m in xrange(self.num_models):
         with tf.variable_scope("model"+str(m)):
           probs.append(self._seq2class_model(self.inputs, self.condition, self.targets, self.is_decoding))
-      self.outputs.append(tf.argmax(sum(probs), axis=1))
+      self.output = tf.argmax(sum(probs), axis=1)
       # would this lead the value run out to be a list of only one two
       # dimensional numpy array?
     else:
@@ -85,20 +87,26 @@ class Seq2ClassModel(object):
       self.loaders = []
       for m in xrange(self.num_models):
         with tf.variable_scope("model"+str(m)) as sc:
-          loss_train.append(self._seq2class_model(self.inputs_splitted[m], self.conditions_splitted[m], self.targets_splitted[m], self.is_decoding), 0)
+          loss_train.append(tf.expand_dims(
+              self._seq2class_model(
+                  self.inputs_splitted[m], self.conditions_splitted[m],
+                  self.targets_splitted[m], self.is_decoding), 0))
           sc.reuse_variables()
-          loss_cv.append(self._seq2class_model(self.inputs_splitted[m], self.conditions_splitted[m], self.targets_splitted[m], self.is_decoding), 0)
+          loss_cv.append(tf.expand_dims(
+              self._seq2class_model(
+                self.inputs_splitted[m], self.conditions_splitted[m],
+                self.targets_splitted[m], self.is_decoding), 0))
           var_dict = {}
-          var_dict["embed/char_embedding"] = tf.get_variable("embed/char_embedding")
+          var_dict["embed/char_embeddings"] = tf.get_variable("embed/char_embeddings")
           self.loaders.append(tf.train.Saver(var_dict))
       loss_train = tf.reduce_mean(tf.concat(loss_train, 0))
       loss_cv = tf.reduce_mean(tf.concat(loss_cv, 0))
-      self.indicators.append(loss_cv)
-      self.losses.append(loss_train)
+      self.indicator = loss_cv
+      self.loss = loss_train
       dis_utils.params_decay(1.0 - self.learning_rate)
-      self.updates.append(tf.contrib.layers.optimize_loss(self.losses, self.global_step,
-                                                          tf.identity(self.learning_rate), 'Adam', gradient_noise_scale=None, clip_gradients=None,
-                                                          name="OptimizeLoss"))
+      self.update = tf.contrib.layers.optimize_loss(
+          self.loss, self.global_step, tf.identity(self.learning_rate),
+          'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
       del tf.get_collection_ref(tf.GraphKeys.UPDATE_OPS)[:]
       tf.get_variable_scope().reuse_variables()
 
@@ -107,29 +115,29 @@ class Seq2ClassModel(object):
     conditional sequence to class model
     """
 
-    batch_size = inputs.get_shape()[1].value
+    batch_size = inputs.get_shape()[0].value
     input_length = inputs.get_shape()[1].value
     condition_length = conditions.get_shape()[1].value
-    # embedding params
+    # embeddings params
     with tf.variable_scope("embed"):
-      char_embedding = tf.contrib.framework.model_variable("char_embedding",
-                                                           shape=[self.vocab_size, self.layer_size],
-                                                           dtype=tf.float32,
-                                                           initializer=tf.truncated_normal_initializer(0.0, 0.01),
-                                                           collections=tf.GraphKeys.WEIGHTS,
-                                                           trainable=True)
+      char_embeddings = tf.contrib.framework.model_variable("char_embeddings",
+                                                            shape=[self.vocab_size, self.layer_size],
+                                                            dtype=tf.float32,
+                                                            initializer=tf.truncated_normal_initializer(0.0, 0.01),
+                                                            collections=[tf.GraphKeys.WEIGHTS],
+                                                            trainable=True)
       class_output_weights = tf.contrib.framework.model_variable("class_output_weights",
                                                                  shape=[self.num_class, self.layer_size*2],
                                                                  dtype=tf.float32,
                                                                  initializer=tf.truncated_normal_initializer(0.0, 0.01),
-                                                                 collections=tf.GraphKeys.WEIGHTS,
+                                                                 collections=[tf.GraphKeys.WEIGHTS],
                                                                  trainable=True)
 
     with tf.variable_scope("encoder"):
       input_masks = tf.greater(inputs, 0)
       condition_masks = tf.greater(conditions, 0)
-      emb_inputs = tf.nn.embedding_lookup(char_embedding, inputs)
-      emb_conditions = tf.nn.embedding_lookup(char_embedding, conditions)
+      emb_inputs = tf.nn.embedding_lookup(char_embeddings, inputs)
+      emb_conditions = tf.nn.embedding_lookup(char_embeddings, conditions)
       # substitute pads with zeros
       emb_inputs = tf.reshape(tf.where(tf.reshape(input_masks, [-1]),
                                        tf.reshape(emb_inputs, [-1, self.layer_size]),
@@ -142,7 +150,7 @@ class Seq2ClassModel(object):
       cnn_emb_inputs = tf.expand_dims(emb_inputs, 1)
       cnn_emb_conditions = tf.expand_dims(emb_conditions, 1)
       conditional_encoder_outputs = dis_utils.CResCNN(cnn_emb_inputs, cnn_emb_conditions, self.conv_layers, self.kernel_size, self.pool_size,
-                                                      pool_layer=self.pool_layers, activation_fn=tf.nn.relu, is_training=not is_decoding, scope="cnn")
+                                                      pool_layers=self.pool_layers, activation_fn=tf.nn.relu, is_training=not is_decoding, scope="cnn")
 
     with tf.variable_scope("projection"):
       logits = tf.matmul(conditional_encoder_outputs, tf.transpose(class_output_weights/(tf.norm(class_output_weights, axis=1, keep_dims=True)+1e-20)))
@@ -150,7 +158,7 @@ class Seq2ClassModel(object):
         return tf.nn.softmax(logits)
       else:
         # loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=targets))
-        loss = tf.nn.softmax_cross_entropy_with_logits(logits, targets)
+        loss = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=targets)
         return loss
 
   def run_one_step(self, sess, inputs, conditions, targets, update=False, do_profiling=False):
@@ -181,11 +189,11 @@ class Seq2ClassModel(object):
 
     # Output feed.
     if self.is_decoding:
-      output_feed = [self.outputs]
+      output_feed = [self.output]
     elif update:
-      output_feed = [self.losses, self.updates]  # Update Op that does SGD. Loss for this batch.
+      output_feed = [self.loss, self.update]  # Update Op that does SGD. Loss for this batch.
     else:
-      output_feed = [self.indicators]  # Loss for this batch.
+      output_feed = [self.indicator]  # Loss for this batch.
 
     if do_profiling:
       self.run_metadata = tf.RunMetadata()

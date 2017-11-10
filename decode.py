@@ -36,7 +36,7 @@ SECS_UNTIL_NEW_CKPT = 60  # max number of seconds before loading new checkpoint
 class BeamSearchDecoder(object):
     """Beam search decoder."""
 
-    def __init__(self, model, batcher, vocab):
+    def __init__(self, sess, model, batcher, vocab):
         """Initialize decoder.
 
         Args:
@@ -45,12 +45,12 @@ class BeamSearchDecoder(object):
           vocab: Vocabulary object
         """
         self._model = model
-        self._model.build_graph()
+        # self._model.build_graph()
         self._batcher = batcher
         self._vocab = vocab
-        self._saver = tf.train.Saver()
+        # self._saver = tf.train.Saver()
         # we use this to load checkpoints for decoding
-        self._sess = tf.Session(config=gen_utils.get_config())
+        self._sess = sess
         self._hps = model.hps
 
         # Load an initial checkpoint to use for decoding
@@ -61,7 +61,7 @@ class BeamSearchDecoder(object):
             # this is something of the form "ckpt-123456"
             ckpt_name = "ckpt-" + ckpt_path.split('-')[-1]
             self._decode_dir = os.path.join(
-                self._hps.log_root, get_decode_dir_name(ckpt_name))
+                self._hps.log_root, get_decode_dir_name(self._hps, ckpt_name))
             if os.path.exists(self._decode_dir):
                 raise Exception(
                     "single_pass decode directory %s should not already exist" %
@@ -84,7 +84,7 @@ class BeamSearchDecoder(object):
             if not os.path.exists(self._rouge_dec_dir):
                 os.mkdir(self._rouge_dec_dir)
 
-    def generate(self):
+    def generate(self, include_start_token=False):
         # the abstract should also be generated
         batch = self._batcher.next_batch()
         if batch is None:
@@ -95,7 +95,10 @@ class BeamSearchDecoder(object):
 
         # Extract the output ids from the hypothesis and convert back to
         # words
-        outputs_ids = [[int(t) for t in best_hyp.tokens[1:]] for best_hyp in best_hyps]
+        if include_start_token:
+            outputs_ids = [[int(t) for t in best_hyp.tokens[:]] for best_hyp in best_hyps]
+        else:
+            outputs_ids = [[int(t) for t in best_hyp.tokens[1:]] for best_hyp in best_hyps]
         return batch, enc_states, dec_in_state, outputs_ids
 
     def decode(self):
@@ -319,7 +322,7 @@ def rouge_log(results_dict, dir_to_write):
         f.write(log_str)
 
 
-def get_decode_dir_name(ckpt_name):
+def get_decode_dir_name(hps, ckpt_name):
     """Make a descriptive name for the decode dir, including the name of the
     checkpoint we use to decode. This is called in single_pass mode."""
 

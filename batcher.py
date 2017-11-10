@@ -211,8 +211,8 @@ class Batch(object):
         # Initialize the numpy arrays
         # Note: our enc_batch can have different length (second dimension) for
         # each batch because we use dynamic_rnn for the encoder.
-        self.enc_batch = np.zeros((self.batch_size, max_enc_seq_len), dtype=np.int32)
-        self.enc_lens = np.zeros((self.batch_size), dtype=np.int32)
+        self.enc_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
+        self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
 
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):
@@ -226,7 +226,7 @@ class Batch(object):
             # Store the in-article OOVs themselves
             self.art_oovs = [ex.article_oovs for ex in example_list]
             # Store the version of the enc_batch that uses the article OOV ids
-            self.enc_batch_extend_vocab = np.zeros((self.batch_size, max_enc_seq_len), dtype=np.int32)
+            self.enc_batch_extend_vocab = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
             for i, ex in enumerate(example_list):
                 self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
 
@@ -255,9 +255,9 @@ class Batch(object):
         # dynamic_rnn for decoding. However I believe this is possible, or will
         # soon be possible, with Tensorflow 1.0, in which case it may be best to
         # upgrade to that.
-        self.dec_batch = np.zeros((self.batch_size, hps.max_dec_steps), dtype=np.int32)
-        self.target_batch = np.zeros((self.batch_size, hps.max_dec_steps), dtype=np.int32)
-        self.padding_mask = np.zeros((self.batch_size, hps.max_dec_steps), dtype=np.float32)
+        self.dec_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
+        self.target_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
+        self.padding_mask = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.float32)
 
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):
@@ -271,7 +271,6 @@ class Batch(object):
         object"""
         self.original_articles = [ex.original_article for ex in example_list]  # list of lists
         self.original_abstracts = [ex.original_abstract for ex in example_list]  # list of lists
-        self.original_abstracts_sents = [ex.original_abstract_sents for ex in example_list]
         # list of list of lists
 
 
@@ -297,7 +296,12 @@ class GenBatcher(object):
         self._vocab = vocab
         self._hps = hps
         self._single_pass = single_pass
-        self._data_path = os.path.join(data_path, self._hps.mode) + "*.bin"
+        mode = "train"
+        if "val" in hps.mode:
+            mode = "val"
+        elif "decode":
+            pass
+        self._data_path = os.path.join(data_path, mode) + "*.bin"
 
         # Initialize a queue of Batches waiting to be used, and a queue of
         # Examples waiting to be batched

@@ -26,6 +26,7 @@ from attention_decoder import attention_decoder
 from share_function import tableLookup
 from tensorflow.contrib.tensorboard.plugins import projector
 from six.moves import xrange
+import data
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -42,20 +43,21 @@ class PointerGenerator(object):
         """Add placeholders to the graph. These are entry points for any input
         data."""
         hps = self.hps
+        batch_size = None
 
         # encoder part
-        self.enc_batch = tf.placeholder(tf.int32, [None, None], name='enc_batch')
-        self.enc_lens = tf.placeholder(tf.int32, [None], name='enc_lens')
+        self.enc_batch = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch')
+        self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
         if FLAGS.pointer_gen:
-            self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [None, None], name='enc_batch_extend_vocab')
+            self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch_extend_vocab')
             self.max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
 
         # decoder part
-        self._dec_batch = tf.placeholder(tf.int32, [None, hps.max_dec_steps], name='dec_batch')
-        self._target_batch = tf.placeholder(tf.int32, [None, hps.max_dec_steps], name='target_batch')
-        self._padding_mask = tf.placeholder(tf.float32, [None, hps.max_dec_steps], name='padding_mask')
-        self.rewards = tf.placeholder(tf.float32, shape=[None, self.hps.max_dec_steps])
-        self.g_predictions = tf.placeholder(tf.float32, shape=[None, self.hps.max_dec_steps])
+        self._dec_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='dec_batch')
+        self._target_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='target_batch')
+        self._padding_mask = tf.placeholder(tf.float32, [batch_size, hps.max_dec_steps], name='padding_mask')
+        self.rewards = tf.placeholder(tf.float32, shape=[batch_size, self.hps.max_dec_steps])
+        self.g_predictions = tf.placeholder(tf.int32, shape=[batch_size, self.hps.max_dec_steps])
 
         if hps.mode in ["decode", 'gan'] and hps.coverage:
             self.prev_coverage = tf.placeholder(tf.float32, [None, None], name='prev_coverage')
@@ -103,8 +105,10 @@ class PointerGenerator(object):
             ([batch_size,hidden_dim],[batch_size,hidden_dim])
         """
         with tf.variable_scope('encoder'):
-            cell_fw = tf.contrib.rnn.LSTMCell(self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True, name="cell_fw")
-            cell_bw = tf.contrib.rnn.LSTMCell(self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True, name="cell_bw")
+            cell_fw = tf.contrib.rnn.LSTMCell(
+                self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
+            cell_bw = tf.contrib.rnn.LSTMCell(
+                self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
             (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
             # the sequence length of the encoder_inputs varies depending on the
@@ -175,7 +179,7 @@ class PointerGenerator(object):
         cell = tf.contrib.rnn.LSTMCell(
             self.hps.hidden_dim,
             state_is_tuple=True,
-            initializer=self.rand_unif_init, name='decoder_cell')
+            initializer=self.rand_unif_init)
 
         # In decode mode, we run attention_decoder one step at a time and so
         # need to pass in the previous step's coverage vector each time
@@ -206,6 +210,7 @@ class PointerGenerator(object):
           final_dists: The final distributions. List length max-dec_steps of
           (batch_size, extended_vsize) arrays.
         """
+        batch_size = tf.shape(vocab_dists)[0]
         with tf.variable_scope('final_distribution'):
             # Multiply vocab dists by p_gen and attention dists by (1-p_gen)
             # these three variable is confusing: vocab_dists, p_gens and
@@ -223,7 +228,7 @@ class PointerGenerator(object):
             # probabilities for in-article OOV words
             # the maximum (over the batch) size of the extended vocabulary
             extended_vsize = self._vocab.size() + self.max_art_oovs
-            extra_zeros = tf.zeros((self.hps.batch_size, self.max_art_oovs))
+            extra_zeros = tf.zeros((batch_size, self.max_art_oovs))
             vocab_dists_extended = [
                 tf.concat(axis=1, values=[dist, extra_zeros])
                 for dist in vocab_dists]
@@ -236,7 +241,7 @@ class PointerGenerator(object):
             # entry of the final distribution
             # This is done for each decoder timestep.
             # This is fiddly; we use tf.scatter_nd to do the projection
-            batch_nums = tf.range(0, limit=self.hps.batch_size)
+            batch_nums = tf.range(0, limit=batch_size)
             # shape (batch_size)
             batch_nums = tf.expand_dims(batch_nums, 1)
             # shape (batch_size, 1)
@@ -248,7 +253,7 @@ class PointerGenerator(object):
             indices = tf.stack((batch_nums, self.enc_batch_extend_vocab), axis=2)
             # shape (batch_size, enc_t, 2)
             # what is this enc_batch_extend_vocab?
-            shape = [self.hps.batch_size, extended_vsize]
+            shape = [batch_size, extended_vsize]
             attn_dists_projected = [
                 tf.scatter_nd(indices, copy_dist, shape)
                 for copy_dist in attn_dists]
@@ -280,7 +285,7 @@ class PointerGenerator(object):
             return final_dists
 
     def _add_emb_vis(self, embedding_var):
-        """Do setup so that we can view word embedding visualization in
+        """Do setup so that we can view word embeddings visualization in
         Tensorboard, as described here:
         https://www.tensorflow.org/get_started/embedding_viz
         Make the vocab metadata file, then make the projector config file
@@ -290,24 +295,26 @@ class PointerGenerator(object):
         self._vocab.write_metadata(vocab_metadata_path)  # write metadata file
         summary_writer = tf.summary.FileWriter(train_dir)
         config = projector.ProjectorConfig()
-        embedding = config.embeddings.add()
-        embedding.tensor_name = embedding_var.name
-        embedding.metadata_path = vocab_metadata_path
+        embeddings = config.embeddings.add()
+        embeddings.tensor_name = embedding_var.name
+        embeddings.metadata_path = vocab_metadata_path
         projector.visualize_embeddings(summary_writer, config)
 
     def _add_seq2seq(self):
         """Add the whole sequence-to-sequence model to the graph."""
         hps = self.hps
 
-        self.embedding = tableLookup(self._vocab.size(), self.hps.emb_dim, scope='vocabtable')
+        self.embeddings = tableLookup(self._vocab.size(), self.hps.emb_dim, scope='vocabtable')
 
         with tf.variable_scope('seq2seq'):
             # Some initializers
-            self.rand_unif_init = tf.random_uniform_initializer(-hps.rand_unif_init_mag, hps.rand_unif_init_mag, seed=123)
+            self.rand_unif_init = tf.random_uniform_initializer(
+                -hps.rand_unif_init_mag, hps.rand_unif_init_mag, seed=123)
             self.trunc_norm_init = tf.truncated_normal_initializer(stddev=hps.trunc_norm_init_std)
 
-            emb_enc_inputs = tf.nn.embedding_lookup(self.embedding, self.enc_batch)
-            emb_dec_inputs = [tf.nn.embedding_lookup(self.embedding, x) for x in tf.unstack(self._dec_batch, axis=1)]
+            emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
+            emb_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
+                              for x in tf.unstack(self._dec_batch, axis=1)]
 
             # Add the encoder.
             enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
@@ -338,7 +345,7 @@ class PointerGenerator(object):
                     # will be list length max_dec_steps containing shape
                     # (batch_size)
                     loss_per_step = []
-                    batch_nums = tf.range(0, limit=hps.batch_size)
+                    batch_nums = tf.range(0, tf.shape(emb_dec_inputs)[0])
                     # shape (batch_size)
                     for dec_step, log_dist in enumerate(log_dists):
                         # The indices of the target words. shape
@@ -385,23 +392,23 @@ class PointerGenerator(object):
                 log_dists, hps.beam_size * 2)
         # note batch_size=beam_size in decode mode
 
-        g_predictions = tf.nn.embedding_lookup(self.embedding, self.g_predictions)
+        g_predictions = tf.nn.embedding_lookup(self.embeddings, self.g_predictions)
         self.g_loss = -tf.reduce_sum(
             tf.reduce_sum(
                 tf.one_hot(tf.to_int32(tf.reshape(self.enc_batch, [-1])),
-                           self.emb_dim, 1.0, 0.0) * tf.clip_by_value(
-                               tf.reshape(g_predictions, [-1, self.emb_dim]), 1e-20, 1.0), 1
+                           self.hps.emb_dim, 1.0, 0.0) * tf.clip_by_value(
+                               tf.reshape(g_predictions, [-1, self.hps.emb_dim]), 1e-20, 1.0), 1
             ) * tf.reshape(self.rewards, [-1])
         )
         # rewards and g_predictions should be placeholders
 
-        g_opt = self.g_optimizer(self.learning_rate)
+        g_opt = self.g_optimizer(self.hps.gen_lr)
 
         trainable_variables = tf.trainable_variables()
-        self.g_grad, _ = tf.clip_by_global_norm(tf.gradients(self.g_loss, trainable_variables), self.grad_clip)
+        self.g_grad, _ = tf.clip_by_global_norm(tf.gradients(self.g_loss, trainable_variables), self.hps.gen_max_gradient)
         self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables))
 
-    def decode(self, emb_dec_inputs, dec_in_state):
+    def decode(self, emb_dec_inputs, dec_in_state, reuse=False):
         """
         input:
             emb_dec_inputs, the input of the cell
@@ -411,7 +418,9 @@ class PointerGenerator(object):
         """
         vsize = self._vocab.size()  # size of the vocabulary
         # Add the decoder.
-        with tf.variable_scope('decoder'):
+        with tf.variable_scope('decoder') as scope:
+            if reuse:
+                scope.get_variable_scope().reuse_variables()
             decoder_outputs, dec_out_state, \
                 self.attn_dists, self.p_gens, self.coverage = self._add_decoder(emb_dec_inputs, dec_in_state)
 
@@ -427,7 +436,7 @@ class PointerGenerator(object):
             # softmax. Each entry on the list corresponds to one decoder
             # step
             for i, output in enumerate(decoder_outputs):
-                if i > 0:
+                if reuse:
                     tf.get_variable_scope().reuse_variables()
                 vocab_scores.append(tf.nn.xw_plus_b(output, w, v))
                 # apply the linear layer
@@ -464,18 +473,18 @@ class PointerGenerator(object):
         # Clip the gradients
         with tf.device("/gpu:0"):
             grads, global_norm = tf.clip_by_global_norm(
-                gradients, self.hps.max_grad_norm)
+                gradients, self.hps.gen_max_gradient)
 
         # Add a summary
         tf.summary.scalar('global_norm', global_norm)
 
         # Apply adagrad optimizer
         optimizer = tf.train.AdagradOptimizer(
-            self.hps.lr, initial_accumulator_value=self.hps.adagrad_init_acc)
+            self.hps.gen_lr, initial_accumulator_value=self.hps.adagrad_init_acc)
         with tf.device("/gpu:0"):
             self._train_op = optimizer.apply_gradients(
                 zip(grads, tvars),
-                global_step=self.global_step, name='train_step')
+                global_step=self.global_step)
 
     def build_graph(self):
         """Add the placeholders, model, global step, train_op and summaries to
@@ -555,17 +564,17 @@ class PointerGenerator(object):
         #     # TODO: should this be changed to shape?
         return enc_states, dec_in_state
 
-    def decode_onestep(self, emb_dec_inputs, dec_in_state):
+    def decode_onestep(self, emb_dec_inputs, dec_in_state, reuse):
         """
         function: decode onestep for rollout
         inputs:
             the embedded input
         """
-        new_states, log_probs = self.decode(emb_dec_inputs, dec_in_state)
+        log_probs, new_states = self.decode(emb_dec_inputs, dec_in_state, reuse)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         output_id = tf.cast(tf.multinomial(log_probs[0], 1), tf.int32)
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
-        return new_states[0], output_id
+        return output_id, new_states
 
     def run_decode_onestep(self, sess, enc_batch_extend_vocab, max_art_oovs,
                            latest_tokens, enc_states, dec_init_states, prev_coverage):
@@ -655,6 +664,9 @@ class PointerGenerator(object):
             new_coverage = [None for _ in xrange(FLAGS.beam_size)]
 
         return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
+
+    def g_optimizer(self, *args, **kwargs):
+        return tf.train.AdamOptimizer(*args, **kwargs)
 
 
 def _mask_and_avg(values, padding_mask):

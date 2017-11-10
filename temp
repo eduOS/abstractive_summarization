@@ -1,0 +1,12 @@
+<tf.Tensor 'rollout/while/Identity:0' shape=() dtype=int32>
+<tf.Tensor 'rollout/while/Identity_1:0' shape=(64, 128) dtype=float32>
+LSTMStateTuple(c=<tf.Tensor 'rollout/while/Identity_2:0' shape=(64, 256) dtype=float32>, h=<tf.Tensor 'rollout/while/Identity_3:0' shape=(64, 256) dtype=float32>)
+<tf.Tensor 'rollout/while/Identity_4:0' shape=<unknown> dtype=int32>,
+<tensorflow.python.ops.tensor_array_ops.TensorArray object at 0x7f3feda7bc50>
+
+
+<tf.Tensor 'rollout/while/add:0' shape=() dtype=int32>
+<tf.Tensor 'rollout/while/TensorArrayReadV3:0' shape=(64,) dtype=int32>
+<tf.Tensor 'rollout/while/Log:0' shape=(64, ?) dtype=float32>
+<tf.Tensor 'rollout/while/Identity_4:0' shape=<unknown> dtype=int32>
+<tensorflow.python.util.tf_should_use.TFShouldUseWarningWrapper object at 0x7f3feb649a10>

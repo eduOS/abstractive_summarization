@@ -17,19 +17,19 @@ def convolution2d(inputs,
   with tf.variable_scope(scope, 'Conv', [inputs], reuse=reuse):
     dtype = inputs.dtype.base_dtype
     num_filters_in = inputs.get_shape()[-1].value
-    weights_shape = [1] + list(kernel_size) + [num_filters_in, num_outputs]
+    weights_shape = [1] + [kernel_size] + [num_filters_in, num_outputs]
     # 1, 3, emb_dim, emb_dim
     weights = tf.get_variable(name='weights',
                               shape=weights_shape,
                               dtype=dtype,
                               initializer=tf.contrib.layers.xavier_initializer(),
-                              collections=tf.GraphKeys.WEIGHTS,
+                              collections=[tf.GraphKeys.WEIGHTS],
                               trainable=True)
     biases = tf.get_variable(name='biases',
                              shape=[num_outputs, ],
                              dtype=dtype,
                              initializer=tf.zeros_initializer(),
-                             collections=tf.GraphKeys.BIASES,
+                             collections=[tf.GraphKeys.BIASES],
                              trainable=True)
     outputs = tf.nn.conv2d(inputs, weights, [1, 1, 1, 1], padding='SAME')
     if is_training:
@@ -37,7 +37,7 @@ def convolution2d(inputs,
     else:
       outputs = outputs + biases
     if pool_size:
-      pool_shape = [1, 1] + list(pool_size) + [1]
+      pool_shape = [1, 1] + [pool_size] + [1]
       outputs = tf.nn.max_pool(outputs, pool_shape, pool_shape, padding='SAME')
     if activation_fn:
       outputs = activation_fn(outputs)
@@ -69,7 +69,7 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
     # residual layers
     for j in range(pool_layers):
       if j > 0:
-        pool_shape = [1, 1] + list(pool_size) + [1]
+        pool_shape = [1, 1] + [pool_size] + [1]
         # 1, 1, 2, 1
         inputs = tf.nn.max_pool(i_outputs, pool_shape, pool_shape, padding='SAME')
         i_outputs = inputs
@@ -86,7 +86,7 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
     c_outputs = conditions
     for j in range(pool_layers*2):
       if j > 0:
-        pool_shape = [1, 1] + list(pool_size*2) + [1]
+        pool_shape = [1, 1] + [pool_size*2] + [1]
         # 1, 1, 2, 1
         conditions = tf.nn.max_pool(c_outputs, pool_shape, pool_shape, padding='SAME')
         c_outputs = conditions
@@ -99,4 +99,4 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
     conditions_emb = tf.reduce_max(c_outputs, axis=1)
 
     # concatenate the two embeding and make the embedding to be twice long
-    return tf.concat(1, [inputs_emb, conditions_emb])
+    return tf.concat(values=[inputs_emb, conditions_emb], axis=1)

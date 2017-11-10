@@ -436,7 +436,7 @@ def create_cell(size,
 
 def greedy_dec(length,
                initial_state,
-               input_embedding,
+               input_embeddings,
                cell,
                logit_fn):
     """ A greedy decoder.
@@ -446,9 +446,9 @@ def greedy_dec(length,
     batch_size = tf.shape(initial_state[0])[0] \
         if isinstance(initial_state, tuple) else \
         tf.shape(initial_state)[0]
-    inputs_size = input_embedding.get_shape()[1].value
+    inputs_size = input_embeddings.get_shape()[1].value
     inputs = tf.nn.embedding_lookup(
-        input_embedding, tf.zeros([batch_size], dtype=tf.int32))
+        input_embeddings, tf.zeros([batch_size], dtype=tf.int32))
 
     outputs, state = cell(inputs, initial_state)
     logits = logit_fn(outputs)
@@ -459,7 +459,7 @@ def greedy_dec(length,
     tf.get_variable_scope().reuse_variables()
     for _ in xrange(length-1):
 
-        inputs = tf.nn.embedding_lookup(input_embedding, symbol)
+        inputs = tf.nn.embedding_lookup(input_embeddings, symbol)
 
         outputs, state = cell(inputs, state)
         logits = logit_fn(outputs)
@@ -475,7 +475,7 @@ def greedy_dec(length,
 
 def stochastic_dec(length,
                    initial_state,
-                   input_embedding,
+                   input_embeddings,
                    cell,
                    logit_fn,
                    num_candidates=1):
@@ -486,9 +486,9 @@ def stochastic_dec(length,
     batch_size = tf.shape(initial_state[0])[0] \
         if isinstance(initial_state, tuple) else \
         tf.shape(initial_state)[0]
-    inputs_size = input_embedding.get_shape()[1].value
+    inputs_size = input_embeddings.get_shape()[1].value
     inputs = tf.nn.embedding_lookup(
-        input_embedding, tf.zeros([batch_size], dtype=tf.int32))
+        input_embeddings, tf.zeros([batch_size], dtype=tf.int32))
 
     outputs, state = cell(inputs, initial_state)
     logits = logit_fn(outputs)
@@ -508,7 +508,7 @@ def stochastic_dec(length,
 
     for _ in xrange(length-1):
 
-        inputs = tf.nn.embedding_lookup(input_embedding, symbol)
+        inputs = tf.nn.embedding_lookup(input_embeddings, symbol)
 
         outputs, state = cell(inputs, state)
         logits = logit_fn(outputs)
@@ -527,7 +527,7 @@ def stochastic_dec(length,
 
 def beam_dec(length,
              initial_state,
-             input_embedding,
+             input_embeddings,
              cell,
              logit_fn,
              num_candidates=1,
@@ -542,10 +542,10 @@ def beam_dec(length,
     batch_size = tf.shape(initial_state[0])[0] \
         if isinstance(initial_state, tuple) else \
         tf.shape(initial_state)[0]
-    inputs_size = input_embedding.get_shape()[1].value
+    inputs_size = input_embeddings.get_shape()[1].value
     inputs = tf.nn.embedding_lookup(
-        input_embedding, tf.zeros([batch_size], dtype=tf.int32))
-    vocab_size = tf.shape(input_embedding)[0]
+        input_embeddings, tf.zeros([batch_size], dtype=tf.int32))
+    vocab_size = tf.shape(input_embeddings)[0]
 
     # iter
     # The initial input is of only two dimension
@@ -584,7 +584,7 @@ def beam_dec(length,
             state = tf.gather(state, beam_parent)
             # one state for each beam extension
 
-        inputs = tf.reshape(tf.nn.embedding_lookup(input_embedding, symbols),
+        inputs = tf.reshape(tf.nn.embedding_lookup(input_embeddings, symbols),
                             [-1, inputs_size])
         # [batch_size * beam_size, inputs_size]
 
@@ -643,7 +643,7 @@ def beam_dec(length,
 # beam decoder
 def stochastic_beam_dec(length,
                         initial_state,
-                        input_embedding,
+                        input_embeddings,
                         cell,
                         logit_fn,
                         num_candidates=1,
@@ -656,10 +656,10 @@ def stochastic_beam_dec(length,
     batch_size = tf.shape(initial_state[0])[0] \
         if isinstance(initial_state, tuple) else \
         tf.shape(initial_state)[0]
-    inputs_size = input_embedding.get_shape()[1].value
+    inputs_size = input_embeddings.get_shape()[1].value
     inputs = tf.nn.embedding_lookup(
-        input_embedding, tf.zeros([batch_size], dtype=tf.int32))
-    vocab_size = tf.shape(input_embedding)[0]
+        input_embeddings, tf.zeros([batch_size], dtype=tf.int32))
+    vocab_size = tf.shape(input_embeddings)[0]
 
     # iter
     outputs, state = cell(inputs, initial_state)
@@ -693,7 +693,7 @@ def stochastic_beam_dec(length,
             state = tf.gather(state, beam_parent)
 
         inputs = tf.reshape(
-            tf.nn.embedding_lookup(input_embedding, symbols),
+            tf.nn.embedding_lookup(input_embeddings, symbols),
             [-1, inputs_size])
 
         # iter
@@ -765,32 +765,32 @@ def stochastic_beam_dec(length,
 
 #   Copy Mechanism ###
 
-def make_logit_fn(vocab_embedding,
-                  copy_embedding=None,
+def make_logit_fn(vocab_embeddings,
+                  copy_embeddings=None,
                   copy_ids=None,
                   is_training=True):
     """implements logit function with copy mechanism
-    copy_embedding:
+    copy_embeddings:
         the encoder states
     questions:
         1. what is the copy_ids? is it from the extended vocabulary or the
         original one? does the vocabulary vary when batches change
             yes
-        2. does the weights of the copy_embedding not relate to the inputs?
+        2. does the weights of the copy_embeddings not relate to the inputs?
             multiplied by the outputs
     """
 
-    if copy_embedding is None or copy_ids is None:
+    if copy_embeddings is None or copy_ids is None:
         def logit_fn(outputs):
-            output_size = vocab_embedding.get_shape()[-1].value
+            output_size = vocab_embeddings.get_shape()[-1].value
             outputs_proj = fully_connected(outputs,
                                            output_size,
                                            is_training=is_training,
                                            scope="proj")
             logits_vocab = tf.reshape(
                 tf.matmul(tf.reshape(outputs_proj, [-1, output_size]),
-                          tf.transpose(vocab_embedding/(tf.norm(
-                              vocab_embedding, axis=1, keep_dims=True)+1e-20))),
+                          tf.transpose(vocab_embeddings/(tf.norm(
+                              vocab_embeddings, axis=1, keep_dims=True)+1e-20))),
                 tf.concat([tf.shape(outputs)[:-1], tf.constant(-1, shape=[1])], 0)
             )
             # why is this normalization necessary
@@ -798,10 +798,10 @@ def make_logit_fn(vocab_embedding,
             return logits_vocab
     else:
         def logit_fn(outputs):
-            batch_size = tf.shape(copy_embedding)[0]
-            length = copy_embedding.get_shape()[1].value
-            output_size = vocab_embedding.get_shape()[-1].value
-            vocab_size = vocab_embedding.get_shape()[0].value
+            batch_size = tf.shape(copy_embeddings)[0]
+            length = copy_embeddings.get_shape()[1].value
+            output_size = vocab_embeddings.get_shape()[-1].value
+            vocab_size = vocab_embeddings.get_shape()[0].value
             outputs_vocab = fully_connected(outputs,
                                             output_size,
                                             is_training=is_training,
@@ -814,15 +814,15 @@ def make_logit_fn(vocab_embedding,
                 beam_size = outputs.get_shape()[1].value
                 logits_vocab = tf.reshape(
                     tf.matmul(tf.reshape(outputs_vocab, [-1, output_size]),
-                              tf.transpose(vocab_embedding/(tf.norm(
-                                  vocab_embedding, axis=1, keep_dims=True)+1e-20))),
+                              tf.transpose(vocab_embeddings/(tf.norm(
+                                  vocab_embeddings, axis=1, keep_dims=True)+1e-20))),
                     [batch_size, beam_size, vocab_size])
                 # [batch_size * beam_size, output_size] x [output_size, vocab_size]
                 # -> [batch_size, beam_size, vocab_size]
                 logits_copy = tf.matmul(
                     outputs_copy,
-                    tf.transpose(copy_embedding/(tf.norm(
-                        copy_embedding, axis=2, keep_dims=True)+1e-20),
+                    tf.transpose(copy_embeddings/(tf.norm(
+                        copy_embeddings, axis=2, keep_dims=True)+1e-20),
                         [0, 2, 1]))
                 # [batch_size, beam_size, output_size] x [batch_size, output_size, length]
                 # -> [batch_size, beam_size, length]
@@ -836,17 +836,17 @@ def make_logit_fn(vocab_embedding,
                 logits_vocab = tf.reshape(
                     tf.matmul(
                         outputs_vocab,
-                        tf.transpose(vocab_embedding/(tf.norm(
-                            vocab_embedding, axis=1, keep_dims=True)+1e-20))),
+                        tf.transpose(vocab_embeddings/(tf.norm(
+                            vocab_embeddings, axis=1, keep_dims=True)+1e-20))),
                     [batch_size, -1, vocab_size])
                 # [batch_size, 1, vocab_size]
                 logits_copy = tf.matmul(
                     tf.reshape(outputs_copy, [batch_size, -1, output_size]),
                     tf.transpose(
-                        copy_embedding/(tf.norm(
-                            copy_embedding, axis=2, keep_dims=True)+1e-20),
+                        copy_embeddings/(tf.norm(
+                            copy_embeddings, axis=2, keep_dims=True)+1e-20),
                         [0, 2, 1]))
-                # why not just softmax(copy_embedding)?
+                # why not just softmax(copy_embeddings)?
                 # [batch_size, 1, length]
             beam_size = tf.shape(logits_copy)[1]
             data = tf.reshape(logits_copy, [-1])

@@ -13,8 +13,6 @@ standardizor = Standardizer()
 """
 build vocabulary from
 """
-# traditional chinese
-# nonprintable characters
 
 
 def main():
@@ -22,12 +20,12 @@ def main():
     word_freqs = OrderedDict()
     worddict = OrderedDict()
     if mode == "word":
-        worddict['<s>'] = 0
-        worddict['</s>'] = 0
-        worddict['[PAD]'] = 0
-        worddict['[UNK]'] = 1
-        worddict['[STOP]'] = 0
-        worddict['[START]'] = 1
+        worddict['<s>'] = sys.maxint
+        worddict['</s>'] = sys.maxint
+        worddict['[PAD]'] = sys.maxint
+        worddict['[UNK]'] = sys.maxint
+        worddict['[STOP]'] = sys.maxint
+        worddict['[START]'] = sys.maxint
 
     assert len(sys.argv) > 3, "numbers of args must be more then 4"
     for filename in sys.argv[2:-1]:
