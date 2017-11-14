@@ -1,4 +1,5 @@
 #!/bin/bash
 
 python  SumGan.py \
-  --mode "pretrain_gen" 
+  --mode "pretrain_gen" \
+  --coverage False

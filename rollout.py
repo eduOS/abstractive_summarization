@@ -1,10 +1,10 @@
 import tensorflow as tf
 from tensorflow.python.ops import tensor_array_ops, control_flow_ops
+from tensorflow.python.ops import variable_scope
 import numpy as np
 from data import gen_vocab2dis_vocab
 PAD_TOKEN = "[PAD]"
 STOP_DECODING = '[STOP]'
-START_DECODING = '[START]'
 
 
 class Rollout(object):
@@ -33,60 +33,47 @@ class Rollout(object):
                 tf.nn.embedding_lookup(self.g_embeddings, self.summ), perm=[1, 0, 2])
             # seq_length x batch_size x emb_dim
 
-        emb_summ = tensor_array_ops.TensorArray(
+        emb_summ_ar = tensor_array_ops.TensorArray(
             dtype=tf.float32, size=self._gen_hps.max_dec_steps)
-        emb_summ = emb_summ.unstack(self.emb_summ)
+        emb_summ_ar = emb_summ_ar.unstack(self.emb_summ)
 
-        summ = tensor_array_ops.TensorArray(dtype=tf.int32, size=self._gen_hps.max_dec_steps)
-        summ = summ.unstack(tf.transpose(self.summ, perm=[1, 0]))
+        summ_ar = tensor_array_ops.TensorArray(dtype=tf.int32, size=self._gen_hps.max_dec_steps)
+        summ_ar = summ_ar.unstack(tf.transpose(self.summ, perm=[1, 0]))
         ######################################################################
 
-        self.gen_summ = tensor_array_ops.TensorArray(
+        self.gen_summ_ar = tensor_array_ops.TensorArray(
             dtype=tf.int32, size=self._gen_hps.max_dec_steps, dynamic_size=False, infer_shape=True)
 
-        # emb_rollout_inputs = [tf.nn.embedding_lookup(self.g_embeddings, x) for x in tf.unstack(self.summ, axis=1)]
-        # given_inputs = emb_rollout_inputs[:self.given_num]
-        # emb_start_decoding = tf.nn.embedding_lookup(
-        #     self.g_embeddings, tf.constant([self.generator.start_token]*self._gen_hps.batch_size))
+        with tf.variable_scope('rollout_loops'):
+            def recurrence_given(i, dec_input, dec_in_state, given_num, gen_summ):
+                next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state)
+                next_input = emb_summ_ar.read(i)
+                gen_summ = gen_summ.write(i, summ_ar.read(i))
+                return i+1, next_input, new_state, given_num, gen_summ
 
-        emb_dec_given = tf.slice(
-            self.emb_summ, [0, 0, 0],
-            tf.stack([tf.constant(-1), self.given_num, tf.constant(-1)], 0))
-        emb_dec_inputs = [x for x in tf.unstack(emb_dec_given, axis=1)]
-        # I should first unstack it and then slice it
-        _, new_state = self.generator.decode(emb_dec_inputs, init_dec_in_state)
+            def recurrence_rollout(i, dec_input, dec_in_state, given_num, gen_summ):
+                next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state)
+                next_input = tf.nn.embedding_lookup(self.g_embeddings, next_input_id)
+                gen_summ = gen_summ.write(i, next_input_id)
+                return i+1, next_input, new_state, given_num, gen_summ
 
-        def recurrence_given(i, next_input, given_num, gen_summ):
-            next_input = emb_summ.read(i)
-            gen_summ = gen_summ.write(i, summ.read(i))
-            # if i < given_num it just copies
-            return i+1, next_input, given_num, gen_summ
-        # this while loop should be changed to just one decode, since
-        # attention_decoder supports sequence decoding
+            i, next_input, new_state, given_num, self.gen_summ_ar = control_flow_ops.while_loop(
+                cond=lambda i, _1, _2, given_num, _4: i < given_num,
+                body=recurrence_given,
+                loop_vars=(tf.constant(1, dtype=tf.int32), emb_summ_ar.read(0),
+                           init_dec_in_state, self.given_num, self.gen_summ_ar))
 
-        def recurrence_rollout(i, dec_input, dec_in_state, given_num, gen_summ):
-            next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state, True)
-            next_input = tf.nn.embedding_lookup(self.g_embeddings, next_input_id)
-            gen_summ = gen_summ.write(i, next_input_id)
-            return i+1, next_input, new_state, given_num, gen_summ
+            variable_scope.get_variable_scope().reuse_variables()
+            # reuse variables between python loops is needed
 
-        i, next_input, given_num, self.gen_summ = control_flow_ops.while_loop(
-            cond=lambda i, _, given_num, _2: i < given_num,
-            body=recurrence_given,
-            loop_vars=(tf.constant(1, dtype=tf.int32),
-                       emb_summ.read(tf.constant(0, dtype=tf.int32)),
-                       self.given_num, self.gen_summ))
-        # start_token and initial dec_in_state should be verified
-        # dec_in_state should be defined as a placeholder
+            _, _, _, _, self.gen_summ_ar = control_flow_ops.while_loop(
+                cond=lambda i, _1, _2, _3, _4: i < self._gen_hps.max_dec_steps,
+                body=recurrence_rollout,
+                loop_vars=(i, next_input, new_state, given_num, self.gen_summ_ar))
 
-        _, _, _, _, self.gen_summ = control_flow_ops.while_loop(
-            cond=lambda i, _1, _2, _3, _4: i < self._gen_hps.max_dec_steps,
-            body=recurrence_rollout,
-            loop_vars=(given_num, next_input, new_state, given_num, self.gen_summ))
-
-        self.gen_summ = self.gen_summ.stack()  # seq_length x batch_size
-        self.gen_summ = tf.transpose(self.gen_summ, perm=[1, 0])
-        self.gen_summ = tf.stop_gradient(self.gen_summ)
+        self.gen_summ_ar = self.gen_summ_ar.stack()  # seq_length x batch_size
+        self.gen_summ_ar = tf.transpose(self.gen_summ_ar, perm=[1, 0])
+        self.gen_summ_ar = tf.stop_gradient(self.gen_summ_ar)
         # batch_size x seq_length
 
     def get_reward(self, sess, gen_vocab, dis_vocab, source_batch,
@@ -100,7 +87,7 @@ class Rollout(object):
             if self._gen_hps.pointer_gen else source_batch.enc_batch
         enc_inputs_chars = gen_vocab2dis_vocab(
             enc_inputs_words, gen_vocab, article_oovs,
-            dis_vocab, self._gen_hps.max_enc_steps, PAD_TOKEN)
+            dis_vocab, self._gen_hp.max_enc_steps, PAD_TOKEN)
 
         for i in range(rollout_num):
             for given_num in range(1, self._gen_hps.max_dec_steps):
@@ -123,7 +110,7 @@ class Rollout(object):
                 # enc_batch_extend_vocab and the max_art_oovs
                 # self._enc_batch_extend_vocab = batch.enc_batch_extend_vocab
                 # self._max_art_oovs = batch.max_art_oovs
-                rollout_samples_words = sess.run(self.gen_summ, feed_dict)
+                rollout_samples_words = sess.run(self.gen_summ_ar, feed_dict)
                 # how about multiple generators for one discriminator?
                 rollout_samples_chars = gen_vocab2dis_vocab(
                     rollout_samples_words, gen_vocab, article_oovs,

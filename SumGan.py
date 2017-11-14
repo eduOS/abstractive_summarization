@@ -144,7 +144,7 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
     hps = model.hps
     with sess_context_manager as sess:
         step = 0
-        print_gap = 1000
+        print_gap = 2
         start_time = time.time()
         while True:  # repeats until interrupted
             batch = batcher.next_batch()
@@ -168,19 +168,18 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
                 print(
                   "\nDashboard until the step:\t%s\n"
                   "\tBatch size:\t%s\n"
-                  "\tRunning average loss:\t%s per article \n"
                   "\tArticles trained:\t%s\n"
-                  "\tTotal training time:\t%ss(%s hours)\n"
+                  "\tTotal training time:%s hours\n"
                   "\tCurrent speed:\t%s seconds/article\n"
-                  "\tCoverage loss\t%s\n" % (
+                  "\tLoss: \t%s; and "
+                  "\tcoverage loss:\t%s\n" % (
                     step,
                     hps.batch_size,
-                    loss,
                     hps.batch_size * step,
-                    current_time - start_time,
                     (current_time - start_time) / 3600,
                     (t1-t0) / hps.batch_size,
-                    coverage_loss,
+                    loss,
+                    coverage_loss if hps.coverage else "not set",
                   )
                 )
             # get the summaries and iteration number so we can write summaries
@@ -380,12 +379,12 @@ def main(argv):
     hps_gan = namedtuple("HParams4GAN", hps_dict.keys())(**hps_dict)
     hps_gan = hps_gan._replace(mode="gan")
     print("Preparing rollout...")
-    with tf.variable_scope("rollout"), tf.device("/gpu:0"):
+    with tf.variable_scope("ROLLOUT"), tf.device("/gpu:0"):
         print("Creating rollout...")
         rollout = Rollout(generator, 0.8)
 
     saver = tf.train.Saver()
-    print("Making supervisor...")
+    print("Setting supervisor...")
     sv = tf.train.Supervisor(
         logdir=FLAGS.train_dir, is_chief=True, saver=saver,
         summary_op=None, save_summaries_secs=60, save_model_secs=60)
@@ -395,7 +394,7 @@ def main(argv):
 
     print("Creating beam search...")
     with tf.variable_scope("beam_search"), tf.device("/gpu:0"):
-        decoder = BeamSearchDecoder(sess, generator, gen_batcher, gen_vocab)
+        decoder = BeamSearchDecoder(saver, sess, generator, gen_batcher, gen_vocab)
 
     # initialize the embeddings at the begging of training
     ckpt = tf.train.get_checkpoint_state(hps_dis.train_dir)
@@ -488,7 +487,7 @@ def main(argv):
         gen_batcher = GenBatcher(hps_gen.data_path, gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
 
         generator = PointerGenerator(hps_gen, gen_vocab)
-        decoder = BeamSearchDecoder(sess, generator, gen_batcher, gen_vocab)
+        decoder = BeamSearchDecoder(saver, sess, generator, gen_batcher, gen_vocab)
         decoder.decode()
 
 

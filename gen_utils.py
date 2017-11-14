@@ -18,7 +18,6 @@
 
 import tensorflow as tf
 import time
-import os
 FLAGS = tf.app.flags.FLAGS
 
 
@@ -35,8 +34,7 @@ def load_ckpt(saver, sess):
     waiting 10 secs in the case of failure. Also returns checkpoint name."""
     while True:
         try:
-            train_dir = os.path.join(FLAGS.log_root, "train")
-            ckpt_state = tf.train.get_checkpoint_state(train_dir)
+            ckpt_state = tf.train.get_checkpoint_state(FLAGS.train_dir)
             tf.logging.info(
                 'Loading checkpoint %s',
                 ckpt_state.model_checkpoint_path)
@@ -45,7 +43,7 @@ def load_ckpt(saver, sess):
         except:
             tf.logging.info(
                 "Failed to load checkpoint from %s. Sleeping for %i secs...",
-                train_dir, 10)
+                FLAGS.train_dir, 10)
             time.sleep(10)
 
 

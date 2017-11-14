@@ -36,7 +36,7 @@ SECS_UNTIL_NEW_CKPT = 60  # max number of seconds before loading new checkpoint
 class BeamSearchDecoder(object):
     """Beam search decoder."""
 
-    def __init__(self, sess, model, batcher, vocab):
+    def __init__(self, saver, sess, model, batcher, vocab):
         """Initialize decoder.
 
         Args:
@@ -48,13 +48,12 @@ class BeamSearchDecoder(object):
         # self._model.build_graph()
         self._batcher = batcher
         self._vocab = vocab
-        # self._saver = tf.train.Saver()
         # we use this to load checkpoints for decoding
         self._sess = sess
         self._hps = model.hps
 
         # Load an initial checkpoint to use for decoding
-        ckpt_path = gen_utils.load_ckpt(self._saver, self._sess)
+        ckpt_path = gen_utils.load_ckpt(saver, self._sess)
 
         if self._hps.single_pass:
             # Make a descriptive decode directory name
@@ -180,7 +179,7 @@ class BeamSearchDecoder(object):
                         'We\'ve been decoding with same checkpoint for %i \
                         seconds. Time to load new checkpoint',
                         t1-t0)
-                    _ = gen_utils.load_ckpt(self._saver, self._sess)  # NOQA
+                    _ = gen_utils.load_ckpt(self._saver, self._sess)
                     t0 = time.time()
 
     def write_for_discriminator(self, artcls, reference_sents, decoded_outputs):
