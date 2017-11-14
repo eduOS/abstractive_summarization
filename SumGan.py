@@ -103,7 +103,7 @@ tf.app.flags.DEFINE_boolean('pointer_gen', True, 'If True, use pointer-generator
 tf.app.flags.DEFINE_boolean('segment', True, 'If True, the source text is segmented, then max_enc_steps and max_dec_steps should be much smaller')
 
 # Coverage hyperparameters
-tf.app.flags.DEFINE_boolean('coverage', True, 'Use coverage mechanism. Note, the experiments reported in the ACL '
+tf.app.flags.DEFINE_boolean('coverage', False, 'Use coverage mechanism. Note, the experiments reported in the ACL '
                             'paper train WITHOUT coverage until converged, and then train for a short phase WITH coverage afterwards.'
                             'i.e. to reproduce the results in the ACL paper, turn this off for most of training then turn on for a short phase at the end.')
 # coverage can be only used while decoding either in the gan or in the pretraining
@@ -168,13 +168,15 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
                 print(
                   "\nDashboard until the step:\t%s\n"
                   "\tBatch size:\t%s\n"
+                  "\tVocabulary size:\t%s"
                   "\tArticles trained:\t%s\n"
-                  "\tTotal training time:%s hours\n"
+                  "\tTotal training time:\t%s hours\n"
                   "\tCurrent speed:\t%s seconds/article\n"
-                  "\tLoss: \t%s; and "
+                  "\tLoss:\t%s; and "
                   "\tcoverage loss:\t%s\n" % (
                     step,
                     hps.batch_size,
+                    hps.gen_vocab_size,
                     hps.batch_size * step,
                     (current_time - start_time) / 3600,
                     (t1-t0) / hps.batch_size,
@@ -484,6 +486,7 @@ def main(argv):
         hps_dec = hps_gen._replace(mode="decode")
         hps_dec = hps_dec._replace(mode="decode")
         hps_dec = hps_dec._replace(single_pass=True)
+        hps_dec = hps_dec._replace(max_dec_steps=1)
         gen_batcher = GenBatcher(hps_gen.data_path, gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
 
         generator = PointerGenerator(hps_gen, gen_vocab)
