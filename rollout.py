@@ -41,7 +41,7 @@ class Rollout(object):
         summ = summ.unstack(tf.transpose(self.summ, perm=[1, 0]))
         ######################################################################
 
-        gen_summ = tensor_array_ops.TensorArray(
+        self.gen_summ = tensor_array_ops.TensorArray(
             dtype=tf.int32, size=self._gen_hps.max_dec_steps, dynamic_size=False, infer_shape=True)
 
         # emb_rollout_inputs = [tf.nn.embedding_lookup(self.g_embeddings, x) for x in tf.unstack(self.summ, axis=1)]
@@ -49,9 +49,11 @@ class Rollout(object):
         # emb_start_decoding = tf.nn.embedding_lookup(
         #     self.g_embeddings, tf.constant([self.generator.start_token]*self._gen_hps.batch_size))
 
-        emb_dec_inputs = [x for x in tf.unstack(self.emb_summ, axis=1)]
-        emb_dec_inputs = tf.slice(emb_dec_inputs, [0, 0, 0], [-1, self.given_num, -1])
-        # should be sliced, to get the state
+        emb_dec_given = tf.slice(
+            self.emb_summ, [0, 0, 0],
+            tf.stack([tf.constant(-1), self.given_num, tf.constant(-1)], 0))
+        emb_dec_inputs = [x for x in tf.unstack(emb_dec_given, axis=1)]
+        # I should first unstack it and then slice it
         _, new_state = self.generator.decode(emb_dec_inputs, init_dec_in_state)
 
         def recurrence_given(i, next_input, given_num, gen_summ):
@@ -73,7 +75,7 @@ class Rollout(object):
             body=recurrence_given,
             loop_vars=(tf.constant(1, dtype=tf.int32),
                        emb_summ.read(tf.constant(0, dtype=tf.int32)),
-                       self.given_num, gen_summ))
+                       self.given_num, self.gen_summ))
         # start_token and initial dec_in_state should be verified
         # dec_in_state should be defined as a placeholder
 
