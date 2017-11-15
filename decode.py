@@ -54,11 +54,14 @@ class BeamSearchDecoder(object):
 
         # Load an initial checkpoint to use for decoding
         ckpt_path = gen_utils.load_ckpt(saver, self._sess)
+        print(ckpt_path)
+        # the checkpoint should add timestamp
 
         if self._hps.single_pass:
             # Make a descriptive decode directory name
             # this is something of the form "ckpt-123456"
-            ckpt_name = "ckpt-" + ckpt_path.split('-')[-1]
+            # ckpt_name = "ckpt-" + ckpt_path.split('-')[-1]
+            ckpt_name = str(time.time())[:10]
             self._decode_dir = os.path.join(
                 self._hps.log_root, get_decode_dir_name(self._hps, ckpt_name))
             if os.path.exists(self._decode_dir):
@@ -179,7 +182,7 @@ class BeamSearchDecoder(object):
                         'We\'ve been decoding with same checkpoint for %i \
                         seconds. Time to load new checkpoint',
                         t1-t0)
-                    _ = gen_utils.load_ckpt(self._saver, self._sess)
+                    _ = gen_utils.load_ckpt(self._saver, self._sess) # NOQA
                     t0 = time.time()
 
     def write_for_discriminator(self, artcls, reference_sents, decoded_outputs):
@@ -325,19 +328,7 @@ def get_decode_dir_name(hps, ckpt_name):
     """Make a descriptive name for the decode dir, including the name of the
     checkpoint we use to decode. This is called in single_pass mode."""
 
-    if "train" in hps.data_path:
-        dataset = "train"
-    elif "val" in hps.data_path:
-        dataset = "val"
-    elif "test" in hps.data_path:
-        dataset = "test"
-    else:
-        raise ValueError(
-            "hps.data_path %s should contain one of train, val or test" %
-            (hps.data_path))
-    dirname = "decode_%s_%imaxenc_%ibeam_%imindec_%imaxdec" % (
-        dataset, hps.max_enc_steps, hps.beam_size, hps.min_dec_steps,
-        hps.max_dec_steps)
+    dirname = hps.mode
     if ckpt_name is not None:
         dirname += "_%s" % ckpt_name
     return dirname

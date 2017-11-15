@@ -18,7 +18,7 @@ from data import Vocab
 PAD_TOKEN = "[PAD]"
 STOP_DECODING = '[STOP]'
 
-
+tf.logging.set_verbosity(tf.logging.ERROR)
 tf.app.flags.DEFINE_string(
     'mode', 'train',
     'must be one of pretrain_gen/pretrain_dis/train_gan/decode')
@@ -144,7 +144,7 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
     hps = model.hps
     with sess_context_manager as sess:
         step = 0
-        print_gap = 2
+        print_gap = 10
         start_time = time.time()
         while True:  # repeats until interrupted
             batch = batcher.next_batch()
@@ -322,7 +322,7 @@ def main(argv):
     if FLAGS.segment is not True:
         hps_gen = hps_gen._replace(max_enc_steps=110)
         hps_gen = hps_gen._replace(max_dec_steps=25)
-    else:
+    elif FLAGS.mode != "decode":
         assert hps_gen.max_enc_steps == 80, "No segmentation, max_enc_steps wrong"
         assert hps_gen.max_dec_steps == 15, "No segmentation, max_dec_steps wrong"
     print("Building generator graph ...")
@@ -389,7 +389,7 @@ def main(argv):
     print("Setting supervisor...")
     sv = tf.train.Supervisor(
         logdir=FLAGS.train_dir, is_chief=True, saver=saver,
-        summary_op=None, save_summaries_secs=60, save_model_secs=60)
+        save_summaries_secs=60, save_model_secs=60)
     summary_writer = sv.summary_writer
     print("Preparing or waiting for session...")
     sess = sv.prepare_or_wait_for_session(config=gen_utils.get_config())
@@ -426,6 +426,8 @@ def main(argv):
             for it in range(hps_gan.gan_gen_iter):
                 # can this be self.batch in decoder?
                 source_batch, enc_states, dec_in_state, best_samples = decoder.generate(True)
+                print("enc_states.shape")
+                print(enc_states.shape)
                 rewards = rollout.get_reward(
                     sess, source_batch, enc_states, dec_in_state, best_samples, 16, discriminator)
                 print('Get the rewards in %s' % it)
@@ -482,15 +484,7 @@ def main(argv):
                     discriminator.run_one_step(sess, inputs, conditions, targets)
 
     elif FLAGS.mode == "decode":
-        print('Going to decode from the generator.' % it)
-        hps_dec = hps_gen._replace(mode="decode")
-        hps_dec = hps_dec._replace(mode="decode")
-        hps_dec = hps_dec._replace(single_pass=True)
-        hps_dec = hps_dec._replace(max_dec_steps=1)
-        gen_batcher = GenBatcher(hps_gen.data_path, gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
-
-        generator = PointerGenerator(hps_gen, gen_vocab)
-        decoder = BeamSearchDecoder(saver, sess, generator, gen_batcher, gen_vocab)
+        print('Going to decode from the generator.')
         decoder.decode()
 
 

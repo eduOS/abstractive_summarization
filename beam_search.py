@@ -148,6 +148,7 @@ def run_beam_search(sess, model, vocab, batch):
         hyps = batch_hyps[k]
         results = []
         steps = 0
+
         while steps < FLAGS.max_dec_steps and len(results) < beam_size:
             # latest token produced by each hypothesis
             latest_tokens = [h.latest_token for h in hyps]
@@ -159,8 +160,8 @@ def run_beam_search(sess, model, vocab, batch):
                 for t in latest_tokens]
             # UNKNOWN_TOKEN will be replaced with a placeholder
             enc_batch_extend_vocab = np.tile(batch.enc_batch_extend_vocab[k], (beam_size, 1))
-            max_art_oovs = np.tile(batch.max_art_oovs[k], (beam_size, 1))
-            enc_states = np.concatenate([hyp.enc_states for hyp in hyps], 0)
+            # max_art_oovs = np.tile(batch.max_art_oovs[k], (beam_size, 1))
+            enc_states = [hyp.enc_states for hyp in hyps]
             # list of current decoder states of the hypotheses
             states = [h.state for h in hyps]
             # list of coverage vectors (or None)
@@ -173,7 +174,7 @@ def run_beam_search(sess, model, vocab, batch):
                 attn_dists, p_gens, new_coverage
             ) = model.run_decode_onestep(
                 sess=sess, enc_batch_extend_vocab=enc_batch_extend_vocab,
-                max_art_oovs=max_art_oovs, latest_tokens=latest_tokens,
+                max_art_oovs=batch.max_art_oovs, latest_tokens=latest_tokens,
                 enc_states=enc_states, dec_init_states=states,
                 prev_coverage=prev_coverage
             )
