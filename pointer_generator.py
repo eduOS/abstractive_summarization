@@ -159,7 +159,7 @@ class PointerGenerator(object):
             new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
             return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
 
-    def _add_decoder(self, enc_states, inputs, dec_in_state):
+    def _add_decoder(self, inputs, dec_in_state):
         """Add attention decoder to the graph. In train or eval mode, you call
         this once to get output on ALL steps. In decode (beam search) mode, you
         call this once for EACH decoder step.
@@ -187,7 +187,7 @@ class PointerGenerator(object):
         # coverage is for decoding in beam_search and gan training
 
         outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
-            inputs, dec_in_state, enc_states, cell,
+            inputs, dec_in_state, self.enc_states, cell,
             initial_state_attention=(self.hps.mode in ["decode", 'gan']),
             pointer_gen=self.hps.pointer_gen, use_coverage=self.hps.coverage,
             prev_coverage=prev_coverage)
@@ -333,7 +333,7 @@ class PointerGenerator(object):
             # a lstm tuple with each item being: [batch_size * beam_size, hidden_dim]
             # where is the batch size
 
-            log_dists, self._dec_out_state = self.decode(self.enc_states, emb_dec_inputs, self.dec_in_state)
+            log_dists, self._dec_out_state = self.decode(emb_dec_inputs, self.dec_in_state)
 
             # Calculate the loss
             with tf.variable_scope('train_loss'):
@@ -410,7 +410,7 @@ class PointerGenerator(object):
         self.g_grad, _ = tf.clip_by_global_norm(tf.gradients(self.g_loss, trainable_variables), self.hps.gen_max_gradient)
         self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables))
 
-    def decode(self, enc_states, emb_dec_inputs, dec_in_state):
+    def decode(self, emb_dec_inputs, dec_in_state):
         """
         input:
             emb_dec_inputs, the input of the cell
@@ -421,7 +421,7 @@ class PointerGenerator(object):
         vsize = self._vocab.size()  # size of the vocabulary
         # Add the decoder.
         decoder_outputs, dec_out_state, \
-            self.attn_dists, self.p_gens, self.coverage = self._add_decoder(enc_states, emb_dec_inputs, dec_in_state)
+            self.attn_dists, self.p_gens, self.coverage = self._add_decoder(emb_dec_inputs, dec_in_state)
 
         # Add the output projection to obtain the vocabulary distribution
         with tf.variable_scope('output_projection'):
@@ -561,13 +561,13 @@ class PointerGenerator(object):
         #     # TODO: should this be changed to shape?
         return enc_states, dec_in_state
 
-    def decode_onestep(self, enc_states, emb_dec_inputs, dec_in_state):
+    def decode_onestep(self, emb_dec_inputs, dec_in_state):
         """
         function: decode onestep for rollout
         inputs:
             the embedded input
         """
-        log_probs, new_states = self.decode(enc_states, emb_dec_inputs, dec_in_state)
+        log_probs, new_states = self.decode(emb_dec_inputs, dec_in_state)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         output_id = tf.squeeze(tf.cast(tf.multinomial(log_probs[0], 1), tf.int32))
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
