@@ -393,6 +393,7 @@ def main(argv):
     summary_writer = sv.summary_writer
     print("Preparing or waiting for session...")
     sess = sv.prepare_or_wait_for_session(config=gen_utils.get_config())
+    tf.summary.FileWriter("./log", sess.graph, flush_secs=0.5)
 
     print("Creating beam search...")
     with tf.variable_scope("beam_search"), tf.device("/gpu:0"):
@@ -426,10 +427,9 @@ def main(argv):
             for it in range(hps_gan.gan_gen_iter):
                 # can this be self.batch in decoder?
                 source_batch, enc_states, dec_in_state, best_samples = decoder.generate(True)
-                print("enc_states.shape")
-                print(enc_states.shape)
                 rewards = rollout.get_reward(
-                    sess, source_batch, enc_states, dec_in_state, best_samples, 16, discriminator)
+                    sess, gen_vocab, dis_vocab, source_batch, enc_states,
+                    dec_in_state, best_samples, 16, discriminator)
                 print('Get the rewards in %s' % it)
                 # only updates parameters without the rollout scope
                 feed_dict = {}

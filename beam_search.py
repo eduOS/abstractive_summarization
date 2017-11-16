@@ -158,14 +158,15 @@ def run_beam_search(sess, model, vocab, batch):
                 t if t in xrange(
                     vocab.size()) else vocab.word2id(data.UNKNOWN_TOKEN)
                 for t in latest_tokens]
+            latest_tokens = np.transpose(np.array(latest_tokens))
             # UNKNOWN_TOKEN will be replaced with a placeholder
             enc_batch_extend_vocab = np.tile(batch.enc_batch_extend_vocab[k], (beam_size, 1))
             # max_art_oovs = np.tile(batch.max_art_oovs[k], (beam_size, 1))
-            enc_states = [hyp.enc_states for hyp in hyps]
+            enc_states = np.array([hyp.enc_states for hyp in hyps])
             # list of current decoder states of the hypotheses
             states = [h.state for h in hyps]
             # list of coverage vectors (or None)
-            prev_coverage = [h.coverage for h in hyps]
+            prev_coverage = np.stack([h.coverage for h in hyps], axis=0)
 
             # Run one step of the decoder to get the new info, it is the same either
             # in decoding or in gan

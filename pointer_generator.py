@@ -194,7 +194,7 @@ class PointerGenerator(object):
 
         return outputs, out_state, attn_dists, p_gens, coverage
 
-    def _calc_final_dist(self, vocab_dists, attn_dists):
+    def _calc_final_dist(self, p_gens, vocab_dists, attn_dists):
         # this is the core function
         """Calculate the final distribution, for the pointer-generator model
 
@@ -216,11 +216,11 @@ class PointerGenerator(object):
             # attn_dists
             vocab_dists = [
                 p_gen * dist
-                for (p_gen, dist) in zip(self.p_gens, vocab_dists)]
+                for (p_gen, dist) in zip(p_gens, vocab_dists)]
             # vocab_dists [max_dec_steps * (batch_size, vsize)]
             attn_dists = [
                 (1 - p_gen) * dist
-                for (p_gen, dist) in zip(self.p_gens, attn_dists)]
+                for (p_gen, dist) in zip(p_gens, attn_dists)]
             # vocab_dists [max_dec_steps * (batch_size, attn_len)]
 
             # Concatenate some zeros to each vocabulary dist, to hold the
@@ -317,7 +317,7 @@ class PointerGenerator(object):
 
             # Add the encoder.
             enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
-            # encoder_outputs: [batch_size * beam_size, max_time, output_size*2]
+            # encoder_outputs: [batch_size * beam_size, max_time, num_hidden*2]
             # fw_st & bw_st: [batch_size * beam_size, num_hidden]
             # those in the encoder should also be updated
             self.enc_states = enc_outputs
@@ -333,7 +333,8 @@ class PointerGenerator(object):
             # a lstm tuple with each item being: [batch_size * beam_size, hidden_dim]
             # where is the batch size
 
-            log_dists, self._dec_out_state = self.decode(emb_dec_inputs, self.dec_in_state)
+            self.attn_dists, self.p_gens, self.coverage, vocab_scores, \
+                log_dists, self._dec_out_state = self.decode(emb_dec_inputs, self.dec_in_state)
 
             # Calculate the loss
             with tf.variable_scope('train_loss'):
@@ -364,7 +365,7 @@ class PointerGenerator(object):
 
                 else:  # baseline model
                     self._loss = tf.contrib.seq2seq.sequence_loss(
-                        tf.stack(self.vocab_scores, axis=1), self._target_batch,
+                        tf.stack(vocab_scores, axis=1), self._target_batch,
                         self._padding_mask, average_across_timesteps=True,
                         average_across_batch=True)
                     # set both batch and timesteps as true to compare it with
@@ -421,7 +422,7 @@ class PointerGenerator(object):
         vsize = self._vocab.size()  # size of the vocabulary
         # Add the decoder.
         decoder_outputs, dec_out_state, \
-            self.attn_dists, self.p_gens, self.coverage = self._add_decoder(emb_dec_inputs, dec_in_state)
+            attn_dists, p_gens, coverage = self._add_decoder(emb_dec_inputs, dec_in_state)
 
         # Add the output projection to obtain the vocabulary distribution
         with tf.variable_scope('output_projection'):
@@ -442,19 +443,19 @@ class PointerGenerator(object):
             # (batch_size, vsize) arrays. The words are in the order they
             # appear in the vocabulary file.
             vocab_dists = [tf.nn.softmax(s) for s in vocab_scores]
-            if not FLAGS.pointer_gen:  # calculate loss from log_dists
-                self.vocab_scores = vocab_scores
+            # if not FLAGS.pointer_gen:  # calculate loss from log_dists
+            #     self.vocab_scores = vocab_scores
             # is the oov included
 
         # For pointer-generator model, calc final distribution from copy
         # distribution and vocabulary distribution, then take log
         if FLAGS.pointer_gen:
-            final_dists = self._calc_final_dist(vocab_dists, self.attn_dists)
+            final_dists = self._calc_final_dist(p_gens, vocab_dists, attn_dists)
             # Take log of final distribution
             log_dists = [tf.log(dist) for dist in final_dists]
         else:  # just take log of vocab_dists
             log_dists = [tf.log(dist) for dist in vocab_dists]
-        return log_dists, dec_out_state
+        return attn_dists, p_gens, coverage, vocab_scores, log_dists, dec_out_state
 
     def _add_train_op(self):
         """Sets self._train_op, the op to run for training."""
@@ -567,7 +568,8 @@ class PointerGenerator(object):
         inputs:
             the embedded input
         """
-        log_probs, new_states = self.decode(emb_dec_inputs, dec_in_state)
+        # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
+        _, _, _, _, log_probs, new_states = self.decode(emb_dec_inputs, dec_in_state)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         output_id = tf.squeeze(tf.cast(tf.multinomial(log_probs[0], 1), tf.int32))
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
@@ -611,16 +613,16 @@ class PointerGenerator(object):
         new_dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
 
         feed = {
-            self.enc_states: np.array(enc_states),
+            self.enc_states: enc_states,
             self.dec_in_state: new_dec_in_state,
-            self._dec_batch: np.transpose(np.array([latest_tokens])),
+            self._dec_batch: latest_tokens,
         }
 
         to_return = {
           "ids": self._topk_ids,
           "probs": self._topk_log_probs,
           "states": self._dec_out_state,
-          "attn_dists": self.attn_dists
+          "attn_dists": self.attn_dists,
         }
 
         if FLAGS.pointer_gen:
@@ -629,7 +631,7 @@ class PointerGenerator(object):
             to_return['p_gens'] = self.p_gens
 
         if self.hps.coverage:
-            feed[self.prev_coverage] = np.stack(prev_coverage, axis=0)
+            feed[self.prev_coverage] = prev_coverage
             to_return['coverage'] = self.coverage
 
         results = sess.run(to_return, feed_dict=feed)  # run the decoder step

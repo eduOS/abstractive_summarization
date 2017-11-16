@@ -60,7 +60,7 @@ class Rollout(object):
                 gen_summ = gen_summ.write(i, next_input_id)
                 return i+1, next_input, new_state, given_num, gen_summ
 
-            i, _, next_input, new_state, given_num, self.gen_summ_ar = control_flow_ops.while_loop(
+            i, next_input, new_state, given_num, self.gen_summ_ar = control_flow_ops.while_loop(
                 cond=lambda i, _1, _2, given_num, _4: i < given_num,
                 body=recurrence_given,
                 loop_vars=(tf.constant(1, dtype=tf.int32), emb_summ_ar.read(0),
@@ -69,7 +69,7 @@ class Rollout(object):
             variable_scope.get_variable_scope().reuse_variables()
             # reuse variables between python loops is needed
 
-            _, _, _, _, _, self.gen_summ_ar = control_flow_ops.while_loop(
+            _, _, _, _, self.gen_summ_ar = control_flow_ops.while_loop(
                 cond=lambda i, _1, _2, _3, _4: i < self._gen_hps.max_dec_steps,
                 body=recurrence_rollout,
                 loop_vars=(i, next_input, new_state, given_num, self.gen_summ_ar))
@@ -111,8 +111,6 @@ class Rollout(object):
 
                 # the unique feature for the pointer gen is the
                 # enc_batch_extend_vocab and the max_art_oovs
-                # self._enc_batch_extend_vocab = batch.enc_batch_extend_vocab
-                # self._max_art_oovs = batch.max_art_oovs
                 rollout_samples_words = sess.run(self.gen_summ_ar, feed_dict)
                 # how about multiple generators for one discriminator?
                 rollout_samples_chars = gen_vocab2dis_vocab(
