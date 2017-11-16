@@ -334,20 +334,19 @@ class PointerGenerator(object):
             # where is the batch size
 
             self.attn_dists, self.p_gens, self.coverage, vocab_scores, \
-                log_dists, self._dec_out_state = self.decode(emb_dec_inputs, self.dec_in_state)
+                final_dists, self._dec_out_state = self.decode(emb_dec_inputs, self.dec_in_state)
 
             # Calculate the loss
             with tf.variable_scope('train_loss'):
                 if FLAGS.pointer_gen:  # calculate loss from log_dists
-                    # Calculate the loss per step
-                    # This is fiddly; we use tf.gather_nd to pick out the
-                    # log probabilities of the target words
-                    # will be list length max_dec_steps containing shape
-                    # (batch_size)
+                    # Calculate the loss per step This is fiddly; we use
+                    # tf.gather_nd to pick out the log probabilities of the
+                    # target words will be list length max_dec_steps containing
+                    # shape (batch_size)
                     loss_per_step = []
                     batch_nums = tf.range(0, tf.shape(emb_dec_inputs[0])[0])
                     # shape (batch_size)
-                    for dec_step, log_dist in enumerate(log_dists):
+                    for dec_step, dist in enumerate(final_dists):
                         # The indices of the target words. shape
                         # (batch_size)
                         targets = self._target_batch[:, dec_step]
@@ -356,7 +355,8 @@ class PointerGenerator(object):
                         # shape (batch_size, 2)
                         # shape (batch_size). loss on this step for each
                         # batch
-                        losses = tf.gather_nd(-log_dist, indices)
+                        gold_probs = tf.gather_nd(dist, indices)
+                        losses = -tf.log(gold_probs)
                         # amazing!
                         loss_per_step.append(losses)
 
@@ -389,27 +389,29 @@ class PointerGenerator(object):
         # extended_vsize)
         if len(emb_dec_inputs) == 1:
             # what is dimention of embe_dec_inputs while decoding?
-            assert len(log_dists) == 1
-            log_dists = log_dists[0]
-            self._topk_log_probs, self._topk_ids = tf.nn.top_k(
-                log_dists, hps.beam_size * 2)
+            assert len(final_dists) == 1
+            final_dists = final_dists[0]
+            topk_probs, self._topk_ids = tf.nn.top_k(
+                final_dists, hps.beam_size * 2)
+            self._topk_log_probs = tf.log(topk_probs)
         # note batch_size=beam_size in decode mode
 
-        g_predictions = tf.nn.embedding_lookup(self.embeddings, self.g_predictions)
-        self.g_loss = -tf.reduce_sum(
-            tf.reduce_sum(
-                tf.one_hot(tf.to_int32(tf.reshape(self.enc_batch, [-1])),
-                           self.hps.emb_dim, 1.0, 0.0) * tf.clip_by_value(
-                               tf.reshape(g_predictions, [-1, self.hps.emb_dim]), 1e-20, 1.0), 1
-            ) * tf.reshape(self.rewards, [-1])
-        )
-        # rewards and g_predictions should be placeholders
+        with tf.variable_scope('gan_loss'):
+            g_predictions = tf.nn.embedding_lookup(self.embeddings, self.g_predictions)
+            self.g_loss = -tf.reduce_sum(
+                tf.reduce_sum(
+                    tf.one_hot(tf.to_int32(tf.reshape(self.enc_batch, [-1])),
+                               self.hps.emb_dim, 1.0, 0.0) * tf.clip_by_value(
+                                   tf.reshape(g_predictions, [-1, self.hps.emb_dim]), 1e-20, 1.0), 1
+                ) * tf.reshape(self.rewards, [-1])
+            )
+            # rewards and g_predictions should be placeholders
 
-        g_opt = self.g_optimizer(self.hps.gen_lr)
+            g_opt = self.g_optimizer(self.hps.gen_lr)
 
-        trainable_variables = tf.trainable_variables()
-        self.g_grad, _ = tf.clip_by_global_norm(tf.gradients(self.g_loss, trainable_variables), self.hps.gen_max_gradient)
-        self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables))
+            trainable_variables = tf.trainable_variables()
+            self.g_grad, _ = tf.clip_by_global_norm(tf.gradients(self.g_loss, trainable_variables), self.hps.gen_max_gradient)
+            self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables))
 
     def decode(self, emb_dec_inputs, dec_in_state):
         """
@@ -452,10 +454,11 @@ class PointerGenerator(object):
         if FLAGS.pointer_gen:
             final_dists = self._calc_final_dist(p_gens, vocab_dists, attn_dists)
             # Take log of final distribution
-            log_dists = [tf.log(dist) for dist in final_dists]
+            # log_dists = [tf.log(dist) for dist in final_dists]
         else:  # just take log of vocab_dists
-            log_dists = [tf.log(dist) for dist in vocab_dists]
-        return attn_dists, p_gens, coverage, vocab_scores, log_dists, dec_out_state
+            final_dists = vocab_dists
+            # log_dists = [tf.log(dist) for dist in vocab_dists]
+        return attn_dists, p_gens, coverage, vocab_scores, final_dists, dec_out_state
 
     def _add_train_op(self):
         """Sets self._train_op, the op to run for training."""
@@ -569,9 +572,9 @@ class PointerGenerator(object):
             the embedded input
         """
         # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
-        _, _, _, _, log_probs, new_states = self.decode(emb_dec_inputs, dec_in_state)
+        _, _, _, _, final_dists, new_states = self.decode(emb_dec_inputs, dec_in_state)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
-        output_id = tf.squeeze(tf.cast(tf.multinomial(log_probs[0], 1), tf.int32))
+        output_id = tf.squeeze(tf.cast(tf.multinomial(final_dists[0], 1), tf.int32))
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
         return output_id, new_states
 

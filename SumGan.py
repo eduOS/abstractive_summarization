@@ -168,12 +168,12 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
                 print(
                   "\nDashboard until the step:\t%s\n"
                   "\tBatch size:\t%s\n"
-                  "\tVocabulary size:\t%s"
+                  "\tVocabulary size:\t%s\n"
                   "\tArticles trained:\t%s\n"
                   "\tTotal training time:\t%s hours\n"
                   "\tCurrent speed:\t%s seconds/article\n"
-                  "\tLoss:\t%s; and "
-                  "\tcoverage loss:\t%s\n" % (
+                  "\tLoss:\t%s;"
+                  "\tand coverage loss:\t%s\n" % (
                     step,
                     hps.batch_size,
                     hps.gen_vocab_size,
@@ -393,7 +393,7 @@ def main(argv):
     summary_writer = sv.summary_writer
     print("Preparing or waiting for session...")
     sess = sv.prepare_or_wait_for_session(config=gen_utils.get_config())
-    tf.summary.FileWriter("./log", sess.graph, flush_secs=0.5)
+    tf.summary.FileWriter("./log", sess.graph)
 
     print("Creating beam search...")
     with tf.variable_scope("beam_search"), tf.device("/gpu:0"):

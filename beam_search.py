@@ -20,6 +20,7 @@ import tensorflow as tf
 import numpy as np
 import data
 from six.moves import xrange
+import time
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -53,13 +54,15 @@ class Hypothesis(object):
         self.p_gens = p_gens
         self.coverage = coverage
 
-    def extend(self, token, log_prob, state, attn_dist, p_gen, coverage):
+    def extend(self, token, log_prob, enc_states, state, attn_dist, p_gen, coverage):
         """Return a NEW hypothesis, extended with the information from the
         latest step of beam search.
 
         Args:
           token: Integer. Latest token produced by beam search.
           log_prob: Float. Log prob of the latest token.
+          enc_states: for attention decoder generated from encoder and it is the
+          same for each beam searching
           state: Current decoder state, a LSTMStateTuple.
           attn_dist: Attention distribution from latest step. Numpy array shape
           (attn_length).
@@ -73,6 +76,7 @@ class Hypothesis(object):
         return Hypothesis(
             tokens=self.tokens + [token],
             log_probs=self.log_probs + [log_prob],
+            enc_states=enc_states,
             state=state,
             attn_dists=self.attn_dists + [attn_dist],
             p_gens=self.p_gens + [p_gen],
@@ -158,11 +162,11 @@ def run_beam_search(sess, model, vocab, batch):
                 t if t in xrange(
                     vocab.size()) else vocab.word2id(data.UNKNOWN_TOKEN)
                 for t in latest_tokens]
-            latest_tokens = np.transpose(np.array(latest_tokens))
+            latest_tokens = np.transpose(np.array([latest_tokens]))
             # UNKNOWN_TOKEN will be replaced with a placeholder
             enc_batch_extend_vocab = np.tile(batch.enc_batch_extend_vocab[k], (beam_size, 1))
             # max_art_oovs = np.tile(batch.max_art_oovs[k], (beam_size, 1))
-            enc_states = np.array([hyp.enc_states for hyp in hyps])
+            enc_states_ = np.array([hyp.enc_states for hyp in hyps])
             # list of current decoder states of the hypotheses
             states = [h.state for h in hyps]
             # list of coverage vectors (or None)
@@ -176,10 +180,13 @@ def run_beam_search(sess, model, vocab, batch):
             ) = model.run_decode_onestep(
                 sess=sess, enc_batch_extend_vocab=enc_batch_extend_vocab,
                 max_art_oovs=batch.max_art_oovs, latest_tokens=latest_tokens,
-                enc_states=enc_states, dec_init_states=states,
+                enc_states=enc_states_, dec_init_states=states,
                 prev_coverage=prev_coverage
             )
 
+            print(topk_ids)
+            print(topk_log_probs)
+            time.sleep(2)
             # Extend each hypothesis and collect them all in all_hyps
             all_hyps = []
             # On the first step, we only had one original hypothesis (the initial
@@ -197,6 +204,7 @@ def run_beam_search(sess, model, vocab, batch):
                     new_hyp = h.extend(
                         token=topk_ids[i, j],
                         log_prob=topk_log_probs[i, j],
+                        enc_states=enc_states_,
                         state=new_state,
                         attn_dist=attn_dist,
                         p_gen=p_gen,
@@ -210,15 +218,18 @@ def run_beam_search(sess, model, vocab, batch):
                     # if stop token is reached...
                     # If this hypothesis is sufficiently long, put in results.
                     # Otherwise discard.
+                    print('encountering a stop symbol.')
                     if steps >= FLAGS.min_dec_steps:
                         results.append(h)
                 else:
                     # hasn't reached stop token, so continue to extend this
                     # hypothesis
                     hyps.append(h)
+                    print('append a hypothesis')
                 if len(hyps) == beam_size or len(results) == beam_size:
                     # Once we've collected beam_size-many hypotheses for the next
                     # step, or beam_size-many complete hypotheses, stop.
+                    # print('length of hyps or results is equal to beam_size, break.')
                     break
 
             steps += 1

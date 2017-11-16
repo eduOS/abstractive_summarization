@@ -153,7 +153,7 @@ class BeamSearchDecoder(object):
             # Remove the [STOP] token from decoded_words, if necessary
             for decoded_words in decoded_words_list:
                 try:
-                    fst_stop_idx = decoded_words.index(data.STOP_DECODING)  # index of the (first) [STOP] symbol
+                    fst_stop_idx = decoded_words.index(data.STOP_DECODING)
                     decoded_words = decoded_words[:fst_stop_idx]
                 except ValueError:
                     pass
@@ -188,11 +188,11 @@ class BeamSearchDecoder(object):
     def write_for_discriminator(self, artcls, reference_sents, decoded_outputs):
         for artc, refe, hypo in zip(artcls, reference_sents, decoded_outputs):
             with open(os.path.join(self._hps.data_path, self._hps.mode + "_negative"), "a") as f:
-                f.write(hypo)
+                f.write(hypo+"\n")
             with open(os.path.join(self._hps.data_path, self._hps.mode + "_positive"), "a") as f:
-                f.write(refe)
+                f.write(refe+"\n")
             with open(os.path.join(self._hps.data_path, self._hps.mode + "_source"), "a") as f:
-                f.write(artc)
+                f.write(artc+"\n")
 
     def write_for_rouge(self, artcls, original_abstracts, decoded_outputs, ex_index):
         """Write output to file in correct format for eval with pyrouge. This is
