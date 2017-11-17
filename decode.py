@@ -143,6 +143,9 @@ class BeamSearchDecoder(object):
             _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
             # is the beam_size here 1?
             outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps]
+            print('the length of each generated sample')
+            for output_ids in outputs_ids:
+                print(len(output_ids))
 
             decoded_words_list = data.outputsids2words(
                 outputs_ids, self._vocab, (art_oovs if self._hps.pointer_gen else None))

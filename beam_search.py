@@ -184,9 +184,10 @@ def run_beam_search(sess, model, vocab, batch):
                 prev_coverage=prev_coverage
             )
 
+            print('batch %s, step %s topk_ids:' % (k, steps))
             print(topk_ids)
             print(topk_log_probs)
-            time.sleep(2)
+            time.sleep(0.2)
             # Extend each hypothesis and collect them all in all_hyps
             all_hyps = []
             # On the first step, we only had one original hypothesis (the initial
@@ -204,7 +205,7 @@ def run_beam_search(sess, model, vocab, batch):
                     new_hyp = h.extend(
                         token=topk_ids[i, j],
                         log_prob=topk_log_probs[i, j],
-                        enc_states=enc_states_,
+                        enc_states=hyps[0].enc_states,
                         state=new_state,
                         attn_dist=attn_dist,
                         p_gen=p_gen,
@@ -225,7 +226,6 @@ def run_beam_search(sess, model, vocab, batch):
                     # hasn't reached stop token, so continue to extend this
                     # hypothesis
                     hyps.append(h)
-                    print('append a hypothesis')
                 if len(hyps) == beam_size or len(results) == beam_size:
                     # Once we've collected beam_size-many hypotheses for the next
                     # step, or beam_size-many complete hypotheses, stop.

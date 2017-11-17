@@ -504,8 +504,8 @@ def get_batch(self, data, batch_size, balance=False, put_back=True):
       if put_back and not balance:
         encoder_input, target = random.choice(data)
       if put_back and balance:
-        cls = random.choice(data)
-        encoder_input, target = random.choice(cls)
+        clas = random.choice(data)
+        encoder_input, target = random.choice(clas)
       else:
         encoder_input, target = data.pop()
       # add to the batch

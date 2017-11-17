@@ -325,6 +325,10 @@ def main(argv):
     elif FLAGS.mode != "decode":
         assert hps_gen.max_enc_steps == 80, "No segmentation, max_enc_steps wrong"
         assert hps_gen.max_dec_steps == 15, "No segmentation, max_dec_steps wrong"
+
+    if FLAGS.mode in ["decode", "gan"]:
+        hps_gen = hps_gen._replace(max_dec_steps=1)
+
     print("Building generator graph ...")
     with tf.variable_scope("generator"):
         generator = PointerGenerator(hps_gen, gen_vocab)

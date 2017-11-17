@@ -55,8 +55,8 @@ class PointerGenerator(object):
         self._dec_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='dec_batch')
         self._target_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='target_batch')
         self._padding_mask = tf.placeholder(tf.float32, [batch_size, hps.max_dec_steps], name='padding_mask')
-        self.rewards = tf.placeholder(tf.float32, shape=[batch_size, self.hps.max_dec_steps])
-        self.g_predictions = tf.placeholder(tf.int32, shape=[batch_size, self.hps.max_dec_steps])
+        self.rewards = tf.placeholder(tf.float32, shape=[batch_size, hps.max_dec_steps])
+        self.g_predictions = tf.placeholder(tf.int32, shape=[batch_size, hps.max_dec_steps])
 
         if hps.mode in ["decode", 'gan'] and hps.coverage:
             self.prev_coverage = tf.placeholder(tf.float32, [None, None], name='prev_coverage')
