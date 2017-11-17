@@ -303,7 +303,7 @@ class GenBatcher(object):
             mode = "val"
         elif "decode":
             pass
-        self._data_path = os.path.join(data_path, mode) + "*.bin"
+        self._data_path = os.path.join(data_path, mode) + "*"
 
         # Initialize a queue of Batches waiting to be used, and a queue of
         # Examples waiting to be batched
@@ -380,9 +380,7 @@ class GenBatcher(object):
         """Reads data from file and processes into Examples which are then
         placed into the example queue."""
 
-        if self._hps.mode == "decode":
-            mode = "train"
-        input_gen = self.text_generator(self._hps.data_path + mode, self._hps.single_pass)
+        input_gen = self.text_generator()
 
         while True:
             try:
@@ -463,7 +461,7 @@ class GenBatcher(object):
                     new_t.daemon = True
                     new_t.start()
 
-    def text_generator(self, data_path, single_pass):
+    def text_generator(self):
         """read abstract and article pairs directly from file
 
         Args:
@@ -471,13 +469,14 @@ class GenBatcher(object):
             single_pass: if the single pass
         """
         while True:
-            filelist = glob.glob(data_path)  # get the list of datafiles
-            assert filelist, ('Error: Empty filelist at %s' % data_path)
-            if single_pass:
+            filelist = glob.glob(self._data_path)  # get the list of datafiles
+            assert filelist, ('Error: Empty filelist at %s' % self._data_path)
+            if self._single_pass:
                 filelist = sorted(filelist)
             else:
                 random.shuffle(filelist)
-            for f in filelist:
+            for ff in filelist:
+                f = open(ff, "r", 'utf-8')
                 while(True):
                     article_text = f.readline()
                     abstract_text = f.readline()
