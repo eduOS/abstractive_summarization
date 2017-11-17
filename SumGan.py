@@ -430,9 +430,9 @@ def main(argv):
             # Train the generator for one step
             for it in range(hps_gan.gan_gen_iter):
                 # can this be self.batch in decoder?
-                source_batch, enc_states, dec_in_state, best_samples = decoder.generate(True)
+                source_batch, enc_states, enc_padding_mask, dec_in_state, best_samples = decoder.generate(True)
                 rewards = rollout.get_reward(
-                    sess, gen_vocab, dis_vocab, source_batch, enc_states,
+                    sess, gen_vocab, dis_vocab, source_batch, enc_states, source_batch.enc_padding_mask,
                     dec_in_state, best_samples, 16, discriminator)
                 print('Get the rewards in %s' % it)
                 # only updates parameters without the rollout scope

@@ -80,7 +80,7 @@ class Rollout(object):
         # batch_size x seq_length
 
     def get_reward(self, sess, gen_vocab, dis_vocab, source_batch,
-                   enc_states, dec_in_state, samples, rollout_num, discriminator):
+                   enc_states, enc_padding_mask, dec_in_state, samples, rollout_num, discriminator):
         # dec_in_state is [batch_size, hidden_dim * 2] and that should be
         # changed to [batch_size, hidden_dim] for the attention_decoder
         rewards = []
@@ -101,6 +101,7 @@ class Rollout(object):
                 feed_dict[self.generator.enc_lens] = source_batch.enc_lens
                 feed_dict[self.given_num] = given_num
                 feed_dict[self.generator.enc_states] = enc_states
+                feed_dict[self.generator.enc_padding_mask] = enc_padding_mask
                 feed_dict[self.init_dec_in_state.c] = dec_in_state.c
                 feed_dict[self.init_dec_in_state.h] = dec_in_state.h
                 if self._gen_hps.pointer_gen:

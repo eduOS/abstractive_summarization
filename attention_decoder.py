@@ -29,7 +29,7 @@ from tensorflow.python.ops import math_ops
 # https://www.tensorflow.org/api_guides/python/contrib.seq2seq#Attention
 
 
-def attention_decoder(decoder_inputs, initial_state, encoder_states,
+def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding_mask,
                       cell, initial_state_attention=False, pointer_gen=True,
                       use_coverage=False, prev_coverage=None):
     """
@@ -105,6 +105,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states,
 
         # Get the weight vectors v and w_c (w_c is for coverage)
         v = variable_scope.get_variable("v", [attention_vec_size])
+
         if use_coverage:
             with variable_scope.variable_scope("coverage"):
                 w_c = variable_scope.get_variable("w_c", [1, 1, 1, attention_vec_size])
@@ -136,6 +137,13 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states,
                 decoder_features = tf.expand_dims(tf.expand_dims(decoder_features, 1), 1)
                 # why not reshape?
 
+                def masked_attention(e):
+                    """Take softmax of e then apply enc_padding_mask and re-normalize"""
+                    attn_dist = nn_ops.softmax(e)  # take softmax. shape (batch_size, attn_length)
+                    attn_dist *= enc_padding_mask  # apply mask
+                    masked_sums = tf.reduce_sum(attn_dist, axis=1)  # shape (batch_size)
+                    return attn_dist / tf.reshape(masked_sums, [-1, 1])  # re-normalize
+
                 if use_coverage and coverage is not None:
                     # non-first step of coverage
                     # Multiply coverage vector by w_c to get coverage_features.
@@ -157,7 +165,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states,
 
                     # Take softmax of e to get the attention distribution
                     # shape (batch_size, attn_length)
-                    attn_dist = nn_ops.softmax(e)
+                    attn_dist = masked_attention(e)
 
                     # Update coverage vector, the initial coverage is zero
                     coverage += array_ops.reshape(attn_dist, [batch_size, -1, 1, 1])
@@ -169,7 +177,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states,
 
                     # Take softmax of e to get the attention distribution
                     # shape (batch_size, attn_length)
-                    attn_dist = nn_ops.softmax(e)
+                    attn_dist = masked_attention(e)
 
                     if use_coverage:  # first step of training
                         coverage = tf.expand_dims(tf.expand_dims(attn_dist, 2), 2)

@@ -215,11 +215,14 @@ class Batch(object):
         # each batch because we use dynamic_rnn for the encoder.
         self.enc_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
         self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
+        self.enc_padding_mask = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.float32)
 
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):
             self.enc_batch[i, :] = ex.enc_input[:]
             self.enc_lens[i] = ex.enc_len
+            for j in range(ex.enc_len):
+                self.enc_padding_mask[i][j] = 1
 
         # For pointer-generator mode, need to store some extra info
         if hps.pointer_gen:

@@ -47,6 +47,7 @@ class PointerGenerator(object):
         # encoder part
         self.enc_batch = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch')
         self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
+        self.enc_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, None], name='enc_padding_mask')
         if FLAGS.pointer_gen:
             self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch_extend_vocab')
             self.max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
@@ -74,6 +75,7 @@ class PointerGenerator(object):
         feed_dict = {}
         feed_dict[self.enc_batch] = batch.enc_batch
         feed_dict[self.enc_lens] = batch.enc_lens
+        feed_dict[self.enc_padding_mask] = batch.enc_padding_mask
         if FLAGS.pointer_gen:
             feed_dict[self.enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
             feed_dict[self.max_art_oovs] = batch.max_art_oovs
@@ -187,7 +189,7 @@ class PointerGenerator(object):
         # coverage is for decoding in beam_search and gan training
 
         outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
-            inputs, dec_in_state, self.enc_states, cell,
+            inputs, dec_in_state, self.enc_states, self.enc_padding_mask, cell,
             initial_state_attention=(self.hps.mode in ["decode", 'gan']),
             pointer_gen=self.hps.pointer_gen, use_coverage=self.hps.coverage,
             prev_coverage=prev_coverage)
@@ -579,7 +581,8 @@ class PointerGenerator(object):
         return output_id, new_states
 
     def run_decode_onestep(self, sess, enc_batch_extend_vocab, max_art_oovs,
-                           latest_tokens, enc_states, dec_init_states, prev_coverage):
+                           latest_tokens, enc_states, enc_padding_mask,
+                           dec_init_states, prev_coverage):
         """For beam search decoding. Run the decoder for one step.
 
         Args:
@@ -617,6 +620,7 @@ class PointerGenerator(object):
 
         feed = {
             self.enc_states: enc_states,
+            self.enc_padding_mask: enc_padding_mask,
             self.dec_in_state: new_dec_in_state,
             self._dec_batch: latest_tokens,
         }
