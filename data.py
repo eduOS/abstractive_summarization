@@ -17,12 +17,8 @@
 """This file contains code to read the train/eval/test data from file and
 process it, and read the vocab data from file and process it"""
 
-import glob
-import random
-import struct
 import csv
 import numpy as np
-from tensorflow.core.example import example_pb2
 from six.moves import xrange  # pylint: disable=redefined-builtin
 from cntk.tokenizer import text2charlist
 
@@ -120,51 +116,6 @@ class Vocab(object):
             writer = csv.DictWriter(f, delimiter="\t", fieldnames=fieldnames)
             for i in xrange(self.size()):
                 writer.writerow({"word": self._id_to_word[i]})
-
-
-def example_generator(data_path, single_pass):
-    """Generates tf.Examples from data files.
-
-      Binary data format: <length><blob>. <length> represents the byte size
-      of <blob>. <blob> is serialized tf.Example proto. The tf.Example contains
-      the tokenized article text and summary.
-
-    Args:
-      data_path:
-        Path to tf.Example data files. Can include wildcards, e.g. if you have
-        several training data chunk files train_001.bin, train_002.bin, etc,
-        then pass data_path=train_* to access them all.
-      single_pass:
-        Boolean. If True, go through the dataset exactly once, generating
-        examples in the order they appear, then return. Otherwise, generate
-        random examples indefinitely.
-
-    Yields:
-      Deserialized tf.Example.
-    """
-    while True:
-        filelist = glob.glob(data_path)  # get the list of datafiles
-        assert filelist, ('Error: Empty filelist at %s' % data_path)
-        # check filelist isn't empty
-        if single_pass:
-            filelist = sorted(filelist)
-        else:
-            random.shuffle(filelist)
-        for f in filelist:
-            reader = open(f, 'rb')
-            while True:
-                len_bytes = reader.read(8)
-                if not len_bytes:
-                    break  # finished reading this file
-                str_len = struct.unpack('q', len_bytes)[0]
-                example_str = struct.unpack(
-                    '%ds' % str_len, reader.read(str_len))[0]
-                yield example_pb2.Example.FromString(example_str)
-        if single_pass:
-            print(
-                "example_generator completed reading all datafiles. No more \
-                data.")
-            break
 
 
 def article2ids(article_words, vocab):

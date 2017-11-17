@@ -23,10 +23,12 @@ from threading import Thread
 import time
 import numpy as np
 import tensorflow as tf
+import glob
 import data
 import gzip
 import os
 from cntk.tokenizer import text2charlist
+from codecs import open
 PAD_TOKEN = '[PAD]'
 
 
@@ -378,8 +380,9 @@ class GenBatcher(object):
         """Reads data from file and processes into Examples which are then
         placed into the example queue."""
 
-        input_gen = self.text_generator(
-            data.example_generator(self._data_path, self._single_pass))
+        if self._hps.mode == "decode":
+            mode = "train"
+        input_gen = self.text_generator(self._hps.data_path + mode, self._hps.single_pass)
 
         while True:
             try:
@@ -460,33 +463,34 @@ class GenBatcher(object):
                     new_t.daemon = True
                     new_t.start()
 
-    def text_generator(self, example_generator):
-        """Generates article and abstract text from tf.Example.
+    def text_generator(self, data_path, single_pass):
+        """read abstract and article pairs directly from file
 
         Args:
-          example_generator: a generator of tf.Examples from file. See
-          data.example_generator"""
+            data_dir: where to find the text files
+            single_pass: if the single pass
+        """
         while True:
-            e = example_generator.next()  # e is a tf.Example
-            try:
-                # the article text was saved under the key 'article' in the data
-                # files
-                article_text = e.features.feature['article'].bytes_list.value[0]
-                # the abstract text was saved under the key 'abstract' in the
-                # data files
-                abstract_text = \
-                    e.features.feature['abstract'].bytes_list.value[0]
-            except ValueError as e:
-                tf.logging.error(
-                    'Failed to get article or abstract from example: %s', str(e)
-                )
-                continue
-            if len(article_text) == 0:
-                # See https://github.com/abisee/pointer-generator/issues/1
-                tf.logging.warning(
-                    'Found an example with empty article text. Skipping it.')
+            filelist = glob.glob(data_path)  # get the list of datafiles
+            assert filelist, ('Error: Empty filelist at %s' % data_path)
+            if single_pass:
+                filelist = sorted(filelist)
             else:
-                yield (article_text, abstract_text)
+                random.shuffle(filelist)
+            for f in filelist:
+                while(True):
+                    article_text = f.readline()
+                    abstract_text = f.readline()
+                    blank = f.readline().strip()
+                    assert not blank, "source file may be wrong"
+                    if len(article_text) == 0:
+                        # See https://github.com/abisee/pointer-generator/issues/1
+                        tf.logging.warning(
+                            'Found an example with empty article text. Skipping it.')
+                    elif len(article_text) == 0 and len(abstract_text) == 0:
+                        break
+                    else:
+                        yield (article_text, abstract_text)
 
 
 def get_batch(self, data, batch_size, balance=False, put_back=True):
@@ -608,19 +612,3 @@ class DisBatcher:
         return source, positive, negative
 
 
-def create_batch(sample_list, gen_vocab, dis_vocab):
-    inputs = []
-    for _ in range(self._hps.batch_size * self._bucketing_cache_size):
-        inputs.append(self._example_queue.get())
-    # sort by length of encoder sequence
-    inputs = sorted(inputs, key=lambda inp: inp.enc_len)
-
-    # Group the sorted Examples into batches, optionally shuffle the
-    # batches, and place in the batch queue.
-    batches = []
-    for i in range(0, len(inputs), self._hps.batch_size):
-        batches.append(inputs[i:i + self._hps.batch_size])
-    if not self._single_pass:
-        shuffle(batches)
-    for b in batches:  # each b is a list of Example objects
-        self._batch_queue.put(Batch(b, self._hps, self._vocab))

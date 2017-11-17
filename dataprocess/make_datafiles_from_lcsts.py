@@ -103,35 +103,44 @@ def get_pairs_from_lcsts(filePath, segment=True):
     print(lines)
 
 
-def write_to_txt(
-    source_path, art_out_file, abs_out_file, makevocab=False, segment=True
-):
+def write_to_txt(source_path, out_file, makevocab=False, max_length=100000):
     """Reads the tokenized .story files corresponding to the urls listed in the
     url_file and writes them to a out_file."""
 
     if makevocab:
         vocab_counter = collections.Counter()
 
-    with open(
-        art_out_file, 'wb', 'utf-8') as art_writter, open(
-            abs_out_file, 'wb', 'utf-8') as abs_writter:
-        for art_tokens, abs_tokens in get_pairs_from_lcsts(source_path):
-            # string
+    file_num = 0
+    length = 0
 
-            # Write to file
-            art_writter.write(" ".join(art_tokens)+"\n")
-            abs_writter.write(" ".join(abs_tokens)+"\n")
+    writer = open(out_file + "_" + str(file_num), 'w', 'utf-8')
 
-            # Write the vocab to file, if applicable
-            if makevocab:
-                abs_tokens = [
-                    t for t in abs_tokens if t not in [
-                        SENTENCE_START, SENTENCE_END]]
-                # remove these tags from vocab
-                tokens = art_tokens + abs_tokens
-                tokens = [t.strip() for t in tokens]  # strip
-                tokens = [t for t in tokens if t != ""]  # remove empty
-                vocab_counter.update(tokens)
+    for art_tokens, abs_tokens in get_pairs_from_lcsts(source_path):
+        # Write to file
+        if length >= max_length:
+            file_num += 1
+            writer.close()
+            writer = open(out_file + "_" + str(file_num), 'w', 'utf-8')
+            length = 0
+
+        writer.write(" ".join(art_tokens)+"\n")
+        writer.write(" ".join(abs_tokens)+"\n")
+        writer.write("\n")
+        length += 1
+
+        if length % (max_length / 10) == 0:
+            writer.flush()
+
+        # Write the vocab to file, if applicable
+        if makevocab:
+            abs_tokens = [
+                t for t in abs_tokens if t not in [
+                    SENTENCE_START, SENTENCE_END]]
+            # remove these tags from vocab
+            tokens = art_tokens + abs_tokens
+            tokens = [t.strip() for t in tokens]  # strip
+            tokens = [t for t in tokens if t != ""]  # remove empty
+            vocab_counter.update(tokens)
 
     # write vocab to file
     if makevocab:
@@ -169,18 +178,15 @@ if __name__ == '__main__':
     # files
     write_to_txt(
         source_dir+"PART_III.txt",
-        os.path.join(finished_files_dir, "test-art.txt"),
-        os.path.join(finished_files_dir, "test-abs.txt")
+        os.path.join(finished_files_dir, "test.txt")
     )
     write_to_txt(
         source_dir+"PART_II.txt",
-        os.path.join(finished_files_dir, "val-art.txt"),
-        os.path.join(finished_files_dir, "val-abs.txt")
+        os.path.join(finished_files_dir, "val.txt")
     )
     write_to_txt(
         source_dir+"PART_I.txt",
-        os.path.join(finished_files_dir, "train-art.txt"),
-        os.path.join(finished_files_dir, "train-abs.txt"),
+        os.path.join(finished_files_dir, "train.txt"),
     )
 
     # Chunk the data. This splits each of train.bin, val.bin and test.bin into
