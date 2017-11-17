@@ -11,11 +11,12 @@ import collections
 # from tensorflow.core.example import example_pb2
 import os.path
 from codecs import open
-import jieba as jb
 from cntk.tokenizer import JiebaTokenizer
 from cntk.constants.punctuation import Punctuation
+from cntk.standardizer import Standardizer
 import re
 tokenizer = JiebaTokenizer()
+standardizor = Standardizer()
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 
@@ -63,11 +64,16 @@ def fix_missing_period(line, segment):
     return line
 
 
-def get_pairs_from_lcsts(filePath):
+def process_line(line):
+    line = standardizor.set_sentence(line).standardize('all').digits().sentence
+    lst = tokenizer.sentence2words(line, punc=False)
+    return lst
+
+
+def get_pairs_from_lcsts(filePath, segment=True):
     """
     both should be segmented
     """
-    segment = False  # True
 
     # training set
     # f     = open('./dataset/LCSTS/PART_I/PART_full.txt', 'r')
@@ -80,13 +86,13 @@ def get_pairs_from_lcsts(filePath):
             summary = f.readline().strip()
             summary = fix_missing_period(summary)
             if segment:
-                summary = [w for w in jb.cut(summary)]
+                summary = process_line(summary)
 
             f.readline()
             f.readline()
             text = f.readline().strip()
             if segment:
-                text = [w for w in jb.cut(text)]
+                text = process_line(text)
 
             pair = (text, summary)
             yield pair
@@ -109,28 +115,8 @@ def write_to_txt(
     with open(
         art_out_file, 'wb', 'utf-8') as art_writter, open(
             abs_out_file, 'wb', 'utf-8') as abs_writter:
-        for article, abstract in get_pairs_from_lcsts(source_path):
+        for art_tokens, abs_tokens in get_pairs_from_lcsts(source_path):
             # string
-
-            if segment:
-                article = tokenizer.sentence2words(article)
-                # unicode
-                abstract = tokenizer.sentence2words(abstract)
-                article = map(
-                    lambda x: "*" if re.match('[0-9.]+', x) else x, article)
-                abstract = map(
-                    lambda x: "*" if re.match('[0-9.]+', x) else x, abstract)
-                # if re.match('[0-9.]+', art):
-            else:
-                article = list(re.sub('[0-9.]+', '*', article))
-                abstract = list(re.sub('[0-9.]+', '*', abstract))
-
-            art_tokens = [
-                art.replace(" ", "").strip()
-                for art in article if len(art.strip()) > 0]
-            abs_tokens = [
-                abst.replace(" ", "").strip()
-                for abst in abstract if len(abst.strip()) > 0]
 
             # Write to file
             art_writter.write(" ".join(art_tokens)+"\n")
@@ -195,7 +181,6 @@ if __name__ == '__main__':
         source_dir+"PART_I.txt",
         os.path.join(finished_files_dir, "train-art.txt"),
         os.path.join(finished_files_dir, "train-abs.txt"),
-        makevocab=True
     )
 
     # Chunk the data. This splits each of train.bin, val.bin and test.bin into

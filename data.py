@@ -405,6 +405,7 @@ def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab,
 
     return: a two dimensional numpy array with the ids of the discriminator vocabulary
     """
+    # TODO: keep the [unk] and such words
     samples_ids = []
     samples_words = outputsids2words(gen_ids, gen_vocab, article_oovs)
     for sample_words in samples_words:
