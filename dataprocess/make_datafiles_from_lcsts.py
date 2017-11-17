@@ -52,18 +52,6 @@ def read_text_file(text_file):
     return lines
 
 
-def fix_missing_period(line, segment):
-    """Adds a period to a line that is missing a period"""
-    if re.search(END_TOKENS, line[-1]):
-        return line
-    # print line[-1]
-    if segment:
-        line = line + u" 。"
-    else:
-        line = line + u"。"
-    return line
-
-
 def process_line(line):
     line = standardizor.set_sentence(line).standardize('all').digits().sentence
     lst = tokenizer.sentence2words(line, punc=False)
@@ -84,7 +72,6 @@ def get_pairs_from_lcsts(filePath, segment=True):
     while line:
         if line == '<summary>':
             summary = f.readline().strip()
-            summary = fix_missing_period(summary)
             if segment:
                 summary = process_line(summary)
 
