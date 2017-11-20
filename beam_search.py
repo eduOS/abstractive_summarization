@@ -180,8 +180,12 @@ def run_beam_search(sess, model, vocab, batch):
                 dec_init_states=states, prev_coverage=prev_coverage
             )
 
-            print('batch %s, step %s topk_ids:' % (k, steps))
+            print("batch %s target_batch, step %s" % (k, steps))
+            print(batch.target_batch[k][steps])
+
+            print('topk_ids:')
             print(topk_ids)
+            print('probabilities:')
             print(topk_log_probs)
             time.sleep(0.2)
             # Extend each hypothesis and collect them all in all_hyps
