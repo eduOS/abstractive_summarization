@@ -62,7 +62,7 @@ class Example(object):
         stop_decoding = vocab.word2id(data.STOP_DECODING)
 
         # Process the article
-        article_words = article.split()
+        article_words = article.split()[1:]
         if len(article_words) > hps.max_enc_steps:
             article_words = article_words[:hps.max_enc_steps]
         # store the length after truncation but before padding
@@ -71,7 +71,7 @@ class Example(object):
         self.enc_input = [vocab.word2id(w) for w in article_words]
 
         # Process the abstract
-        abstract_words = abstract.split()  # list of strings
+        abstract_words = abstract.split()[1:]  # list of strings
         # list of word ids; OOVs are represented by the id for UNK token
         self.abs_ids = [vocab.word2id(w) for w in abstract_words]
 
@@ -365,11 +365,10 @@ class GenBatcher(object):
         """
         # If the batch queue is empty, print a warning
         if self._batch_queue.qsize() == 0:
-            tf.logging.warning(
-                'Bucket input queue is empty when calling next_batch. Bucket \
-                queue size: %i, Input queue size: %i',
-                self._batch_queue.qsize(),
-                self._example_queue.qsize())
+            print('Bucket input queue is empty when calling next_batch. Bucket \
+                    queue size: %i, Input queue size: %i' % (
+                        self._batch_queue.qsize(),
+                        self._example_queue.qsize()))
             if self._single_pass and self._finished_reading:
                 tf.logging.info("Finished reading dataset in single_pass mode.")
                 return None
@@ -447,16 +446,14 @@ class GenBatcher(object):
             time.sleep(60)
             for idx, t in enumerate(self._example_q_threads):
                 if not t.is_alive():  # if the thread is dead
-                    tf.logging.error(
-                        'Found example queue thread dead. Restarting.')
+                    print('Found example queue thread dead. Restarting.')
                     new_t = Thread(target=self.fill_example_queue)
                     self._example_q_threads[idx] = new_t
                     new_t.daemon = True
                     new_t.start()
             for idx, t in enumerate(self._batch_q_threads):
                 if not t.is_alive():  # if the thread is dead
-                    tf.logging.error(
-                        'Found batch queue thread dead. Restarting.')
+                    print('Found batch queue thread dead. Restarting.')
                     new_t = Thread(target=self.fill_batch_queue)
                     self._batch_q_threads[idx] = new_t
                     new_t.daemon = True
@@ -479,19 +476,16 @@ class GenBatcher(object):
             for ff in filelist:
                 f = open(ff, "r", 'utf-8')
                 while(True):
-                    article_text = f.readline()
-                    abstract_text = f.readline()
+                    article_text = f.readline().strip()
+                    abstract_text = f.readline().strip()
                     blank = f.readline().strip()
                     assert not blank, "source file may be wrong"
-                    if len(article_text) == 0:
-                        # See https://github.com/abisee/pointer-generator/issues/1
-                        tf.logging.warning(
-                            'Found an example with empty article text. Skipping it.')
+                    if article_text.startswith("ART: ") and abstract_text.startswith("ABS: "):
+                        yield (article_text, abstract_text)
                     elif len(article_text) == 0 and len(abstract_text) == 0:
-                        print("the file is finished")
                         break
                     else:
-                        yield (article_text, abstract_text)
+                        print('Found an example with empty article text. Skipping it.')
 
 
 def get_batch(self, data, batch_size, balance=False, put_back=True):

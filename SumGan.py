@@ -21,7 +21,7 @@ from data import Vocab
 PAD_TOKEN = "[PAD]"
 STOP_DECODING = '[STOP]'
 
-tf.logging.set_verbosity(tf.logging.ERROR)
+# tf.logging.set_verbosity(tf.logging.ERROR)
 tf.app.flags.DEFINE_string(
     'mode', 'train',
     'must be one of pretrain_gen/pretrain_dis/train_gan/decode')
