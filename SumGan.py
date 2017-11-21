@@ -147,7 +147,7 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
     hps = model.hps
     with sess_context_manager as sess:
         step = 0
-        print_gap = 10
+        print_gap = 300
         start_time = time.time()
         while True:  # repeats until interrupted
             batch = batcher.next_batch()
@@ -320,7 +320,8 @@ def main(argv):
     hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
     print("Building vocabulary for generator ...")
     gen_vocab = Vocab(os.path.join(hps_gen.data_path, 'gen_vocab'), hps_gen.gen_vocab_size)
-    gen_batcher = GenBatcher(hps_gen.data_path, gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
+    gen_batcher_train = GenBatcher(hps_gen.data_path, "train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
+    gen_batcher_val = GenBatcher(hps_gen.data_path, "val", gen_vocab, hps_gen, single_pass=False)
 
     if FLAGS.segment is not True:
         hps_gen = hps_gen._replace(max_enc_steps=110)
@@ -396,14 +397,14 @@ def main(argv):
     print("Setting supervisor...")
     sv = tf.train.Supervisor(
         logdir=FLAGS.train_dir, is_chief=True, saver=saver,
-        save_summaries_secs=60, save_model_secs=60)
+        save_summaries_secs=60*60, save_model_secs=60*30)
     summary_writer = sv.summary_writer
     print("Preparing or waiting for session...")
     sess = sv.prepare_or_wait_for_session(config=gen_utils.get_config())
 
     print("Creating beam search...")
     with tf.variable_scope("beam_search"), tf.device("/gpu:0"):
-        decoder = BeamSearchDecoder(saver, sess, generator, gen_batcher, gen_vocab)
+        decoder = BeamSearchDecoder(saver, sess, generator, gen_vocab)
 
     # initialize the embeddings at the begging of training
     ckpt = tf.train.get_checkpoint_state(hps_dis.train_dir)
@@ -413,7 +414,7 @@ def main(argv):
     # --------------- train generator ---------------
     if FLAGS.mode == "pretrain_gen":
         print('Going to pretrain the generator')
-        pretrain_generator(generator, gen_batcher, sess, summary_writer)
+        pretrain_generator(generator, gen_batcher_train, sess, summary_writer)
 
     # --------------- train discriminator -----------
     elif FLAGS.mode == "pretrain_dis":
@@ -432,7 +433,8 @@ def main(argv):
             # Train the generator for one step
             for it in range(hps_gan.gan_gen_iter):
                 # can this be self.batch in decoder?
-                source_batch, enc_states, enc_padding_mask, dec_in_state, best_samples = decoder.generate(True)
+                source_batch, enc_states, enc_padding_mask, dec_in_state, best_samples = decoder.generate(
+                    gen_batcher_train, include_start_token=True)
                 rewards = rollout.get_reward(
                     sess, gen_vocab, dis_vocab, source_batch, enc_states, source_batch.enc_padding_mask,
                     dec_in_state, best_samples, 16, discriminator)
@@ -454,20 +456,18 @@ def main(argv):
             # Test
             print('Going to test the generator.' % it)
             if hps_gan.i_gan % 5 == 0 or hps_gan.i_gan == hps_gan.gan_iter - 1:
-                source_batch, enc_states, dec_in_state, best_samples = decoder.generate()
+                source_batch, enc_states, dec_in_state, best_samples = decoder.generate(gen_batcher_val)
                 # the true abstract is source_batch.dec_batch
                 summary, test_loss, step = generator.run_eval_step(sess, source_batch)
                 buffer = 'step:\t' + str(step) + '\tloss:\t' + str(test_loss) + '\n'
+                # training would terminate here if the test loss is sound
                 print(buffer)
-
-            # Update roll-out parameters
-            # rollout.update_params()
 
             # Train the discriminator
             print('Going to train the discriminator.' % it)
             for _ in range(hps_gan.gan_dis_iter):
                 for _ in range(3):
-                    source_batch, enc_states, dec_in_state, samples_words = decoder.generate()
+                    source_batch, enc_states, dec_in_state, samples_words = decoder.generate(gen_batcher_train)
                     articles_oovs = source_batch.art_oovs if hps_gen.pointer_gen else None
 
                     samples_chars = gen_vocab2dis_vocab(
@@ -491,7 +491,8 @@ def main(argv):
 
     elif FLAGS.mode == "decode":
         print('Going to decode from the generator.')
-        decoder.decode()
+        decoder.decode(gen_batcher_train)
+        # decode for generating corpus for discriminator
 
 
 if __name__ == '__main__':

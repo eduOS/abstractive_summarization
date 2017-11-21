@@ -40,7 +40,7 @@ SECS_UNTIL_NEW_CKPT = 60  # max number of seconds before loading new checkpoint
 class BeamSearchDecoder(object):
     """Beam search decoder."""
 
-    def __init__(self, saver, sess, model, batcher, vocab):
+    def __init__(self, saver, sess, model, vocab):
         """Initialize decoder.
 
         Args:
@@ -50,7 +50,6 @@ class BeamSearchDecoder(object):
         """
         self._model = model
         # self._model.build_graph()
-        self._batcher = batcher
         self._vocab = vocab
         # we use this to load checkpoints for decoding
         self._sess = sess
@@ -90,9 +89,9 @@ class BeamSearchDecoder(object):
             if not os.path.exists(self._rouge_dec_dir):
                 os.mkdir(self._rouge_dec_dir)
 
-    def generate(self, include_start_token=False):
+    def generate(self, batcher, include_start_token=False):
         # the abstract should also be generated
-        batch = self._batcher.next_batch()
+        batch = batcher.next_batch()
         if batch is None:
             return
 
@@ -107,14 +106,14 @@ class BeamSearchDecoder(object):
             outputs_ids = [[int(t) for t in best_hyp.tokens[1:]] for best_hyp in best_hyps]
         return batch, enc_states, dec_in_state, outputs_ids
 
-    def decode(self):
+    def decode(self, batcher):
         """Decode examples until data is exhausted (if self._hps.single_pass) and
         return, or decode indefinitely, loading latest checkpoint at regular
         intervals"""
         t0 = time.time()
         counter = 0
         while True:
-            batch = self._batcher.next_batch()
+            batch = batcher.next_batch()
             # 1 example repeated across batch
             if batch is None:
                 # finished decoding dataset in single_pass mode

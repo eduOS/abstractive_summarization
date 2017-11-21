@@ -289,7 +289,7 @@ class GenBatcher(object):
 
     BATCH_QUEUE_MAX = 100  # max number of batches the batch_queue can hold
 
-    def __init__(self, data_path, vocab, hps, single_pass):
+    def __init__(self, data_path, mode, vocab, hps, single_pass):
         """Initialize the batcher. Start threads that process the data into
         batches.
 
@@ -304,11 +304,6 @@ class GenBatcher(object):
         self._vocab = vocab
         self._hps = hps
         self._single_pass = single_pass
-        mode = "train"
-        if "val" in hps.mode:
-            mode = "val"
-        elif "decode":
-            pass
         self._data_path = os.path.join(data_path, mode) + "*"
 
         # Initialize a queue of Batches waiting to be used, and a queue of
@@ -493,6 +488,7 @@ class GenBatcher(object):
                         tf.logging.warning(
                             'Found an example with empty article text. Skipping it.')
                     elif len(article_text) == 0 and len(abstract_text) == 0:
+                        print("the file is finished")
                         break
                     else:
                         yield (article_text, abstract_text)
