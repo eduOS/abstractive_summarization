@@ -1,3 +1,6 @@
+from __future__ import unicode_literals, print_function
+from __future__ import absolute_import
+from __future__ import division
 import tensorflow as tf
 from collections import namedtuple
 import numpy as np
@@ -397,7 +400,6 @@ def main(argv):
     summary_writer = sv.summary_writer
     print("Preparing or waiting for session...")
     sess = sv.prepare_or_wait_for_session(config=gen_utils.get_config())
-    tf.summary.FileWriter("./log", sess.graph)
 
     print("Creating beam search...")
     with tf.variable_scope("beam_search"), tf.device("/gpu:0"):

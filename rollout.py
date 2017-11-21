@@ -1,3 +1,6 @@
+from __future__ import unicode_literals, print_function
+from __future__ import absolute_import
+from __future__ import division
 import tensorflow as tf
 from tensorflow.python.ops import tensor_array_ops, control_flow_ops
 from tensorflow.python.ops import variable_scope

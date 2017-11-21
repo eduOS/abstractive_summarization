@@ -16,6 +16,9 @@
 
 """This file contains code to build and run the tensorflow graph for the
 sequence-to-sequence model"""
+from __future__ import unicode_literals, print_function
+from __future__ import absolute_import
+from __future__ import division
 
 import os
 import sys
@@ -47,7 +50,7 @@ class PointerGenerator(object):
         # encoder part
         self.enc_batch = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch')
         self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
-        self.enc_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, None], name='enc_padding_mask')
+        self.enc_padding_mask = tf.placeholder(tf.float32, [batch_size, None], name='enc_padding_mask')
         if FLAGS.pointer_gen:
             self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch_extend_vocab')
             self.max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')

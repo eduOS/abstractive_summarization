@@ -15,6 +15,9 @@
 # ==============================================================================
 
 """This file contains code to run beam search decoding"""
+from __future__ import unicode_literals, print_function
+from __future__ import absolute_import
+from __future__ import division
 
 import tensorflow as tf
 import numpy as np
@@ -161,7 +164,7 @@ def run_beam_search(sess, model, vocab, batch):
             # UNKNOWN_TOKEN will be replaced with a placeholder
             enc_batch_extend_vocab = np.tile(batch.enc_batch_extend_vocab[k], (beam_size, 1))
             # max_art_oovs = np.tile(batch.max_art_oovs[k], (beam_size, 1))
-            enc_states_ = np.tile(enc_states[k], (beam_size, 1))
+            enc_states_ = np.tile(enc_states[k], (beam_size, 1, 1))
             enc_padding_mask = np.tile(batch.enc_padding_mask[k], (beam_size, 1))
             # list of current decoder states of the hypotheses
             states = [h.state for h in hyps]

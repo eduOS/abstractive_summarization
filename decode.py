@@ -17,6 +17,9 @@
 """This file contains code to run beam search decoding, including running ROUGE
 evaluation and producing JSON datafiles for the in-browser attention visualizer,
 which can be found here https://github.com/abisee/attn_vis"""
+from __future__ import unicode_literals, print_function
+from __future__ import absolute_import
+from __future__ import division
 
 import os
 import time
@@ -24,6 +27,7 @@ import tensorflow as tf
 import beam_search
 import data
 import json
+from codecs import open
 # import pyrouge
 import gen_utils
 import logging
@@ -140,7 +144,7 @@ class BeamSearchDecoder(object):
                                                     (art_oovs if self._hps.pointer_gen else None))
 
             # Run beam search to get best Hypothesis
-            _, _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+            _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
             # is the beam_size here 1?
             outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps]
             print('the length of each generated sample')
@@ -190,11 +194,11 @@ class BeamSearchDecoder(object):
 
     def write_for_discriminator(self, artcls, reference_sents, decoded_outputs):
         for artc, refe, hypo in zip(artcls, reference_sents, decoded_outputs):
-            with open(os.path.join(self._hps.data_path, self._hps.mode + "_negative"), "a") as f:
+            with open(os.path.join(self._hps.data_path, self._hps.mode + "_negative"), "a", 'utf-8') as f:
                 f.write(hypo+"\n")
-            with open(os.path.join(self._hps.data_path, self._hps.mode + "_positive"), "a") as f:
+            with open(os.path.join(self._hps.data_path, self._hps.mode + "_positive"), "a", 'utf-8') as f:
                 f.write(refe+"\n")
-            with open(os.path.join(self._hps.data_path, self._hps.mode + "_source"), "a") as f:
+            with open(os.path.join(self._hps.data_path, self._hps.mode + "_source"), "a", 'utf-8') as f:
                 f.write(artc+"\n")
 
     def write_for_rouge(self, artcls, original_abstracts, decoded_outputs, ex_index):
@@ -224,13 +228,14 @@ class BeamSearchDecoder(object):
             self._decode_dir,
             "overview.txt")
 
-        with open(ref_file, "a") as f:
+        with open(ref_file, "a", 'utf-8') as f:
             for idx, sent in enumerate(reference_sents):
                 f.write(sent+"\n")
-        with open(decoded_file, "a") as f:
+        with open(decoded_file, "a", 'utf-8') as f:
             for idx, sent in enumerate(decoded_sents):
+                print(sent)
                 f.write(sent+"\n")
-        with open(overview_file, "a") as f:
+        with open(overview_file, "a", 'utf-8') as f:
             for artc, refe, hypo in zip(artcls, reference_sents, decoded_sents):
                 f.write("article: "+artc+"\n")
                 f.write("reference: "+refe+"\n")
@@ -264,7 +269,7 @@ class BeamSearchDecoder(object):
         if self._hps.pointer_gen:
             to_write['p_gens'] = p_gens
         output_fname = os.path.join(self._decode_dir, 'attn_vis_data.json')
-        with open(output_fname, 'w') as output_file:
+        with open(output_fname, 'w', 'utf-8') as output_file:
             json.dump(to_write, output_file)
         tf.logging.info('Wrote visualization data to %s', output_fname)
 
@@ -323,7 +328,7 @@ def rouge_log(results_dict, dir_to_write):
     tf.logging.info(log_str)  # log to screen
     results_file = os.path.join(dir_to_write, "ROUGE_results.txt")
     tf.logging.info("Writing final ROUGE results to %s...", results_file)
-    with open(results_file, "w") as f:
+    with open(results_file, "w", 'utf-8') as f:
         f.write(log_str)
 
 
