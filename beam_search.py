@@ -24,6 +24,7 @@ import numpy as np
 import data
 from six.moves import xrange
 import time
+import sys
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -182,15 +183,11 @@ def run_beam_search(sess, model, vocab, batch):
                 enc_states=enc_states_, enc_padding_mask=enc_padding_mask,
                 dec_init_states=states, prev_coverage=prev_coverage
             )
+            # the attn_dists seems wrong, they are all the same
 
-            print("batch %s target_batch, step %s" % (k, steps))
-            print(batch.target_batch[k][steps])
-
-            print('topk_ids:')
-            print(topk_ids)
-            # print('probabilities:')
-            # print(topk_log_probs)
-            # time.sleep(0.2)
+            print(p_gens)
+            print(latest_tokens)
+            time.sleep(10)
             # Extend each hypothesis and collect them all in all_hyps
             all_hyps = []
             # On the first step, we only had one original hypothesis (the initial

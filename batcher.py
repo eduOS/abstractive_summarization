@@ -101,9 +101,9 @@ class Example(object):
                 start_decoding,
                 stop_decoding)
 
-        # Store the original strings
-        self.original_article = article
-        self.original_abstract = abstract
+        # Store the original strings ART:
+        self.original_article = article[5:]
+        self.original_abstract = abstract[5:]
         # self.original_abstract_sents = abstract_sentences
 
     def get_dec_inp_targ_seqs(self, sequence, max_len, start_id, stop_id):

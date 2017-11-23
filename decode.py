@@ -146,9 +146,6 @@ class BeamSearchDecoder(object):
             _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
             # is the beam_size here 1?
             outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps]
-            for output_ids in outputs_ids:
-                print(output_ids)
-                time.sleep(2)
 
             decoded_words_list = data.outputsids2words(
                 outputs_ids, self._vocab, (art_oovs if self._hps.pointer_gen else None))
@@ -232,7 +229,6 @@ class BeamSearchDecoder(object):
                 f.write(sent+"\n")
         with open(decoded_file, "a", 'utf-8') as f:
             for idx, sent in enumerate(decoded_sents):
-                print(sent)
                 f.write(sent+"\n")
         with open(overview_file, "a", 'utf-8') as f:
             for artc, refe, hypo in zip(artcls, reference_sents, decoded_sents):

@@ -6,6 +6,7 @@ from collections import namedtuple
 import numpy as np
 import sys
 import os
+import datetime
 import gen_utils
 import time
 import re
@@ -169,7 +170,7 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
             if step % print_gap == 0:
                 current_time = time.time()
                 print(
-                  "\nDashboard until the step:\t%s\n"
+                  "\nDashboard updated %s, finished steps:\t%s\n"
                   "\tBatch size:\t%s\n"
                   "\tVocabulary size:\t%s\n"
                   "\tArticles trained:\t%s\n"
@@ -177,6 +178,7 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
                   "\tCurrent speed:\t%s seconds/article\n"
                   "\tLoss:\t%s;"
                   "\tand coverage loss:\t%s\n" % (
+                    datetime.datetime.now().strftime("on %m-%d at %H:%M"),
                     step,
                     hps.batch_size,
                     hps.gen_vocab_size,
