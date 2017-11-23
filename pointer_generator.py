@@ -26,7 +26,7 @@ import time
 import numpy as np
 import tensorflow as tf
 from attention_decoder import attention_decoder
-from share_function import tableLookup
+# from share_function import tableLookup
 from tensorflow.contrib.tensorboard.plugins import projector
 from six.moves import xrange
 
@@ -308,17 +308,17 @@ class PointerGenerator(object):
         """Add the whole sequence-to-sequence model to the graph."""
         hps = self.hps
 
-        self.embeddings = tableLookup(self._vocab.size(), self.hps.emb_dim, scope='vocabtable')
-
         with tf.variable_scope('seq2seq'):
             # Some initializers
             self.rand_unif_init = tf.random_uniform_initializer(
                 -hps.rand_unif_init_mag, hps.rand_unif_init_mag, seed=123)
             self.trunc_norm_init = tf.truncated_normal_initializer(stddev=hps.trunc_norm_init_std)
 
-            emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
-            emb_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
-                              for x in tf.unstack(self._dec_batch, axis=1)]
+            with tf.variable_scope('embeddings'):
+                self.embeddings = tf.get_variable('embeddings', [self._vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+                emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
+                emb_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
+                                  for x in tf.unstack(self._dec_batch, axis=1)]
 
             # Add the encoder.
             enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
@@ -395,9 +395,9 @@ class PointerGenerator(object):
         if len(emb_dec_inputs) == 1:
             # what is dimention of embe_dec_inputs while decoding?
             assert len(final_dists) == 1
-            final_dists = final_dists[0]
+            self.final_dists = final_dists[0]
             topk_probs, self._topk_ids = tf.nn.top_k(
-                final_dists, hps.beam_size * 2)
+                self.final_dists, hps.beam_size * 2)
             self._topk_log_probs = tf.log(topk_probs)
         # note batch_size=beam_size in decode mode
 
@@ -633,6 +633,7 @@ class PointerGenerator(object):
           "probs": self._topk_log_probs,
           "states": self._dec_out_state,
           "attn_dists": self.attn_dists,
+          "final_dists": self.final_dists,
         }
 
         if FLAGS.pointer_gen:
@@ -672,7 +673,7 @@ class PointerGenerator(object):
         else:
             new_coverage = [None for _ in xrange(FLAGS.beam_size)]
 
-        return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
+        return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage, results["final_dists"]
 
     def g_optimizer(self, *args, **kwargs):
         return tf.train.AdamOptimizer(*args, **kwargs)

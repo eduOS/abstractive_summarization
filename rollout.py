@@ -15,7 +15,7 @@ class Rollout(object):
         self.generator = generator
         self.update_rate = update_rate
         self._gen_hps = self.generator.hps
-        self.g_embeddings = self.generator.embeddings
+        self.g_embeddings = tf.identity(self.generator.embeddings)
 
         #######################################################################
         # placeholder definition
