@@ -27,7 +27,7 @@ tf.app.flags.DEFINE_string(
     'mode', 'train',
     'must be one of pretrain_gen/pretrain_dis/train_gan/decode')
 # ------------------------------------- common
-tf.app.flags.DEFINE_integer("batch_size", 64, "Batch size to use during training.")
+tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training.")
 
 # ------------------------------------- discriminator
 

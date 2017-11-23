@@ -127,7 +127,8 @@ def run_beam_search(sess, model, vocab, batch):
     # enc_states has shape [batch_size, <=max_enc_steps, 2*hidden_dim].
     enc_states, dec_in_state = model.run_encoder(sess, batch)
     # enc_states and dec_in_state should be scaled to match the latter setting
-    target = batch.target_batch
+    greedy_decoder(sess, model, batch, enc_states, dec_in_state)
+    sys.exit(1)
 
     best_hyps = []
     batch_hyps = []
@@ -151,6 +152,9 @@ def run_beam_search(sess, model, vocab, batch):
     # this can be optimized into multithread
     for k in xrange(batch_size):
         hyps = batch_hyps[k]
+        enc_batch_extend_vocab = np.tile(batch.enc_batch_extend_vocab[k], (beam_size, 1))
+        enc_padding_mask = np.tile(batch.enc_padding_mask[k], (beam_size, 1))
+        enc_states_ = np.tile(enc_states[k], (beam_size, 1, 1))
         results = []
         steps = 0
 
@@ -165,10 +169,7 @@ def run_beam_search(sess, model, vocab, batch):
                 for t in latest_tokens]
             latest_tokens = np.transpose(np.array([latest_tokens]))
             # UNKNOWN_TOKEN will be replaced with a placeholder
-            enc_batch_extend_vocab = np.tile(batch.enc_batch_extend_vocab[k], (beam_size, 1))
             # max_art_oovs = np.tile(batch.max_art_oovs[k], (beam_size, 1))
-            enc_states_ = np.tile(enc_states[k], (beam_size, 1, 1))
-            enc_padding_mask = np.tile(batch.enc_padding_mask[k], (beam_size, 1))
             # list of current decoder states of the hypotheses
             states = [h.state for h in hyps]
             # list of coverage vectors (or None)
