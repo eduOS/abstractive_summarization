@@ -26,7 +26,7 @@ import time
 import numpy as np
 import tensorflow as tf
 from attention_decoder import attention_decoder
-# from share_function import tableLookup
+from share_function import tableLookup
 from tensorflow.contrib.tensorboard.plugins import projector
 from six.moves import xrange
 
@@ -308,17 +308,17 @@ class PointerGenerator(object):
         """Add the whole sequence-to-sequence model to the graph."""
         hps = self.hps
 
+        self.embeddings = tableLookup(self._vocab.size(), self.hps.emb_dim, scope='vocabtable')
+
         with tf.variable_scope('seq2seq'):
             # Some initializers
             self.rand_unif_init = tf.random_uniform_initializer(
                 -hps.rand_unif_init_mag, hps.rand_unif_init_mag, seed=123)
             self.trunc_norm_init = tf.truncated_normal_initializer(stddev=hps.trunc_norm_init_std)
 
-            with tf.variable_scope('embeddings'):
-                self.embeddings = tf.get_variable('embeddings', [self._vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
-                emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
-                emb_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
-                                  for x in tf.unstack(self._dec_batch, axis=1)]
+            emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
+            emb_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
+                              for x in tf.unstack(self._dec_batch, axis=1)]
 
             # Add the encoder.
             enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
@@ -395,9 +395,9 @@ class PointerGenerator(object):
         if len(emb_dec_inputs) == 1:
             # what is dimention of embe_dec_inputs while decoding?
             assert len(final_dists) == 1
-            self.final_dists = final_dists[0]
+            final_dists = final_dists[0]
             topk_probs, self._topk_ids = tf.nn.top_k(
-                self.final_dists, hps.beam_size * 2)
+                final_dists, hps.beam_size * 2)
             self._topk_log_probs = tf.log(topk_probs)
         # note batch_size=beam_size in decode mode
 
@@ -613,18 +613,10 @@ class PointerGenerator(object):
           of None if coverage is not turned on.
         """
 
-        # Turn dec_init_states (a list of LSTMStateTuples) into a single
-        # LSTMStateTuple for the batch
-        cells = [np.expand_dims(state.c, axis=0) for state in dec_init_states]
-        hiddens = [np.expand_dims(state.h, axis=0) for state in dec_init_states]
-        new_c = np.concatenate(cells, axis=0)  # shape [batch_size,hidden_dim]
-        new_h = np.concatenate(hiddens, axis=0)  # shape [batch_size,hidden_dim]
-        new_dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
-
         feed = {
             self.enc_states: enc_states,
             self.enc_padding_mask: enc_padding_mask,
-            self.dec_in_state: new_dec_in_state,
+            self.dec_in_state: dec_init_states,
             self._dec_batch: latest_tokens,
         }
 
@@ -633,7 +625,6 @@ class PointerGenerator(object):
           "probs": self._topk_log_probs,
           "states": self._dec_out_state,
           "attn_dists": self.attn_dists,
-          "final_dists": self.final_dists,
         }
 
         if FLAGS.pointer_gen:
@@ -649,10 +640,6 @@ class PointerGenerator(object):
 
         # Convert results['states'] (a single LSTMStateTuple) into a list of
         # LSTMStateTuple -- one for each hypothesis
-        new_states = [
-            tf.contrib.rnn.LSTMStateTuple(
-                results['states'].c[i, :], results['states'].h[i, :])
-            for i in xrange(FLAGS.beam_size)]
 
         # Convert singleton list containing a tensor to a list of k arrays
         assert len(results['attn_dists']) == 1
@@ -673,7 +660,7 @@ class PointerGenerator(object):
         else:
             new_coverage = [None for _ in xrange(FLAGS.beam_size)]
 
-        return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage, results["final_dists"]
+        return results['ids'], results['probs'], results['states'], attn_dists, p_gens, new_coverage
 
     def g_optimizer(self, *args, **kwargs):
         return tf.train.AdamOptimizer(*args, **kwargs)

@@ -84,7 +84,7 @@ class Vocab(object):
                     print("max_size of vocab was specified as %i; we now have %i words. Stopping reading." % (max_size, len(self._word_to_id)))
                     break
 
-        print("Finished constructing vocabulary of %i total words. Last word added: %s" % (max_size, self._id_to_word[max_size-1]))
+        # print("Finished constructing vocabulary of %i total words. Last word added: %s" % (max_size, self._id_to_word[max_size-1]))
 
     def word2id(self, word):
         """Returns the id (integer) of a word (string). Returns [UNK] id if word
