@@ -673,7 +673,7 @@ class PointerGenerator(object):
         else:
             new_coverage = [None for _ in xrange(FLAGS.beam_size)]
 
-        return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage, results["final_dists"]
+        return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
 
     def g_optimizer(self, *args, **kwargs):
         return tf.train.AdamOptimizer(*args, **kwargs)

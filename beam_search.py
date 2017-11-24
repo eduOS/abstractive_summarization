@@ -23,7 +23,6 @@ import tensorflow as tf
 import numpy as np
 import data
 from six.moves import xrange
-import sys
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -100,37 +99,6 @@ class Hypothesis(object):
         return self.log_prob / len(self.tokens)
 
 
-def run_greedy_search(sess, model, vocab, batch):
-    enc_states, dec_in_state = model.run_encoder(sess, batch)
-    latest_tokens = [vocab.word2id(data.START_DECODING)]*FLAGS.batch_size
-    latest_tokens = np.transpose(np.array([latest_tokens]))
-    steps = 0
-    greedy_outcome = []
-    prev_coverage = np.zeros([batch.enc_batch.shape[1]])
-    print("MARK")
-    while(steps < FLAGS.max_dec_steps):
-        (
-            topk_ids, topk_log_probs, new_states,
-            attn_dists, p_gens, prev_coverage
-        ) = model.run_decode_onestep(
-            sess=sess, enc_batch_extend_vocab=np.array(batch.enc_batch_extend_vocab),
-            max_art_oovs=batch.max_art_oovs, latest_tokens=latest_tokens,
-            enc_states=enc_states, enc_padding_mask=np.array(batch.enc_padding_mask),
-            dec_init_states=dec_in_state, prev_coverage=prev_coverage,
-        )
-        print(new_states.c.shape)
-        print(new_states.h.shape)
-        latest_tokens = [t if t in range(vocab.size()) else vocab.word2id(data.UNKNOWN_TOKEN) for t in topk_ids[:, 0].tolist()]
-        latest_tokens = np.transpose(np.array([latest_tokens]))
-        greedy_outcome.append([vocab.id2word(i) for i in topk_ids[:, 0].tolist()])
-        dec_in_state = new_states
-        steps += 1
-
-    with open("tem.txt", 'w', "utf-8") as f:
-        for ok in greedy_outcome:
-            f.write(" ".join(ok) + "\n")
-
-
 def run_beam_search(sess, model, vocab, batch):
     """ For the GAN
     Performs beam search decoding on the given example.
@@ -156,8 +124,6 @@ def run_beam_search(sess, model, vocab, batch):
     # enc_states has shape [batch_size, <=max_enc_steps, 2*hidden_dim].
     enc_states, dec_in_state = model.run_encoder(sess, batch)
     # enc_states and dec_in_state should be scaled to match the latter setting
-    greedy_decoder(sess, model, batch, enc_states, dec_in_state)
-    sys.exit(1)
 
     best_hyps = []
     batch_hyps = []
@@ -208,7 +174,7 @@ def run_beam_search(sess, model, vocab, batch):
             # in decoding or in gan
             (
                 topk_ids, topk_log_probs, new_states,
-                attn_dists, p_gens, new_coverage, final_dists
+                attn_dists, p_gens, new_coverage
             ) = model.run_decode_onestep(
                 sess=sess, enc_batch_extend_vocab=enc_batch_extend_vocab,
                 max_art_oovs=batch.max_art_oovs, latest_tokens=latest_tokens,
