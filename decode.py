@@ -28,6 +28,7 @@ import beam_search
 import data
 import json
 from codecs import open
+import sys
 # import pyrouge
 import gen_utils
 import logging
