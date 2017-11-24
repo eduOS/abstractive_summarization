@@ -615,16 +615,11 @@ class PointerGenerator(object):
 
         # Turn dec_init_states (a list of LSTMStateTuples) into a single
         # LSTMStateTuple for the batch
-        cells = [np.expand_dims(state.c, axis=0) for state in dec_init_states]
-        hiddens = [np.expand_dims(state.h, axis=0) for state in dec_init_states]
-        new_c = np.concatenate(cells, axis=0)  # shape [batch_size,hidden_dim]
-        new_h = np.concatenate(hiddens, axis=0)  # shape [batch_size,hidden_dim]
-        new_dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
 
         feed = {
             self.enc_states: enc_states,
             self.enc_padding_mask: enc_padding_mask,
-            self.dec_in_state: new_dec_in_state,
+            self.dec_in_state: dec_init_states,
             self._dec_batch: latest_tokens,
         }
 
@@ -649,10 +644,6 @@ class PointerGenerator(object):
 
         # Convert results['states'] (a single LSTMStateTuple) into a list of
         # LSTMStateTuple -- one for each hypothesis
-        new_states = [
-            tf.contrib.rnn.LSTMStateTuple(
-                results['states'].c[i, :], results['states'].h[i, :])
-            for i in xrange(FLAGS.beam_size)]
 
         # Convert singleton list containing a tensor to a list of k arrays
         assert len(results['attn_dists']) == 1
@@ -673,7 +664,7 @@ class PointerGenerator(object):
         else:
             new_coverage = [None for _ in xrange(FLAGS.beam_size)]
 
-        return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage, results["final_dists"]
+        return results['ids'], results['probs'], results['states'], attn_dists, p_gens, new_coverage, results["final_dists"]
 
     def g_optimizer(self, *args, **kwargs):
         return tf.train.AdamOptimizer(*args, **kwargs)

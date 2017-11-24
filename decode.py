@@ -144,6 +144,8 @@ class BeamSearchDecoder(object):
                                                     (art_oovs if self._hps.pointer_gen else None))
 
             # Run beam search to get best Hypothesis
+            beam_search.run_greedy_search(self._sess, self._model, self._vocab, batch)
+            sys.exit(1)
             _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
             # is the beam_size here 1?
             outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps]
