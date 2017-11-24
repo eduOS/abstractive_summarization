@@ -19,6 +19,8 @@ from data import gen_vocab2dis_vocab
 
 from res_discriminator import Seq2ClassModel
 from data import Vocab
+from tensorflow.python import debug as tf_debug
+
 PAD_TOKEN = "[PAD]"
 STOP_DECODING = '[STOP]'
 
@@ -147,6 +149,7 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
     coverage_loss = None
     hps = model.hps
     with sess_context_manager as sess:
+        sess = tf_debug.LocalCLIDebugWrapperSession(sess, ui_type="readline")
         step = 0
         print_gap = 300
         start_time = time.time()
