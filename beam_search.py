@@ -118,8 +118,6 @@ def run_greedy_search(sess, model, vocab, batch):
             enc_states=enc_states, enc_padding_mask=np.array(batch.enc_padding_mask),
             dec_init_states=dec_in_state, prev_coverage=prev_coverage,
         )
-        print(new_states.c.shape)
-        print(new_states.h.shape)
         latest_tokens = [t if t in range(vocab.size()) else vocab.word2id(data.UNKNOWN_TOKEN) for t in topk_ids[:, 0].tolist()]
         latest_tokens = np.transpose(np.array([latest_tokens]))
         greedy_outcome.append([vocab.id2word(i) for i in topk_ids[:, 0].tolist()])
