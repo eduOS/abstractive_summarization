@@ -23,7 +23,7 @@ import tensorflow as tf
 import numpy as np
 import data
 from six.moves import xrange
-import sys
+from codecs import open
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -156,8 +156,6 @@ def run_beam_search(sess, model, vocab, batch):
     # enc_states has shape [batch_size, <=max_enc_steps, 2*hidden_dim].
     enc_states, dec_in_state = model.run_encoder(sess, batch)
     # enc_states and dec_in_state should be scaled to match the latter setting
-    greedy_decoder(sess, model, batch, enc_states, dec_in_state)
-    sys.exit(1)
 
     best_hyps = []
     batch_hyps = []
@@ -208,7 +206,7 @@ def run_beam_search(sess, model, vocab, batch):
             # in decoding or in gan
             (
                 topk_ids, topk_log_probs, new_states,
-                attn_dists, p_gens, new_coverage, final_dists
+                attn_dists, p_gens, new_coverage
             ) = model.run_decode_onestep(
                 sess=sess, enc_batch_extend_vocab=enc_batch_extend_vocab,
                 max_art_oovs=batch.max_art_oovs, latest_tokens=latest_tokens,
