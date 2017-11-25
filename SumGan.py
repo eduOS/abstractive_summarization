@@ -391,9 +391,9 @@ def main(argv):
     hps_gan = namedtuple("HParams4GAN", hps_dict.keys())(**hps_dict)
     hps_gan = hps_gan._replace(mode="gan")
     print("Preparing rollout...")
-    with tf.variable_scope("ROLLOUT"), tf.device("/gpu:0"):
-        print("Creating rollout...")
-        rollout = Rollout(generator, 0.8)
+    # with tf.variable_scope("ROLLOUT"), tf.device("/gpu:0"):
+    #     print("Creating rollout...")
+    #     rollout = Rollout(generator, 0.8)
 
     saver = tf.train.Saver()
     print("Setting supervisor...")

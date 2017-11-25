@@ -322,47 +322,22 @@ class PointerGenerator(object):
 
             # Add the encoder.
             enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
-            # encoder_outputs: [batch_size * beam_size, max_time, num_hidden*2]
-            # fw_st & bw_st: [batch_size * beam_size, num_hidden]
-            # those in the encoder should also be updated
             self.enc_states = enc_outputs
-            # this is for the decode-one-step process: beam search and rollout
-            # this don't need a
-
-            # Our encoder is bidirectional and our decoder is unidirectional so
-            # we need to reduce the final encoder hidden state to the right size
-            # to be the initial decoder hidden state
             self.dec_in_state = self._reduce_states(fw_st, bw_st)
-            # tf.contrib.rnn.LSTMStateTuple(
-            # [batch_size * beam_size, hidden_dim], [batch_size * beam_size, hidden_dim])
-            # a lstm tuple with each item being: [batch_size * beam_size, hidden_dim]
-            # where is the batch size
-
-            self.attn_dists, self.p_gens, self.coverage, vocab_scores, \
-                final_dists, self._dec_out_state = self.decode(emb_dec_inputs, self.dec_in_state)
+            with tf.variable_scope('decoder'):
+                self.attn_dists, self.p_gens, self.coverage, vocab_scores, \
+                    final_dists, self._dec_out_state = self.decode(emb_dec_inputs, self.dec_in_state)
 
             # Calculate the loss
             with tf.variable_scope('train_loss'):
                 if FLAGS.pointer_gen:  # calculate loss from log_dists
-                    # Calculate the loss per step This is fiddly; we use
-                    # tf.gather_nd to pick out the log probabilities of the
-                    # target words will be list length max_dec_steps containing
-                    # shape (batch_size)
                     loss_per_step = []
                     batch_nums = tf.range(0, tf.shape(emb_dec_inputs[0])[0])
-                    # shape (batch_size)
                     for dec_step, dist in enumerate(final_dists):
-                        # The indices of the target words. shape
-                        # (batch_size)
                         targets = self._target_batch[:, dec_step]
                         indices = tf.stack((batch_nums, targets), axis=1)
-                        # why stack a batch_nums?
-                        # shape (batch_size, 2)
-                        # shape (batch_size). loss on this step for each
-                        # batch
                         gold_probs = tf.gather_nd(dist, indices)
                         losses = -tf.log(gold_probs)
-                        # amazing!
                         loss_per_step.append(losses)
 
                     # Apply padding_mask mask and get loss
@@ -373,11 +348,8 @@ class PointerGenerator(object):
                         tf.stack(vocab_scores, axis=1), self._target_batch,
                         self._padding_mask, average_across_timesteps=True,
                         average_across_batch=True)
-                    # set both batch and timesteps as true to compare it with
-                    # the loss
 
                 tf.summary.scalar('loss', self._loss)
-
                 # Calculate coverage loss from the attention distributions
                 if hps.coverage:
                     with tf.variable_scope('coverage_loss'):
@@ -577,7 +549,8 @@ class PointerGenerator(object):
             the embedded input
         """
         # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
-        _, _, _, _, final_dists, new_states = self.decode(emb_dec_inputs, dec_in_state)
+        with tf.variable_scope('decoder'):
+            _, _, _, _, final_dists, new_states = self.decode(emb_dec_inputs, dec_in_state)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         output_id = tf.squeeze(tf.cast(tf.multinomial(final_dists[0], 1), tf.int32))
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
