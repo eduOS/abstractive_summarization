@@ -17,6 +17,10 @@
 """This file contains code to read the train/eval/test data from file and
 process it, and read the vocab data from file and process it"""
 
+from __future__ import unicode_literals, print_function
+from __future__ import absolute_import
+from __future__ import division
+
 import csv
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -84,7 +88,7 @@ class Vocab(object):
                     print("max_size of vocab was specified as %i; we now have %i words. Stopping reading." % (max_size, len(self._word_to_id)))
                     break
 
-        print("Finished constructing vocabulary of %i total words. Last word added: %s" % (max_size, self._id_to_word[max_size-1]))
+        # print("Finished constructing vocabulary of %i total words. Last word added: %s" % (max_size, self._id_to_word[max_size-1]))
 
     def word2id(self, word):
         """Returns the id (integer) of a word (string). Returns [UNK] id if word

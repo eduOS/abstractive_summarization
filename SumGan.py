@@ -394,6 +394,7 @@ def main(argv):
     # with tf.variable_scope("ROLLOUT"), tf.device("/gpu:0"):
     #     print("Creating rollout...")
     #     rollout = Rollout(generator, 0.8)
+    # this is about the variable sharing conflicts
 
     saver = tf.train.Saver()
     print("Setting supervisor...")

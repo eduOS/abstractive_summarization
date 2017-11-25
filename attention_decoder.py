@@ -15,6 +15,10 @@
 # ==============================================================================
 
 """This file defines the decoder"""
+from __future__ import unicode_literals, print_function
+from __future__ import absolute_import
+from __future__ import division
+
 
 import tensorflow as tf
 from tensorflow.python.ops import variable_scope
