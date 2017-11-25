@@ -315,7 +315,8 @@ class PointerGenerator(object):
             self.trunc_norm_init = tf.truncated_normal_initializer(stddev=hps.trunc_norm_init_std)
 
             with tf.variable_scope('embeddings'):
-                self.embeddings = tf.get_variable('embeddings', [self._vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+                self.embeddings = tf.get_variable(
+                    'embeddings', [self._vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
                 emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
                 emb_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
                                   for x in tf.unstack(self._dec_batch, axis=1)]
@@ -481,6 +482,8 @@ class PointerGenerator(object):
     def run_train_step(self, sess, batch):
         """Runs one training iteration. Returns a dictionary containing train
         op, summaries, loss, global_step and (optionally) coverage loss."""
+        print(batch.dec_batch)
+        print(batch.target_batch)
         feed_dict = self._make_feed_dict(batch)
         to_return = {
             'train_op': self._train_op,
