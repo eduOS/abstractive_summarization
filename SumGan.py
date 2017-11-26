@@ -396,7 +396,7 @@ def main(argv):
     #     rollout = Rollout(generator, 0.8)
     # this is about the variable sharing conflicts
 
-    saver = tf.train.Saver()
+    saver = tf.train.Saver(max_to_keep=5)
     print("Setting supervisor...")
     sv = tf.train.Supervisor(
         logdir=FLAGS.train_dir, is_chief=True, saver=saver,
