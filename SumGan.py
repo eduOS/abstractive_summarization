@@ -128,6 +128,32 @@ if not os.path.exists(FLAGS.train_dir):
     os.makedirs(FLAGS.train_dir)
 
 
+def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay=0.99):
+  """Calculate the running average loss via exponential decay.
+  This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
+
+  Args:
+    loss: loss on the most recent eval step
+    running_avg_loss: running_avg_loss so far
+    summary_writer: FileWriter object to write for tensorboard
+    step: training iteration step
+    decay: rate of exponential decay, a float between 0 and 1. Larger is smoother.
+
+  Returns:
+    running_avg_loss: new running average loss
+  """
+  if running_avg_loss == 0:  # on the first iteration just take the loss
+    running_avg_loss = loss
+  else:
+    running_avg_loss = running_avg_loss * decay + (1 - decay) * loss
+  running_avg_loss = min(running_avg_loss, 12)  # clip
+  loss_sum = tf.Summary()
+  tag_name = 'running_avg_loss/decay=%f' % (decay)
+  loss_sum.value.add(tag=tag_name, simple_value=running_avg_loss)
+  summary_writer.add_summary(loss_sum, step)
+  tf.logging.info('running_avg_loss: %f', running_avg_loss)
+  return running_avg_loss
+
 def generate_samples(sess, trainable_model, batch_size, generated_num, output_file):
     # Generate Samples
     generated_samples = []
@@ -140,14 +166,18 @@ def generate_samples(sess, trainable_model, batch_size, generated_num, output_fi
             fout.write(buffer)
 
 
-def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
+def pretrain_generator(model, batcher, sess_context_manager, summary_writer, batcher_val, bestmodel_save_path):
     """Repeatedly runs training iterations, logging loss to screen and writing
     summaries"""
     print("starting run_training")
     coverage_loss = None
     hps = model.hps
+    # this is where checkpoints of best models are saved
+    running_avg_loss = 0
+    # the eval job keeps a smoother, running average loss to tell it when to
+    # implement early stopping
+    best_loss = None  # will hold the best loss achieved so far
     with sess_context_manager as sess:
-        step = 0
         print_gap = 300
         start_time = time.time()
         while True:  # repeats until interrupted
@@ -155,17 +185,31 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
 
             # print('running training step...')
             t0 = time.time()
-            results = model.run_train_step(sess, batch)
+            results = model.run_one_step(sess, batch, update=True)
             t1 = time.time()
+            step = results['global_step']
             # print('seconds for training step: %.3f', t1-t0)
 
             loss = results['loss']
             # print('loss: %f', loss)  # print the loss to screen
-            step += 1
             if hps.coverage:
                 coverage_loss = results['coverage_loss']
                 # print the coverage loss to screen
                 # print("coverage_loss: %f", coverage_loss)
+
+            results_val = model.run_one_step(sess, batcher_val.next_batch(), update=True)
+            loss_val = results_val["loss"]
+
+            running_avg_loss = calc_running_avg_loss(
+                np.asscalar(loss_val), running_avg_loss, summary_writer, step)
+
+            if best_loss is None or running_avg_loss < best_loss:
+                tf.logging.info(
+                    'Found new best model with %.3f running_avg_loss. Saving to\
+                    %s', running_avg_loss, bestmodel_save_path)
+                checkpoint_path = os.path.join(hps.train_dir, "CGAN.ckpt")
+                model.saver.save(sess, checkpoint_path, global_step=step)
+                print("The new eval loss is %s and the model is updated.." % loss_val)
 
             if step % print_gap == 0:
                 current_time = time.time()
@@ -194,10 +238,9 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
             # we will write these summaries to tensorboard using summary_writer
             summaries = results['summaries']
             # we need this to update our running average loss
-            train_step = results['global_step']
 
-            summary_writer.add_summary(summaries, train_step)  # write the summaries
-            if train_step % 100 == 0:  # flush the summary writer every so often
+            summary_writer.add_summary(summaries, step)  # write the summaries
+            if step % 100 == 0:  # flush the summary writer every so often
                 summary_writer.flush()
 
 
@@ -397,6 +440,7 @@ def main(argv):
     # this is about the variable sharing conflicts
 
     saver = tf.train.Saver(max_to_keep=5)
+    bestmodel_save_path = os.path.join(hps_gen.train_dir, 'bestmodel')
     print("Setting supervisor...")
     sv = tf.train.Supervisor(
         logdir=FLAGS.train_dir, is_chief=True, saver=saver,
@@ -419,7 +463,7 @@ def main(argv):
     if FLAGS.mode == "pretrain_gen":
         print('Going to pretrain the generator')
         try:
-            pretrain_generator(generator, gen_batcher_train, sess, summary_writer)
+            pretrain_generator(generator, gen_batcher_train, sess, summary_writer, gen_batcher_val, bestmodel_save_path)
         except KeyboardInterrupt:
             tf.logging.info("Caught keyboard interrupt on worker. Stopping supervisor...")
             sv.stop()

@@ -457,16 +457,17 @@ class PointerGenerator(object):
         t1 = time.time()
         tf.logging.info('Time to build graph: %i seconds', t1 - t0)
 
-    def run_train_step(self, sess, batch):
+    def run_one_step(self, sess, batch, update=True):
         """Runs one training iteration. Returns a dictionary containing train
         op, summaries, loss, global_step and (optionally) coverage loss."""
         feed_dict = self._make_feed_dict(batch)
         to_return = {
-            'train_op': self._train_op,
             'summaries': self._summaries,
             'loss': self._loss,
             'global_step': self.global_step,
         }
+        if update:
+            to_return['train_op'] = self._train_op,
         if self.hps.coverage:
             to_return['coverage_loss'] = self._coverage_loss
         return sess.run(to_return, feed_dict)
