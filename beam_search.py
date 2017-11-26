@@ -23,6 +23,7 @@ import tensorflow as tf
 import numpy as np
 import data
 from six.moves import xrange
+from codecs import open
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -172,6 +173,7 @@ def run_beam_search(sess, model, vocab, batch):
 
             # Run one step of the decoder to get the new info, it is the same either
             # in decoding or in gan
+
             (
                 topk_ids, topk_log_probs, new_states,
                 attn_dists, p_gens, new_coverage

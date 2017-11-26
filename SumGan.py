@@ -174,9 +174,9 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer):
                   "\tBatch size:\t%s\n"
                   "\tVocabulary size:\t%s\n"
                   "\tArticles trained:\t%s\n"
-                  "\tTotal training time:\t%s hours\n"
-                  "\tCurrent speed:\t%s seconds/article\n"
-                  "\tLoss:\t%s;"
+                  "\tTotal training time:\t%.4f hours\n"
+                  "\tCurrent speed:\t%.4f seconds/article\n"
+                  "\tLoss:\t%.4f;"
                   "\tand coverage loss:\t%s\n" % (
                     datetime.datetime.now().strftime("on %m-%d at %H:%M"),
                     step,
@@ -400,7 +400,8 @@ def main(argv):
     print("Setting supervisor...")
     sv = tf.train.Supervisor(
         logdir=FLAGS.train_dir, is_chief=True, saver=saver,
-        save_summaries_secs=60*60, save_model_secs=60*30)
+        summary_op=None,
+        save_summaries_secs=60, save_model_secs=60)
     summary_writer = sv.summary_writer
     print("Preparing or waiting for session...")
     sess = sv.prepare_or_wait_for_session(config=gen_utils.get_config())
@@ -417,13 +418,21 @@ def main(argv):
     # --------------- train generator ---------------
     if FLAGS.mode == "pretrain_gen":
         print('Going to pretrain the generator')
-        pretrain_generator(generator, gen_batcher_train, sess, summary_writer)
+        try:
+            pretrain_generator(generator, gen_batcher_train, sess, summary_writer)
+        except KeyboardInterrupt:
+            tf.logging.info("Caught keyboard interrupt on worker. Stopping supervisor...")
+            sv.stop()
 
     # --------------- train discriminator -----------
     elif FLAGS.mode == "pretrain_dis":
         print('Going to pretrain the discriminator')
         dis_batcher = DisBatcher(hps_dis.data_path, "decode", dis_vocab, hps_dis.batch_size, single_pass=hps_dis.single_pass)
-        pretrain_discriminator(sess, discriminator, dis_vocab, dis_batcher, summary_writer)
+        try:
+            pretrain_discriminator(sess, discriminator, dis_vocab, dis_batcher, summary_writer)
+        except KeyboardInterrupt:
+            tf.logging.info("Caught keyboard interrupt on worker. Stopping supervisor...")
+            sv.stop()
 
     # --------------- finetune the generator --------
     elif FLAGS.mode == "train_gan":
