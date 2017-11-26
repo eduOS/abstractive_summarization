@@ -53,6 +53,7 @@ tf.app.flags.DEFINE_integer("max_steps", -1, "max number of steps to train")
 # Misc
 tf.app.flags.DEFINE_string("dis_data_dir", "./js_corpus", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "./model", "Training directory.")
+tf.app.flags.DEFINE_string("val_dir", "./model/val/", "Training directory.")
 tf.app.flags.DEFINE_integer("gpu_id", 0, "Select which gpu to use.")
 
 # Mode
@@ -127,15 +128,17 @@ if FLAGS.mode == "train_gan":
 if not os.path.exists(FLAGS.train_dir):
     os.makedirs(FLAGS.train_dir)
 
+if not os.path.exists(FLAGS.val_dir):
+    os.makedirs(FLAGS.val_dir)
 
-def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay=0.99):
+
+def calc_running_avg_loss(loss, running_avg_loss, step, decay=0.99):
   """Calculate the running average loss via exponential decay.
   This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
 
   Args:
     loss: loss on the most recent eval step
     running_avg_loss: running_avg_loss so far
-    summary_writer: FileWriter object to write for tensorboard
     step: training iteration step
     decay: rate of exponential decay, a float between 0 and 1. Larger is smoother.
 
@@ -150,7 +153,6 @@ def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay=0.
   loss_sum = tf.Summary()
   tag_name = 'running_avg_loss/decay=%f' % (decay)
   loss_sum.value.add(tag=tag_name, simple_value=running_avg_loss)
-  summary_writer.add_summary(loss_sum, step)
   tf.logging.info('running_avg_loss: %f', running_avg_loss)
   return running_avg_loss
 
@@ -166,7 +168,7 @@ def generate_samples(sess, trainable_model, batch_size, generated_num, output_fi
             fout.write(buffer)
 
 
-def pretrain_generator(model, batcher, sess_context_manager, summary_writer, batcher_val, bestmodel_save_path):
+def pretrain_generator(model, batcher, sess_context_manager, batcher_val, saver, bestmodel_save_path):
     """Repeatedly runs training iterations, logging loss to screen and writing
     summaries"""
     print("starting run_training")
@@ -197,21 +199,21 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer, bat
                 # print the coverage loss to screen
                 # print("coverage_loss: %f", coverage_loss)
 
-            results_val = model.run_one_step(sess, batcher_val.next_batch(), update=True)
-            loss_val = results_val["loss"]
-
             running_avg_loss = calc_running_avg_loss(
-                np.asscalar(loss_val), running_avg_loss, summary_writer, step)
-
-            if best_loss is None or running_avg_loss < best_loss:
-                tf.logging.info(
-                    'Found new best model with %.3f running_avg_loss. Saving to\
-                    %s', running_avg_loss, bestmodel_save_path)
-                checkpoint_path = os.path.join(hps.train_dir, "CGAN.ckpt")
-                model.saver.save(sess, checkpoint_path, global_step=step)
-                print("The new eval loss is %s and the model is updated.." % loss_val)
+                np.asscalar(loss), running_avg_loss, step)
 
             if step % print_gap == 0:
+                results_val = model.run_one_step(sess, batcher_val.next_batch())
+                loss_val = results_val["loss"]
+                if best_loss is None or loss_val < best_loss:
+                    tf.logging.info(
+                        'Found new best model with %.3f running_avg_loss. Saving to\
+                        %s', running_avg_loss, bestmodel_save_path)
+                    saver.save(sess, bestmodel_save_path, global_step=step)
+                    print("the eval loss is %s and the model is updated %s.." %
+                          (loss_val, datetime.datetime.now().strftime("on %m-%d at %H:%M")))
+                    best_loss = loss_val
+
                 current_time = time.time()
                 print(
                   "\nDashboard updated %s, finished steps:\t%s\n"
@@ -229,22 +231,13 @@ def pretrain_generator(model, batcher, sess_context_manager, summary_writer, bat
                     hps.batch_size * step,
                     (current_time - start_time) / 3600,
                     (t1-t0) / hps.batch_size,
-                    loss,
+                    running_avg_loss,
                     coverage_loss if hps.coverage else "not set",
                   )
                 )
-            # get the summaries and iteration number so we can write summaries
-            # to tensorboard
-            # we will write these summaries to tensorboard using summary_writer
-            summaries = results['summaries']
-            # we need this to update our running average loss
-
-            summary_writer.add_summary(summaries, step)  # write the summaries
-            if step % 100 == 0:  # flush the summary writer every so often
-                summary_writer.flush()
 
 
-def pretrain_discriminator(sess_context_manager, model, vocab, batcher, summary_writer):
+def pretrain_discriminator(sess_context_manager, model, vocab, batcher):
   """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
   hps = model.hps
   with sess_context_manager as sess:
@@ -336,6 +329,7 @@ def main(argv):
     # --------------- build graph ---------------
     hparam_gen = [
         'mode',
+        'train_dir',
         'adagrad_init_acc',
         'batch_size',
         'beam_size',
@@ -440,19 +434,18 @@ def main(argv):
     # this is about the variable sharing conflicts
 
     saver = tf.train.Saver(max_to_keep=5)
-    bestmodel_save_path = os.path.join(hps_gen.train_dir, 'bestmodel')
+    bestmodel_save_path = os.path.join(FLAGS.val_dir, 'bestmodel')
     print("Setting supervisor...")
     sv = tf.train.Supervisor(
         logdir=FLAGS.train_dir, is_chief=True, saver=saver,
         summary_op=None,
         save_summaries_secs=60, save_model_secs=60)
-    summary_writer = sv.summary_writer
     print("Preparing or waiting for session...")
     sess = sv.prepare_or_wait_for_session(config=gen_utils.get_config())
 
     print("Creating beam search...")
     with tf.variable_scope("beam_search"), tf.device("/gpu:0"):
-        decoder = BeamSearchDecoder(saver, sess, generator, gen_vocab)
+        decoder = BeamSearchDecoder(sess, generator, gen_vocab)
 
     # initialize the embeddings at the begging of training
     ckpt = tf.train.get_checkpoint_state(hps_dis.train_dir)
@@ -463,7 +456,7 @@ def main(argv):
     if FLAGS.mode == "pretrain_gen":
         print('Going to pretrain the generator')
         try:
-            pretrain_generator(generator, gen_batcher_train, sess, summary_writer, gen_batcher_val, bestmodel_save_path)
+            pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, saver, bestmodel_save_path)
         except KeyboardInterrupt:
             tf.logging.info("Caught keyboard interrupt on worker. Stopping supervisor...")
             sv.stop()
@@ -473,7 +466,7 @@ def main(argv):
         print('Going to pretrain the discriminator')
         dis_batcher = DisBatcher(hps_dis.data_path, "decode", dis_vocab, hps_dis.batch_size, single_pass=hps_dis.single_pass)
         try:
-            pretrain_discriminator(sess, discriminator, dis_vocab, dis_batcher, summary_writer)
+            pretrain_discriminator(sess, discriminator, dis_vocab, dis_batcher)
         except KeyboardInterrupt:
             tf.logging.info("Caught keyboard interrupt on worker. Stopping supervisor...")
             sv.stop()
@@ -547,7 +540,7 @@ def main(argv):
 
     elif FLAGS.mode == "decode":
         print('Going to decode from the generator.')
-        decoder.decode(gen_batcher_train)
+        decoder.decode(gen_batcher_train, saver, bestmodel_save_path)
         # decode for generating corpus for discriminator
 
 

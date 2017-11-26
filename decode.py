@@ -28,7 +28,6 @@ import beam_search
 import data
 import json
 from codecs import open
-import sys
 # import pyrouge
 import gen_utils
 import logging
@@ -41,7 +40,7 @@ SECS_UNTIL_NEW_CKPT = 60  # max number of seconds before loading new checkpoint
 class BeamSearchDecoder(object):
     """Beam search decoder."""
 
-    def __init__(self, saver, sess, model, vocab):
+    def __init__(self, sess, model, vocab):
         """Initialize decoder.
 
         Args:
@@ -55,11 +54,6 @@ class BeamSearchDecoder(object):
         # we use this to load checkpoints for decoding
         self._sess = sess
         self._hps = model.hps
-
-        # Load an initial checkpoint to use for decoding
-        ckpt_path = gen_utils.load_ckpt(saver, self._sess)
-        print(ckpt_path)
-        # the checkpoint should add timestamp
 
         if self._hps.single_pass:
             # Make a descriptive decode directory name
@@ -107,12 +101,15 @@ class BeamSearchDecoder(object):
             outputs_ids = [[int(t) for t in best_hyp.tokens[1:]] for best_hyp in best_hyps]
         return batch, enc_states, dec_in_state, outputs_ids
 
-    def decode(self, batcher):
+    def decode(self, batcher, saver, bestmodel_save_path):
         """Decode examples until data is exhausted (if self._hps.single_pass) and
         return, or decode indefinitely, loading latest checkpoint at regular
         intervals"""
         t0 = time.time()
         counter = 0
+        if os.path.exists(bestmodel_save_path):
+            raise Exception("Bestmodel save path %s don\'t exist!.." % bestmodel_save_path)
+        saver.restore(self._sess, bestmodel_save_path)
         while True:
             batch = batcher.next_batch()
             # 1 example repeated across batch
