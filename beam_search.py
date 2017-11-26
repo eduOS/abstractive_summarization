@@ -23,6 +23,7 @@ import tensorflow as tf
 import numpy as np
 import data
 from six.moves import xrange
+import sys
 from codecs import open
 
 FLAGS = tf.app.flags.FLAGS
@@ -125,6 +126,11 @@ def run_beam_search(sess, model, vocab, batch):
     # enc_states has shape [batch_size, <=max_enc_steps, 2*hidden_dim].
     enc_states, dec_in_state = model.run_encoder(sess, batch)
     # enc_states and dec_in_state should be scaled to match the latter setting
+    trace_enc_states = open("enc_states.txt", "w", "utf-8")
+    trace_dec_states = open("dec_states.txt", "w", "utf-8")
+    trace_attention = open("attention.txt", "w", "utf-8")
+    trace_inputs = open("inputs.txt", "w", "utf-8")
+    attn_dists = None
 
     best_hyps = []
     batch_hyps = []
@@ -173,6 +179,11 @@ def run_beam_search(sess, model, vocab, batch):
 
             # Run one step of the decoder to get the new info, it is the same either
             # in decoding or in gan
+            preface = "beam %s steps %s \n" % (k, steps)
+            trace_enc_states.write(preface + enc_states + "\n")
+            trace_inputs.write(preface + latest_tokens + "\n")
+            trace_attention.write(preface + (attn_dists if attn_dists else "::\n") + "\n")
+            trace_dec_states.write(preface + states + "\n")
 
             (
                 topk_ids, topk_log_probs, new_states,
@@ -242,6 +253,7 @@ def run_beam_search(sess, model, vocab, batch):
         hyps_sorted = sort_hyps(results)
         best_hyp = hyps_sorted[0]
         best_hyps.append(best_hyp)
+        sys.exit(1)
 
     # Return the hypothesis with highest average log prob
     return enc_states, dec_in_state, best_hyps
