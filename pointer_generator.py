@@ -432,9 +432,6 @@ class PointerGenerator(object):
             grads, global_norm = tf.clip_by_global_norm(
                 gradients, self.hps.gen_max_gradient)
 
-        # Add a summary
-        tf.summary.scalar('global_norm', global_norm)
-
         # Apply adagrad optimizer
         optimizer = tf.train.AdagradOptimizer(
             self.hps.gen_lr, initial_accumulator_value=self.hps.adagrad_init_acc)
@@ -462,12 +459,12 @@ class PointerGenerator(object):
         op, summaries, loss, global_step and (optionally) coverage loss."""
         feed_dict = self._make_feed_dict(batch)
         to_return = {
-            'summaries': self._summaries,
             'loss': self._loss,
             'global_step': self.global_step,
         }
         if update:
             to_return['train_op'] = self._train_op,
+            to_return['summaries'] = self._summaries,
         if self.hps.coverage:
             to_return['coverage_loss'] = self._coverage_loss
         return sess.run(to_return, feed_dict)

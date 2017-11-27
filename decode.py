@@ -33,6 +33,7 @@ import gen_utils
 import logging
 from six.moves import xrange
 # import numpy as np
+FLAGS = tf.app.flags.FLAGS
 
 SECS_UNTIL_NEW_CKPT = 60  # max number of seconds before loading new checkpoint
 
@@ -101,15 +102,13 @@ class BeamSearchDecoder(object):
             outputs_ids = [[int(t) for t in best_hyp.tokens[1:]] for best_hyp in best_hyps]
         return batch, enc_states, dec_in_state, outputs_ids
 
-    def decode(self, batcher, saver, bestmodel_save_path):
+    def decode(self, batcher, saver):
         """Decode examples until data is exhausted (if self._hps.single_pass) and
         return, or decode indefinitely, loading latest checkpoint at regular
         intervals"""
         t0 = time.time()
         counter = 0
-        if os.path.exists(bestmodel_save_path):
-            raise Exception("Bestmodel save path %s don\'t exist!.." % bestmodel_save_path)
-        saver.restore(self._sess, bestmodel_save_path)
+        saver.restore(self._sess, tf.train.latest_checkpoint(FLAGS.val_dir))
         while True:
             batch = batcher.next_batch()
             # 1 example repeated across batch

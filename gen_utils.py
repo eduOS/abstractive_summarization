@@ -38,7 +38,7 @@ def load_ckpt(saver, sess):
     waiting 10 secs in the case of failure. Also returns checkpoint name."""
     while True:
         try:
-            ckpt_state = tf.train.get_checkpoint_state(FLAGS.train_dir)
+            ckpt_state = tf.train.get_checkpoint_state(FLAGS.model_dir)
             tf.logging.info(
                 'Loading checkpoint %s',
                 ckpt_state.model_checkpoint_path)
@@ -47,7 +47,7 @@ def load_ckpt(saver, sess):
         except:
             tf.logging.info(
                 "Failed to load checkpoint from %s. Sleeping for %i secs...",
-                FLAGS.train_dir, 10)
+                FLAGS.model_dir, 10)
             time.sleep(10)
 
 
