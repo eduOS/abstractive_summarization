@@ -158,18 +158,6 @@ def calc_running_avg_loss(loss, running_avg_loss, step, decay=0.99):
   return running_avg_loss
 
 
-def generate_samples(sess, trainable_model, batch_size, generated_num, output_file):
-    # Generate Samples
-    generated_samples = []
-    for _ in range(int(generated_num / batch_size)):
-        generated_samples.extend(trainable_model.generate(sess))
-
-    with open(output_file, 'w') as fout:
-        for poem in generated_samples:
-            buffer = ' '.join([str(x) for x in poem]) + '\n'
-            fout.write(buffer)
-
-
 def pretrain_generator(model, batcher, sess_context_manager, batcher_val, saver):
     """Repeatedly runs training iterations, logging loss to screen and writing
     summaries"""
@@ -221,7 +209,7 @@ def pretrain_generator(model, batcher, sess_context_manager, batcher_val, saver)
                         'Found new best model with %.3f running_avg_loss. Saving to %s %s' %
                         (loss_val, bestmodel_save_path,
                          datetime.datetime.now().strftime("on %m-%d at %H:%M")))
-                    saver.save(sess, bestmodel_save_path, global_step=step)
+                    saver.save(sess, bestmodel_save_path, global_step=step, latest_filename="checkpoint_best")
                     best_loss = loss_val
 
                 print(
@@ -446,9 +434,10 @@ def main(argv):
     print("Creating session..")
     sess = tf.Session(config=gen_utils.get_config())
     print("Restoring models...")
-    if FLAGS.restore_best_model:
-        saver.restore(sess, tf.train.latest_checkpoint(FLAGS.val_dir))
-    else:
+    if "train" in FLAGS.mode and FLAGS.restore_best_model:
+        saver.restore(sess, tf.train.get_checkpoint_state(
+            FLAGS.val_dir, latest_filename="checkpoint_best").model_checkpoint_path)
+    elif "train" in FLAGS.mode:
         saver.restore(sess, tf.train.latest_checkpoint(hps_gen.model_dir))
 
     print("Creating beam search...")
@@ -489,7 +478,7 @@ def main(argv):
             for it in range(hps_gan.gan_gen_iter):
                 # can this be self.batch in decoder?
                 source_batch, enc_states, enc_padding_mask, dec_in_state, best_samples = decoder.generate(
-                    gen_batcher_train, include_start_token=True)
+                    gen_batcher_train, saver, include_start_token=True)
                 rewards = rollout.get_reward(
                     sess, gen_vocab, dis_vocab, source_batch, enc_states, source_batch.enc_padding_mask,
                     dec_in_state, best_samples, 16, discriminator)
@@ -511,7 +500,7 @@ def main(argv):
             # Test
             print('Going to test the generator.' % it)
             if hps_gan.i_gan % 5 == 0 or hps_gan.i_gan == hps_gan.gan_iter - 1:
-                source_batch, enc_states, dec_in_state, best_samples = decoder.generate(gen_batcher_val)
+                source_batch, enc_states, dec_in_state, best_samples = decoder.generate(gen_batcher_val, saver)
                 # the true abstract is source_batch.dec_batch
                 summary, test_loss, step = generator.run_eval_step(sess, source_batch)
                 buffer = 'step:\t' + str(step) + '\tloss:\t' + str(test_loss) + '\n'

@@ -85,12 +85,13 @@ class BeamSearchDecoder(object):
             if not os.path.exists(self._rouge_dec_dir):
                 os.mkdir(self._rouge_dec_dir)
 
-    def generate(self, batcher, include_start_token=False):
+    def generate(self, batcher, saver, include_start_token=False):
         # the abstract should also be generated
         batch = batcher.next_batch()
         if batch is None:
             return
 
+        saver.restore(self._sess, tf.train.latest_checkpoint(FLAGS.val_dir))
         # Run beam search to get best Hypothesis
         enc_states, dec_in_state, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
 
