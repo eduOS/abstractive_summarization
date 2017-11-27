@@ -162,6 +162,7 @@ def pretrain_generator(model, batcher, sess_context_manager, batcher_val, saver)
     """Repeatedly runs training iterations, logging loss to screen and writing
     summaries"""
     print("starting run_training")
+    saver_val = tf.train.Saver(max_to_keep=2)
     bestmodel_save_path = os.path.join(FLAGS.val_dir, 'bestmodel')
     coverage_loss = None
     hps = model.hps
@@ -209,7 +210,7 @@ def pretrain_generator(model, batcher, sess_context_manager, batcher_val, saver)
                         'Found new best model with %.3f running_avg_loss. Saving to %s %s' %
                         (loss_val, bestmodel_save_path,
                          datetime.datetime.now().strftime("on %m-%d at %H:%M")))
-                    saver.save(sess, bestmodel_save_path, global_step=step, latest_filename="checkpoint_best")
+                    saver_val.save(sess, bestmodel_save_path, global_step=step, latest_filename="checkpoint_best")
                     best_loss = loss_val
 
                 print(
@@ -430,7 +431,7 @@ def main(argv):
     #     rollout = Rollout(generator, 0.8)
     # this is about the variable sharing conflicts
 
-    saver = tf.train.Saver(max_to_keep=5, save_relative_paths=True)
+    saver = tf.train.Saver(max_to_keep=5)
     print("Creating session..")
     sess = tf.Session(config=gen_utils.get_config())
     print("Restoring models...")
