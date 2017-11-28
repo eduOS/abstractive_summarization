@@ -238,6 +238,7 @@ def pretrain_generator(model, batcher, sess_context_manager, batcher_val, saver)
 
 def pretrain_discriminator(sess_context_manager, model, vocab, batcher):
     """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
+    # TODO: load two pretained model: the generator and the embedding
     hps = model.hps
     with sess_context_manager as sess:
         # This is the training loop.
@@ -556,6 +557,7 @@ def main(argv):
     elif FLAGS.mode == "decode":
         print('Going to decode from the generator.')
         decoder.decode(gen_batcher_train, saver)
+        print("Finished decoding..")
         # decode for generating corpus for discriminator
 
 

@@ -58,6 +58,7 @@ class Seq2ClassModel(object):
   def init_emb(self, sess, emb_dir):
     for ld in self.loaders:
       ld.restore(sess, tf.train.get_checkpoint_state(emb_dir).model_checkpoint_path)
+    # why a loop here, isn't once enough?
 
   def _add_placeholders(self):
     self.inputs = tf.placeholder(tf.int32, shape=[self.batch_size, self.max_dec_steps], name="inputs")
@@ -108,7 +109,6 @@ class Seq2ClassModel(object):
           self.loss, self.global_step, tf.identity(self.learning_rate),
           'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
       del tf.get_collection_ref(tf.GraphKeys.UPDATE_OPS)[:]
-      tf.get_variable_scope().reuse_variables()
 
   def _seq2class_model(self, inputs, conditions, targets, is_decoding):
     """

@@ -39,3 +39,4 @@
 29. two inputs but with different scalability
 30. decode the not pointer generator option in the graph
 31. separate the discriminator graph and the generator graph but load them together in order to train then separately
+32. train my own vocabulary for the discriminator
