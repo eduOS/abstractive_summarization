@@ -51,15 +51,15 @@ class Rollout(object):
         self.gen_summ_ar = tensor_array_ops.TensorArray(
             dtype=tf.int32, size=self._gen_hps.max_dec_steps, dynamic_size=False, infer_shape=True)
 
-        with tf.variable_scope('rollout_loops'):
+        with tf.variable_scope(decoder_scope, reuse=True):
             def recurrence_given(i, dec_input, dec_in_state, given_num, gen_summ):
-                next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state, decoder_scope)
+                next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state)
                 next_input = emb_summ_ar.read(i)
                 gen_summ = gen_summ.write(i, summ_ar.read(i))
                 return i+1, next_input, new_state, given_num, gen_summ
 
             def recurrence_rollout(i, dec_input, dec_in_state, given_num, gen_summ):
-                next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state, decoder_scope)
+                next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state)
                 next_input = tf.nn.embedding_lookup(self.g_embeddings, next_input_id)
                 gen_summ = gen_summ.write(i, next_input_id)
                 return i+1, next_input, new_state, given_num, gen_summ

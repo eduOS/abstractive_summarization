@@ -522,15 +522,14 @@ class PointerGenerator(object):
         #     # TODO: should this be changed to shape?
         return enc_states, dec_in_state
 
-    def decode_onestep(self, emb_dec_inputs, dec_in_state, decoder_scope):
+    def decode_onestep(self, emb_dec_inputs, dec_in_state):
         """
         function: decode onestep for rollout
         inputs:
             the embedded input
         """
         # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
-        with tf.variable_scope(decoder_scope, reuse=True):
-            _, _, _, _, final_dists, new_states = self._add_decoder(emb_dec_inputs, dec_in_state)
+        _, _, _, _, final_dists, new_states = self._add_decoder(emb_dec_inputs, dec_in_state)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         output_id = tf.squeeze(tf.cast(tf.multinomial(final_dists[0], 1), tf.int32))
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
