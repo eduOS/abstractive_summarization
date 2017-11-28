@@ -439,7 +439,12 @@ def main(argv):
         saver.restore(sess, tf.train.get_checkpoint_state(
             FLAGS.val_dir, latest_filename="checkpoint_best").model_checkpoint_path)
     elif "train" in FLAGS.mode:
-        saver.restore(sess, tf.train.latest_checkpoint(hps_gen.model_dir))
+        try:
+            saver.restore(sess, tf.train.latest_checkpoint(hps_gen.model_dir))
+        except:
+            # train from scratch
+            init = tf.global_variables_initializer()
+            sess.run(init)
 
     print("Creating beam search...")
     with tf.variable_scope("beam_search"), tf.device("/gpu:0"):
