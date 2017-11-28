@@ -299,45 +299,26 @@ def abstract2sents(abstract):
             return sents
 
 
-def puresentence2ids(text, vocab):
-    """encode a sentence in plain text into a sequence of token ids
-        token_ids are one-based
-    """
-    try:
-        text = text.strip()
-    except:
-        pass
-    seq = [vocab.word2id(word) for word in text]
-    return seq
-
-
-def pureids2sentence(token_ids, vocab):
-    """decode a sequence of token ids to a sentence
-        token_ids must be one-based
-    """
-    token_ids = filter(lambda i: i > 0, token_ids)
-    token_ids = map(lambda i: i-1 if vocab.idx2key(i-1) else vocab.key2idx("_UNK"), token_ids)
-    text = " ".join([vocab.idx2key(i) for i in token_ids])
-    return text
-
-
 def prepare_dis_pretraining_batch(batch):
     """
-    translate the list into np array
-    and add the targets for them
+    translate the list into np array and add the targets for them
+    randomly select the sample as positive or negative input
     """
-    source, positive, negative = batch
-    inputs = positive + negative
+    source, positives, negatives = batch
+    inputs = positives + negatives
 
-    positive_labels = [[0, 1] for _ in positive]
-    negative_labels = [[1, 0] for _ in negative]
+    positive_labels = [[0, 1] for _ in positives]
+    negative_labels = [[1, 0] for _ in negatives]
     targets = positive_labels + negative_labels
 
     conditions = source + source
 
-    inputs = np.transpose(np.array(inputs))
-    conditions = np.transpose(np.array(conditions))
-    targets = np.array(targets)
+    # randomize the inputs, conditions and targets
+    assert len(inputs) == len(conditions) == len(targets)
+    indices = np.random.permutation(len(inputs))
+    inputs = np.array(inputs)[indices]
+    conditions = np.array(conditions)[indices]
+    targets = np.array(targets)[indices]
 
     return inputs, conditions, targets
 
@@ -367,9 +348,9 @@ def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab,
     for sample_words in samples_words:
         try:
             fst_stop_idx = sample_words.index(STOP_MARK)  # index of the (first) [STOP] symbol
-            sample_chars = text2charlist(sample_words[:fst_stop_idx])
+            sample_chars = text2charlist(sample_words[:fst_stop_idx], keep_word="[UNK]")
         except ValueError:
-            sample_chars = text2charlist(sample_words)
+            sample_chars = text2charlist(sample_words, keep_word="[UNK]")
         sample_ids = [dis_vocab.word2id(char) for char in sample_chars]
         while len(sample_ids) < max_len:
             sample_ids.append(0)

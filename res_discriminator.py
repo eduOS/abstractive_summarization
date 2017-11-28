@@ -44,7 +44,7 @@ class Seq2ClassModel(object):
     self.cell_type = hps.cell_type
     self.global_step = tf.Variable(0, trainable=False)
     self.mode = hps.mode
-    self.num_models = hps.num_models
+    self.num_models = hps.num_models * 2  # the positive and negative double the samlpe size
     self.batch_size = hps.batch_size * self.num_models
     self.max_enc_steps = hps.max_enc_steps
     self.max_dec_steps = hps.max_dec_steps

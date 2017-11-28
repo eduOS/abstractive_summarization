@@ -42,7 +42,7 @@ tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
 tf.app.flags.DEFINE_integer("dis_vocab_size", 10000, "vocabulary size.")
 tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_string("buckets", "9,12,20,40", "buckets of different lengths")
-tf.app.flags.DEFINE_integer("num_models", 16, "Size of each model layer.")
+tf.app.flags.DEFINE_integer("num_models", 8, "Size of each model layer. The actural size is doubled.")
 
 # Training parameters
 tf.app.flags.DEFINE_float("dis_lr", 0.01, "Learning rate.")
@@ -84,6 +84,7 @@ tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True
 
 # Where to save output
 tf.app.flags.DEFINE_string('log_root', './log/', 'Root directory for all logging.')
+tf.app.flags.DEFINE_string('dec_dir', '', 'Where to generate the decode results. If false the time stamp is toke.')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in adirectory with this name, under log_root.')
 
 # Hyperparameters
@@ -134,28 +135,28 @@ if not os.path.exists(FLAGS.val_dir):
 
 
 def calc_running_avg_loss(loss, running_avg_loss, step, decay=0.9):
-  """Calculate the running average loss via exponential decay.
-  This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
+    """Calculate the running average loss via exponential decay.
+    This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
 
-  Args:
-    loss: loss on the most recent eval step
-    running_avg_loss: running_avg_loss so far
-    step: training iteration step
-    decay: rate of exponential decay, a float between 0 and 1. Larger is smoother.
+    Args:
+        loss: loss on the most recent eval step
+        running_avg_loss: running_avg_loss so far
+        step: training iteration step
+        decay: rate of exponential decay, a float between 0 and 1. Larger is smoother.
 
-  Returns:
-    running_avg_loss: new running average loss
-  """
-  if running_avg_loss == 0:  # on the first iteration just take the loss
-    running_avg_loss = loss
-  else:
-    running_avg_loss = running_avg_loss * decay + (1 - decay) * loss
-  running_avg_loss = min(running_avg_loss, 12)  # clip
-  loss_sum = tf.Summary()
-  tag_name = 'running_avg_loss/decay=%f' % (decay)
-  loss_sum.value.add(tag=tag_name, simple_value=running_avg_loss)
-  tf.logging.info('running_avg_loss: %f', running_avg_loss)
-  return running_avg_loss
+    Returns:
+        running_avg_loss: new running average loss
+    """
+    if running_avg_loss == 0:  # on the first iteration just take the loss
+        running_avg_loss = loss
+    else:
+        running_avg_loss = running_avg_loss * decay + (1 - decay) * loss
+    running_avg_loss = min(running_avg_loss, 12)  # clip
+    loss_sum = tf.Summary()
+    tag_name = 'running_avg_loss/decay=%f' % (decay)
+    loss_sum.value.add(tag=tag_name, simple_value=running_avg_loss)
+    tf.logging.info('running_avg_loss: %f', running_avg_loss)
+    return running_avg_loss
 
 
 def pretrain_generator(model, batcher, sess_context_manager, batcher_val, saver):
@@ -236,60 +237,68 @@ def pretrain_generator(model, batcher, sess_context_manager, batcher_val, saver)
 
 
 def pretrain_discriminator(sess_context_manager, model, vocab, batcher):
-  """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
-  hps = model.hps
-  with sess_context_manager as sess:
-    # This is the training loop.
-    step_time, loss = 0.0, 0.0
-    current_step = 0
-    eval_loss_best = sys.float_info.max
-    previous_losses = [eval_loss_best]
-    if hps.early_stop:
-      eval_batcher = DisBatcher(hps.data_path, "eval", vocab, hps.batch_size, single_pass=hps.single_pass)
-    while True:
-      start_time = time.time()
-      batch = batcher.next()
-      inputs, conditions, targets = data.prepare_dis_pretraining_batch(batch)
-      step_loss = model.run_one_step(sess_context_manager, inputs, conditions, targets, update=True)
-      step_time += (time.time() - start_time) / hps.steps_per_checkpoint
-      loss += step_loss / hps.steps_per_checkpoint
-      current_step += 1
-
-      # Once in a while, we save checkpoint, print statistics, and run evals.
-      if current_step % hps.steps_per_checkpoint == 0:
-        # Print statistics for the previous epoch.
-        print("global step %d learning rate %.4f step-time %.4f loss "
-              "%.4f" % (model.global_step.eval(), model.learning_rate.eval(), step_time, loss))
-        dump_model = True
-        if hps.early_stop:
-          dump_model = False
-          # Run evals on development set and print their perplexity.
-          eval_losses = []
-          for bucket_id_eval in range(len(_buckets)):
-            while True:
-              batch = eval_batcher.next()
-              eval_inputs, eval_conditions, eval_targets = data.prepare_dis_pretraining_batch(batch)
-              step_loss = model.run_one_step(sess_context_manager, eval_inputs, eval_conditions, eval_targets, update=False)
-              eval_losses.append(step_loss)
-          eval_loss = sum(eval_losses) / len(eval_losses)
-          print("  eval loss %.4f" % eval_loss)
-          previous_losses.append(eval_loss)
-          sys.stdout.flush()
-          threshold = 10
-          if eval_loss > 0.99 * previous_losses[-2]:
-            sess.run(model.learning_rate.assign(tf.maximum(hps.learning_rate_decay_factor*model.learning_rate, 1e-4)))
-          if len(previous_losses) > threshold and eval_loss > max(previous_losses[-threshold-1:-1]) and eval_loss_best < min(previous_losses[-threshold:]):
-            break
-          if eval_loss < eval_loss_best:
-            dump_model = True
-            eval_loss_best = eval_loss
-        # Save checkpoint and zero timer and loss.
-        if dump_model:
-          checkpoint_path = os.path.join(hps.model_dir, "translate.ckpt")
-          model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+    """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
+    hps = model.hps
+    with sess_context_manager as sess:
+        # This is the training loop.
         step_time, loss = 0.0, 0.0
-        if current_step >= hps.max_steps:
-          break
+        current_step = 0
+        eval_loss_best = sys.float_info.max
+        previous_losses = [eval_loss_best]
+        if hps.early_stop:
+            eval_batcher = DisBatcher(
+                hps.data_path, "eval", vocab, hps.batch_size, single_pass=hps.single_pass)
+        while True:
+            start_time = time.time()
+            batch = batcher.next_batch()
+            inputs, conditions, targets = data.prepare_dis_pretraining_batch(batch)
+            step_loss = model.run_one_step(
+                sess_context_manager, inputs, conditions, targets, update=True)
+            step_time += (time.time() - start_time) / hps.steps_per_checkpoint
+            loss += step_loss / hps.steps_per_checkpoint
+            current_step += 1
+
+            # Once in a while, we save checkpoint, print statistics, and run evals.
+            if current_step % hps.steps_per_checkpoint == 0:
+                # Print statistics for the previous epoch.
+                print("global step %d learning rate %.4f step-time %.4f loss "
+                      "%.4f" % (model.global_step.eval(), model.learning_rate.eval(), step_time, loss))
+                dump_model = True
+                if hps.early_stop:
+                    dump_model = False
+                    # Run evals on development set and print their perplexity.
+                    eval_losses = []
+                    for bucket_id_eval in range(len(_buckets)):
+                        while True:
+                            batch = eval_batcher.next()
+                            eval_inputs, eval_conditions, eval_targets = \
+                                data.prepare_dis_pretraining_batch(batch)
+                            step_loss = model.run_one_step(
+                                sess_context_manager, eval_inputs, eval_conditions,
+                                eval_targets, update=False)
+                            eval_losses.append(step_loss)
+                    eval_loss = sum(eval_losses) / len(eval_losses)
+                    print("  eval loss %.4f" % eval_loss)
+                    previous_losses.append(eval_loss)
+                    sys.stdout.flush()
+                    threshold = 10
+                    if eval_loss > 0.99 * previous_losses[-2]:
+                        sess.run(model.learning_rate.assign(
+                            tf.maximum(hps.learning_rate_decay_factor*model.learning_rate, 1e-4)))
+                    if len(previous_losses) > threshold and \
+                            eval_loss > max(previous_losses[-threshold-1:-1]) and \
+                            eval_loss_best < min(previous_losses[-threshold:]):
+                        break
+                    if eval_loss < eval_loss_best:
+                        dump_model = True
+                        eval_loss_best = eval_loss
+                # Save checkpoint and zero timer and loss.
+                if dump_model:
+                    checkpoint_path = os.path.join(hps.model_dir, "translate.ckpt")
+                    model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+                step_time, loss = 0.0, 0.0
+                if current_step >= hps.max_steps:
+                    break
 
 
 def convert_to_coverage_model():
@@ -434,15 +443,16 @@ def main(argv):
     saver = tf.train.Saver(max_to_keep=5)
     print("Creating session..")
     sess = tf.Session(config=gen_utils.get_config())
-    print("Restoring models...")
-    if "train" in FLAGS.mode and FLAGS.restore_best_model:
+    if ("train" in FLAGS.mode and FLAGS.restore_best_model) or FLAGS.mode in ["decode", "train_gan"]:
+        print("Restoring models from best checkpoint...")
         saver.restore(sess, tf.train.get_checkpoint_state(
             FLAGS.val_dir, latest_filename="checkpoint_best").model_checkpoint_path)
     elif "train" in FLAGS.mode:
         try:
+            print("Restoring models from the latest checkpoint...")
             saver.restore(sess, tf.train.latest_checkpoint(hps_gen.model_dir))
         except:
-            # train from scratch
+            print("Initializing variables to train from scratch..")
             init = tf.global_variables_initializer()
             sess.run(init)
 
@@ -466,7 +476,9 @@ def main(argv):
     # --------------- train discriminator -----------
     elif FLAGS.mode == "pretrain_dis":
         print('Going to pretrain the discriminator')
-        dis_batcher = DisBatcher(hps_dis.data_path, "decode", dis_vocab, hps_dis.batch_size, single_pass=hps_dis.single_pass)
+        dis_batcher = DisBatcher(
+            hps_dis.data_path, "decode", dis_vocab, hps_dis.batch_size * hps_dis.num_models,
+            single_pass=hps_dis.single_pass)
         try:
             pretrain_discriminator(sess, discriminator, dis_vocab, dis_batcher)
         except KeyboardInterrupt:

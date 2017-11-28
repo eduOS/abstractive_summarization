@@ -38,3 +38,4 @@
 28. TODO: keep the [unk] and such words in the vocab transform func
 29. two inputs but with different scalability
 30. decode the not pointer generator option in the graph
+31. separate the discriminator graph and the generator graph but load them together in order to train then separately

@@ -32,7 +32,6 @@ import gzip
 import os
 from cntk.tokenizer import text2charlist
 from codecs import open
-PAD_TOKEN = '[PAD]'
 
 
 def fopen(filename, mode='r'):
@@ -545,7 +544,7 @@ class DisBatcher:
         self.negative.seek(0)
         self.source.seek(0)
 
-    def next(self):
+    def next_batch(self):
         if self.end_of_data:
             self.end_of_data = False
             self.reset()
@@ -579,13 +578,13 @@ class DisBatcher:
                     abs_n = abs_p[:self.max_abs_steps]
                     art = art[:self.max_art_steps]
 
-                abs_p = abs_p + [PAD_TOKEN] * (self.max_abs_steps - len(abs_p))
-                abs_n = abs_n + [PAD_TOKEN] * (self.max_abs_steps - len(abs_n))
-                art = art + [PAD_TOKEN] * (self.max_art_steps - len(art))
-
                 abs_p = [self.vocab.word2id(w) for w in abs_p]
                 abs_n = [self.vocab.word2id(w) for w in abs_n]
                 art = [self.vocab.word2id(w) for w in art]
+
+                abs_p = abs_p + [0] * (self.max_abs_steps - len(abs_p))
+                abs_n = abs_n + [0] * (self.max_abs_steps - len(abs_n))
+                art = art + [0] * (self.max_art_steps - len(art))
 
                 positive.append(abs_p)
                 negative.append(abs_p)
@@ -605,5 +604,3 @@ class DisBatcher:
             raise StopIteration
 
         return source, positive, negative
-
-

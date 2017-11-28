@@ -91,7 +91,6 @@ class BeamSearchDecoder(object):
         if batch is None:
             return
 
-        saver.restore(self._sess, tf.train.latest_checkpoint(FLAGS.val_dir))
         # Run beam search to get best Hypothesis
         enc_states, dec_in_state, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
 
@@ -109,21 +108,18 @@ class BeamSearchDecoder(object):
         intervals"""
         t0 = time.time()
         counter = 0
-        saver.restore(self._sess, tf.train.latest_checkpoint(FLAGS.val_dir))
         while True:
-            batch = batcher.next_batch()
             # 1 example repeated across batch
+            batch = batcher.next_batch()
             if batch is None:
                 # finished decoding dataset in single_pass mode
                 assert self._hps.single_pass, (
                     "Dataset exhausted, but we are not in single_pass mode")
-                tf.logging.info(
-                    "Decoder has finished reading dataset for single_pass.")
-                tf.logging.info(
-                    "Output has been saved in %s and %s. \
-                    Now starting ROUGE eval...",
-                    self._rouge_ref_dir,
-                    self._rouge_dec_dir)
+                print("Decoder has finished reading dataset for single_pass.")
+                # print(
+                #     "Output has been saved in %s and %s. \
+                #     Now starting ROUGE eval..." % (
+                #         self._rouge_ref_dir, self._rouge_dec_dir))
                 # results_dict = rouge_eval(
                 #     self._rouge_ref_dir, self._rouge_dec_dir)
                 # rouge_log(results_dict, self._decode_dir)
@@ -168,6 +164,8 @@ class BeamSearchDecoder(object):
                 self.write_for_discriminator(
                     original_articles, original_abstracts, decoded_outputs)
                 counter += 1  # this is how many examples we've decoded
+                if counter % 10000 == 0:
+                    print("Have decoded %s samples." % (counter * FLAGS.batch_size))
             else:
                 print_results(articles_withunks, abstracts_withunks, decoded_outputs)
                 # log output to screen
@@ -330,6 +328,8 @@ def get_decode_dir_name(hps, ckpt_name):
     checkpoint we use to decode. This is called in single_pass mode."""
 
     dirname = hps.mode
-    if ckpt_name is not None:
+    if FLAGS.dec_dir:
+        dirname += "_%s" % FLAGS.dec_dir
+    else:
         dirname += "_%s" % ckpt_name
     return dirname
