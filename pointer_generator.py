@@ -274,7 +274,7 @@ class PointerGenerator(object):
         """Add the whole sequence-to-sequence model to the graph."""
         hps = self.hps
 
-        with tf.variable_scope('seq2seq'):
+        with tf.name_scope('seq2seq'):
             # Some initializers
             self.rand_unif_init = tf.random_uniform_initializer(
                 -hps.rand_unif_init_mag, hps.rand_unif_init_mag, seed=123)
@@ -291,7 +291,7 @@ class PointerGenerator(object):
             enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
             self.enc_states = enc_outputs
             self.dec_in_state = self._reduce_states(fw_st, bw_st)
-            with tf.variable_scope('decoder'):
+            with tf.variable_scope('decoder') as decoder_scope:
                 self.attn_dists, self.p_gens, self.coverage, vocab_scores, \
                     final_dists, self._dec_out_state = self._add_decoder(emb_dec_inputs, self.dec_in_state)
 
@@ -354,6 +354,8 @@ class PointerGenerator(object):
             trainable_variables = tf.trainable_variables()
             self.g_grad, _ = tf.clip_by_global_norm(tf.gradients(self.g_loss, trainable_variables), self.hps.gen_max_gradient)
             self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables))
+
+        return decoder_scope
 
     def _add_decoder(self, emb_dec_inputs, dec_in_state):
         """
@@ -447,12 +449,13 @@ class PointerGenerator(object):
         t0 = time.time()
         self._add_placeholders()
         with tf.device("/gpu:0"):
-            self._add_seq2seq()
+            decoder_scope = self._add_seq2seq()
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
         self._add_train_op()
         self._summaries = tf.summary.merge_all()
         t1 = time.time()
         tf.logging.info('Time to build graph: %i seconds', t1 - t0)
+        return decoder_scope
 
     def run_one_step(self, sess, batch, update=True):
         """Runs one training iteration. Returns a dictionary containing train
@@ -519,14 +522,14 @@ class PointerGenerator(object):
         #     # TODO: should this be changed to shape?
         return enc_states, dec_in_state
 
-    def decode_onestep(self, emb_dec_inputs, dec_in_state):
+    def decode_onestep(self, emb_dec_inputs, dec_in_state, decoder_scope):
         """
         function: decode onestep for rollout
         inputs:
             the embedded input
         """
         # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
-        with tf.variable_scope('decoder'):
+        with tf.variable_scope(decoder_scope, reuse=True):
             _, _, _, _, final_dists, new_states = self._add_decoder(emb_dec_inputs, dec_in_state)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         output_id = tf.squeeze(tf.cast(tf.multinomial(final_dists[0], 1), tf.int32))

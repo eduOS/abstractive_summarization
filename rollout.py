@@ -11,9 +11,10 @@ STOP_DECODING = '[STOP]'
 
 
 class Rollout(object):
-    def __init__(self, generator, update_rate):
+    def __init__(self, generator, update_rate, decoder_scope):
         self.generator = generator
         self.update_rate = update_rate
+        # TODO: for the variables update
         self._gen_hps = self.generator.hps
         self.g_embeddings = tf.identity(self.generator.embeddings)
 
@@ -52,13 +53,13 @@ class Rollout(object):
 
         with tf.variable_scope('rollout_loops'):
             def recurrence_given(i, dec_input, dec_in_state, given_num, gen_summ):
-                next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state)
+                next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state, decoder_scope)
                 next_input = emb_summ_ar.read(i)
                 gen_summ = gen_summ.write(i, summ_ar.read(i))
                 return i+1, next_input, new_state, given_num, gen_summ
 
             def recurrence_rollout(i, dec_input, dec_in_state, given_num, gen_summ):
-                next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state)
+                next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state, decoder_scope)
                 next_input = tf.nn.embedding_lookup(self.g_embeddings, next_input_id)
                 gen_summ = gen_summ.write(i, next_input_id)
                 return i+1, next_input, new_state, given_num, gen_summ
@@ -69,7 +70,7 @@ class Rollout(object):
                 loop_vars=(tf.constant(1, dtype=tf.int32), emb_summ_ar.read(0),
                            init_dec_in_state, self.given_num, self.gen_summ_ar))
 
-            variable_scope.get_variable_scope().reuse_variables()
+            # variable_scope.get_variable_scope().reuse_variables()
             # reuse variables between python loops is needed
 
             _, _, _, _, self.gen_summ_ar = control_flow_ops.while_loop(

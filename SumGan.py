@@ -133,7 +133,7 @@ if not os.path.exists(FLAGS.val_dir):
     os.makedirs(FLAGS.val_dir)
 
 
-def calc_running_avg_loss(loss, running_avg_loss, step, decay=0.99):
+def calc_running_avg_loss(loss, running_avg_loss, step, decay=0.9):
   """Calculate the running average loss via exponential decay.
   This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
 
@@ -373,7 +373,7 @@ def main(argv):
     print("Building generator graph ...")
     with tf.variable_scope("generator"):
         generator = PointerGenerator(hps_gen, gen_vocab)
-        generator.build_graph()
+        gen_decoder_scope = generator.build_graph()
 
     hparam_dis = [
         'mode',
@@ -426,9 +426,9 @@ def main(argv):
     hps_gan = namedtuple("HParams4GAN", hps_dict.keys())(**hps_dict)
     hps_gan = hps_gan._replace(mode="gan")
     print("Preparing rollout...")
-    # with tf.variable_scope("ROLLOUT"), tf.device("/gpu:0"):
-    #     print("Creating rollout...")
-    #     rollout = Rollout(generator, 0.8)
+    with tf.variable_scope("ROLLOUT"), tf.device("/gpu:0"):
+        print("Creating rollout...")
+        rollout = Rollout(generator, 0.8, gen_decoder_scope)
     # this is about the variable sharing conflicts
 
     saver = tf.train.Saver(max_to_keep=5)
