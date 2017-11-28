@@ -376,8 +376,10 @@ def main(argv):
         assert hps_gen.max_enc_steps == 80, "No segmentation, max_enc_steps wrong"
         assert hps_gen.max_dec_steps == 15, "No segmentation, max_dec_steps wrong"
 
-    if FLAGS.mode in ["decode", "gan"]:
+    if FLAGS.mode in ["decode", "train_gan"]:
         hps_gen = hps_gen._replace(max_dec_steps=1)
+    if FLAGS.mode == "train_gan":
+        hps_gen = hps_gen._replace(batch_size=FLAGS.batch_size * FLAGS.num_models)
 
     print("Building generator graph ...")
     with tf.variable_scope("generator"):
