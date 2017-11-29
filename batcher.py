@@ -288,7 +288,7 @@ class GenBatcher(object):
 
     BATCH_QUEUE_MAX = 100  # max number of batches the batch_queue can hold
 
-    def __init__(self, data_path, mode, vocab, hps, single_pass):
+    def __init__(self, mode, vocab, hps, single_pass):
         """Initialize the batcher. Start threads that process the data into
         batches.
 
@@ -303,7 +303,7 @@ class GenBatcher(object):
         self._vocab = vocab
         self._hps = hps
         self._single_pass = single_pass
-        self._data_path = os.path.join(data_path, mode) + "*"
+        self._data_path = os.path.join(hps.data_path, mode) + "*"
 
         # Initialize a queue of Batches waiting to be used, and a queue of
         # Examples waiting to be batched
@@ -374,6 +374,10 @@ class GenBatcher(object):
 
         batch = self._batch_queue.get()  # get the next Batch
         return batch
+
+    def reset(self):
+        if self._hps == "val":
+            self.f.seek(0)
 
     def fill_example_queue(self):
         """Reads data from file and processes into Examples which are then
@@ -467,6 +471,9 @@ class GenBatcher(object):
         """
         while True:
             filelist = glob.glob(self._data_path)  # get the list of datafiles
+            if self._hps == "val":
+                assert len(filelist) == 1, \
+                    "in val mode the len should be 1 but %s given." % len(filelist)
             assert filelist, ('Error: Empty filelist at %s' % self._data_path)
             if self._single_pass:
                 filelist = sorted(filelist)
@@ -474,6 +481,8 @@ class GenBatcher(object):
                 random.shuffle(filelist)
             for ff in filelist:
                 f = open(ff, "r", 'utf-8')
+                if self._hps == "val":
+                    self.f = f
                 while(True):
                     article_text = f.readline().strip()
                     abstract_text = f.readline().strip()

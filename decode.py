@@ -85,12 +85,8 @@ class BeamSearchDecoder(object):
             if not os.path.exists(self._rouge_dec_dir):
                 os.mkdir(self._rouge_dec_dir)
 
-    def generate(self, batcher, saver, include_start_token=False):
+    def generate(self, batch, include_start_token=False):
         # the abstract should also be generated
-        batch = batcher.next_batch()
-        if batch is None:
-            return
-
         # Run beam search to get best Hypothesis
         enc_states, dec_in_state, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
 
@@ -100,9 +96,9 @@ class BeamSearchDecoder(object):
             outputs_ids = [[int(t) for t in best_hyp.tokens[:]] for best_hyp in best_hyps]
         else:
             outputs_ids = [[int(t) for t in best_hyp.tokens[1:]] for best_hyp in best_hyps]
-        return batch, enc_states, dec_in_state, outputs_ids
+        return enc_states, dec_in_state, outputs_ids
 
-    def decode(self, batcher, saver):
+    def decode(self, batcher):
         """Decode examples until data is exhausted (if self._hps.single_pass) and
         return, or decode indefinitely, loading latest checkpoint at regular
         intervals"""

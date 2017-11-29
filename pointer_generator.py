@@ -451,6 +451,7 @@ class PointerGenerator(object):
         with tf.device("/gpu:0"):
             decoder_scope = self._add_seq2seq()
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
+        self.least_val_loss = tf.Variable(1000.0, name='least_val_loss', trainable=False)
         self._add_train_op()
         self._summaries = tf.summary.merge_all()
         t1 = time.time()

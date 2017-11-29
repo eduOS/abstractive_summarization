@@ -2,10 +2,10 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 import tensorflow as tf
+from tensorflow.python import pywrap_tensorflow
 from collections import namedtuple
 import numpy as np
 import sys
-import os
 import datetime
 import gen_utils
 import time
@@ -16,6 +16,8 @@ from decode import BeamSearchDecoder
 from pointer_generator import PointerGenerator
 from rollout import Rollout
 from data import gen_vocab2dis_vocab
+from os.path import join as join_path
+from utils import ensure_exists
 
 from res_discriminator import Seq2ClassModel
 from data import Vocab
@@ -29,6 +31,7 @@ tf.app.flags.DEFINE_string(
 # ------------------------------------- common
 tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training.")
 tf.app.flags.DEFINE_boolean('restore_best_model', False, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
+tf.app.flags.DEFINE_boolean('steps_per_checkpoint', 1000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 
 # ------------------------------------- discriminator
 
@@ -41,7 +44,6 @@ tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
 tf.app.flags.DEFINE_integer("dis_vocab_size", 10000, "vocabulary size.")
 tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
-tf.app.flags.DEFINE_string("buckets", "9,12,20,40", "buckets of different lengths")
 tf.app.flags.DEFINE_integer("num_models", 8, "Size of each model layer. The actural size is doubled.")
 
 # Training parameters
@@ -54,7 +56,7 @@ tf.app.flags.DEFINE_integer("max_steps", -1, "max number of steps to train")
 # Misc
 tf.app.flags.DEFINE_string("dis_data_dir", "./js_corpus", "Data directory")
 tf.app.flags.DEFINE_string("model_dir", "./model", "Training directory.")
-tf.app.flags.DEFINE_string("val_dir", "./model/val/", "Training directory.")
+tf.app.flags.DEFINE_string("val_dir", "val", "Training directory.")
 tf.app.flags.DEFINE_integer("gpu_id", 0, "Select which gpu to use.")
 
 # Mode
@@ -120,18 +122,13 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
                             '(same name with _cov_init appended)\ that will be ready to run with coverage flag turned on,\ for the coverage training stage.')
 
 FLAGS = tf.app.flags.FLAGS
-_buckets = map(int, re.split(' |,|;', FLAGS.buckets))
 
 assert FLAGS.mode in ["pretrain_gen", "pretrain_dis", "train_gan", "decode"]
 
 if FLAGS.mode == "train_gan":
     FLAGS.single_pass = False
 
-if not os.path.exists(FLAGS.model_dir):
-    os.makedirs(FLAGS.model_dir)
-
-if not os.path.exists(FLAGS.val_dir):
-    os.makedirs(FLAGS.val_dir)
+ensure_exists(FLAGS.model_dir)
 
 
 def calc_running_avg_loss(loss, running_avg_loss, step, decay=0.9):
@@ -159,70 +156,89 @@ def calc_running_avg_loss(loss, running_avg_loss, step, decay=0.9):
     return running_avg_loss
 
 
-def pretrain_generator(model, batcher, sess_context_manager, batcher_val, saver):
+def pretrain_generator(model, batcher, sess, val_batcher, saver):
     """Repeatedly runs training iterations, logging loss to screen and writing
     summaries"""
     print("starting run_training")
-    saver_val = tf.train.Saver(max_to_keep=2)
-    bestmodel_save_path = os.path.join(FLAGS.val_dir, 'bestmodel')
+    # get reload the
+    val_saver = tf.train.Saver(max_to_keep=10,
+                               var_list=[v for v in tf.all_variables() if "generator" in v.name])
+
+    best_loss = None  # will hold the best loss achieved so far
+    val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
+    ckpt = tf.train.get_checkpoint_state(val_dir)
+    if ckpt:
+        reader = pywrap_tensorflow.NewCheckpointReader(ckpt.model_checkpoint_path)
+        var_to_shape_map = reader.get_variable_to_shape_map()
+        best_loss = reader.get_tensor(
+            [key for key in var_to_shape_map if "least_val_loss" in key][0])
+    # get the val loss score
+    bestmodel_save_path = join_path(FLAGS.val_dir, 'bestmodel')
     coverage_loss = None
     hps = model.hps
     # this is where checkpoints of best models are saved
     running_avg_loss = 0
     # the eval job keeps a smoother, running average loss to tell it when to
     # implement early stopping
-    best_loss = None  # will hold the best loss achieved so far
-    with sess_context_manager as sess:
-        print_gap = 1000
-        while True:  # repeats until interrupted
-            batch = batcher.next_batch()
+    while True:  # repeats until interrupted
+        batch = batcher.next_batch()
+        if batch is None:
+            return None
 
-            # print('running training step...')
-            t0 = time.time()
-            results = model.run_one_step(sess, batch)
-            t1 = time.time()
-            step = results['global_step']
-            # print('seconds for training step: %.3f', t1-t0)
+        # print('running training step...')
+        t0 = time.time()
+        results = model.run_one_step(sess, batch)
+        t1 = time.time()
+        step = results['global_step']
+        # print('seconds for training step: %.3f', t1-t0)
 
-            loss = results['loss']
-            # print('loss: %f', loss)  # print the loss to screen
-            if hps.coverage:
-                coverage_loss = results['coverage_loss']
-                # print the coverage loss to screen
-                # print("coverage_loss: %f", coverage_loss)
+        loss = results['loss']
+        # print('loss: %f', loss)  # print the loss to screen
+        if hps.coverage:
+            coverage_loss = results['coverage_loss']
+            # print the coverage loss to screen
+            # print("coverage_loss: %f", coverage_loss)
 
-            running_avg_loss = calc_running_avg_loss(
-                np.asscalar(loss), running_avg_loss, step)
+        running_avg_loss = calc_running_avg_loss(
+            np.asscalar(loss), running_avg_loss, step)
 
-            if step * 2 % print_gap == 0:
-                model_path = os.path.join(hps.model_dir, "model")
-                saver.save(sess, model_path, global_step=step)
-                print(
-                    'Saving model with %.3f running_avg_loss. Saving to %s %s' %
-                    (running_avg_loss, model_path,
-                        datetime.datetime.now().strftime("on %m-%d at %H:%M")))
+        if step % FLAGS.steps_per_checkpoint == 0:
+            model_path = join_path(hps.model_dir, "model")
+            saver.save(sess, model_path, global_step=step)
+            print(
+                'Saving model with %.3f running_avg_loss. Saving to %s %s' %
+                (running_avg_loss, model_path,
+                    datetime.datetime.now().strftime("on %m-%d at %H:%M")))
 
-            if step % print_gap == 0:
+            # check if it is the best checkpoint so far
+            losses = []
+            while True:
+                val_batch = val_batcher.next_batch()
+                if not val_batch:
+                    val_batcher.reset()
+                    break
                 results_val = model.run_one_step(
-                    sess, batcher_val.next_batch(), update=False)
-                loss_val = results_val["loss"]
-                if best_loss is None or loss_val < best_loss:
-                    print(
-                        'Found new best model with %.3f running_avg_loss. Saving to %s %s' %
-                        (loss_val, bestmodel_save_path,
-                         datetime.datetime.now().strftime("on %m-%d at %H:%M")))
-                    saver_val.save(sess, bestmodel_save_path, global_step=step, latest_filename="checkpoint_best")
-                    best_loss = loss_val
-
+                    sess, val_batch, update=False)
+                losses.append(results_val["loss"])
+            eval_loss = sum(losses) / len(losses)
+            if best_loss is None or eval_loss < best_loss:
+                sess.run(model.least_val_loss.assign(eval_loss))
                 print(
-                  "\nDashboard updated %s, finished steps:\t%s\n"
-                  "\tBatch size:\t%s\n"
-                  "\tVocabulary size:\t%s\n"
-                  "\tArticles trained:\t%s\n"
-                  "\tTotal training time approxiately:\t%.4f hours\n"
-                  "\tCurrent speed:\t%.4f seconds/article\n"
-                  "\tLoss:\t%.4f;"
-                  "\tand coverage loss:\t%s\n" % (
+                    'Found new best model with %.3f running_avg_loss. Saving to %s %s' %
+                    (eval_loss, bestmodel_save_path,
+                        datetime.datetime.now().strftime("on %m-%d at %H:%M")))
+                val_saver.save(sess, bestmodel_save_path, global_step=step, latest_filename="checkpoint_best")
+                best_loss = eval_loss
+
+            print(
+                "\nDashboard updated %s, finished steps:\t%s\n"
+                "\tBatch size:\t%s\n"
+                "\tVocabulary size:\t%s\n"
+                "\tArticles trained:\t%s\n"
+                "\tTotal training time approxiately:\t%.4f hours\n"
+                "\tCurrent speed:\t%.4f seconds/article\n"
+                "\tLoss:\t%.4f;"
+                "\tand coverage loss:\t%s\n" % (
                     datetime.datetime.now().strftime("on %m-%d at %H:%M"),
                     step,
                     hps.batch_size,
@@ -232,11 +248,11 @@ def pretrain_generator(model, batcher, sess_context_manager, batcher_val, saver)
                     (t1-t0) / hps.batch_size,
                     running_avg_loss,
                     coverage_loss if hps.coverage else "not set",
-                  )
-                )
+                    )
+            )
 
 
-def pretrain_discriminator(sess_context_manager, model, vocab, batcher):
+def pretrain_discriminator(sess_context_manager, model, vocab, batcher, saver):
     """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
     # TODO: load two pretained model: the generator and the embedding
     hps = model.hps
@@ -269,17 +285,19 @@ def pretrain_discriminator(sess_context_manager, model, vocab, batcher):
                     dump_model = False
                     # Run evals on development set and print their perplexity.
                     eval_losses = []
-                    for bucket_id_eval in range(len(_buckets)):
-                        while True:
-                            batch = eval_batcher.next()
-                            eval_inputs, eval_conditions, eval_targets = \
-                                data.prepare_dis_pretraining_batch(batch)
-                            step_loss = model.run_one_step(
-                                sess_context_manager, eval_inputs, eval_conditions,
-                                eval_targets, update=False)
-                            eval_losses.append(step_loss)
+                    while True:
+                        batch = eval_batcher.next_batch()
+                        if not batch[0]:
+                            eval_batcher.reset()
+                            break
+                        eval_inputs, eval_conditions, eval_targets = \
+                            data.prepare_dis_pretraining_batch(batch)
+                        step_loss = model.run_one_step(
+                            sess_context_manager, eval_inputs, eval_conditions,
+                            eval_targets, update=False)
+                        eval_losses.append(step_loss)
                     eval_loss = sum(eval_losses) / len(eval_losses)
-                    print("  eval loss %.4f" % eval_loss)
+                    print("Eval loss %.4f" % eval_loss)
                     previous_losses.append(eval_loss)
                     sys.stdout.flush()
                     threshold = 10
@@ -295,7 +313,7 @@ def pretrain_discriminator(sess_context_manager, model, vocab, batcher):
                         eval_loss_best = eval_loss
                 # Save checkpoint and zero timer and loss.
                 if dump_model:
-                    checkpoint_path = os.path.join(hps.model_dir, "translate.ckpt")
+                    checkpoint_path = ensure_exists(join_path(hps.model_dir, "translate.ckpt"))
                     model.saver.save(sess, checkpoint_path, global_step=model.global_step)
                 step_time, loss = 0.0, 0.0
                 if current_step >= hps.max_steps:
@@ -334,7 +352,7 @@ def main(argv):
     # Create a batcher object that will create minibatches of data
     # TODO change to pass number
 
-    # --------------- build graph ---------------
+    # --------------- building graph ---------------
     hparam_gen = [
         'mode',
         'model_dir',
@@ -366,9 +384,7 @@ def main(argv):
 
     hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
     print("Building vocabulary for generator ...")
-    gen_vocab = Vocab(os.path.join(hps_gen.data_path, 'gen_vocab'), hps_gen.gen_vocab_size)
-    gen_batcher_train = GenBatcher(hps_gen.data_path, "train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
-    gen_batcher_val = GenBatcher(hps_gen.data_path, "val", gen_vocab, hps_gen, single_pass=False)
+    gen_vocab = Vocab(join_path(hps_gen.data_path, 'gen_vocab'), hps_gen.gen_vocab_size)
 
     if FLAGS.segment is not True:
         hps_gen = hps_gen._replace(max_enc_steps=110)
@@ -392,7 +408,6 @@ def main(argv):
         'model_dir',
         'dis_vocab_size',
         'num_class',
-        'buckets',
         'layer_size',
         'conv_layers',
         'kernel_size',
@@ -416,7 +431,7 @@ def main(argv):
 
     hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
     print("Building vocabulary for discriminator ...")
-    dis_vocab = Vocab(os.path.join(hps_dis.data_path, 'dis_vocab'), hps_dis.dis_vocab_size)
+    dis_vocab = Vocab(join_path(hps_dis.data_path, 'dis_vocab'), hps_dis.dis_vocab_size)
     # the decode mode is refering to the decoding process of the generator
     print("Building discriminator graph ...")
     with tf.variable_scope("discriminator"), tf.device("/gpu:0"):
@@ -438,56 +453,79 @@ def main(argv):
     hps_gan = namedtuple("HParams4GAN", hps_dict.keys())(**hps_dict)
     hps_gan = hps_gan._replace(mode="gan")
     print("Preparing rollout...")
-    with tf.variable_scope("ROLLOUT"), tf.device("/gpu:0"):
+    with tf.variable_scope("rollout"), tf.device("/gpu:0"):
         print("Creating rollout...")
         rollout = Rollout(generator, 0.8, gen_decoder_scope)
-    # this is about the variable sharing conflicts
 
-    saver = tf.train.Saver(max_to_keep=5)
-    print("Creating session..")
+    # --------------- initializing variables ---------------
     sess = tf.Session(config=gen_utils.get_config())
-    if ("train" in FLAGS.mode and FLAGS.restore_best_model) or FLAGS.mode in ["decode", "train_gan"]:
-        print("Restoring models from best checkpoint...")
-        saver.restore(sess, tf.train.get_checkpoint_state(
-            FLAGS.val_dir, latest_filename="checkpoint_best").model_checkpoint_path)
-    elif "train" in FLAGS.mode:
-        try:
-            print("Restoring models from the latest checkpoint...")
-            saver.restore(sess, tf.train.latest_checkpoint(hps_gen.model_dir))
-        except:
-            print("Initializing variables to train from scratch..")
-            init = tf.global_variables_initializer()
-            sess.run(init)
+    sess.run(tf.global_variables_initializer())
+    if FLAGS.mode == "pretrain_gen":
+        print("Restoring the generator model from the latest checkpoint...")
+        gen_saver = tf.train.Saver(
+            max_to_keep=3, var_list=[v for v in tf.all_variables() if "generator" in v.name])
+        gen_dir = ensure_exists(join_path(FLAGS.model_dir, "generator"))
+        ckpt = tf.train.get_checkpoint_state(gen_dir)
+        if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
+            gen_saver.restore(sess, tf.train.latest_checkpoint(gen_dir))
+        else:
+            print("No model stored..")
 
-    print("Creating beam search...")
-    with tf.variable_scope("beam_search"), tf.device("/gpu:0"):
-        decoder = BeamSearchDecoder(sess, generator, gen_vocab)
+    elif FLAGS.mode in ["decode", "train_gan"]:
+        print("Restoring the generator model from the best checkpoint...")
+        dec_saver = tf.train.Saver(
+            max_to_keep=3, var_list=[v for v in tf.all_variables() if "generator" in v.name])
+        rollout_saver = tf.train.Saver(
+            max_to_keep=3, var_list=[v for v in tf.all_variables() if "rollout" in v.name])
+        val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
+        ckpt = tf.train.get_checkpoint_state(val_dir, latest_filename="checkpoint_best")
+        if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
+            dec_saver.restore(sess, ckpt.model_checkpoint_path)
+        else:
+            print("No model stored..")
+            if FLAGS.mode == "train_gan":
+                print("Something went wrong you need to figure the right generator checkpoint.")
+                raise
+        rlt_dir = ensure_exists(join_path(FLAGS.model_dir, 'rollout'))
+        ckpt = tf.train.get_checkpoint_state(rlt_dir)
+        if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
+            rollout_saver.restore(sess, tf.train.latest_checkpoint(rlt_dir))
+        else:
+            print("No previous rollout model stored..")
 
-    # initialize the embeddings at the begging of training
-    ckpt = tf.train.get_checkpoint_state(hps_dis.model_dir)
-    if ckpt and not tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
-        discriminator.init_emb(sess, hps_dis.model_dir)
+    elif FLAGS.mode in ["pretrain_dis", "train_gan"]:
+        dis_saver = tf.train.Saver(
+            max_to_keep=3, var_list=[v for v in tf.all_variables() if "discriminator" in v.name])
+        dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
+        ckpt = tf.train.get_checkpoint_state(dis_dir)
+        if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
+            dis_saver.restore(sess, ckpt.model_checkpoint_path)
+        else:
+            # initialize the embeddings at the begging of training
+            discriminator.init_emb(sess, join_path(FLAGS.model_dir, "init_embed"))
+            print("No model stored..")
 
-    # --------------- train generator ---------------
+    # --------------- train models ---------------
+    decoder = BeamSearchDecoder(sess, generator, gen_vocab)
+    gen_batcher_train = GenBatcher("train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
+    gen_batcher_val = GenBatcher("val", gen_vocab, hps_gen, single_pass=True)
     if FLAGS.mode == "pretrain_gen":
         print('Going to pretrain the generator')
         try:
-            pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, saver)
+            pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, gen_saver)
         except KeyboardInterrupt:
             tf.logging.info("Caught keyboard interrupt on worker....")
 
-    # --------------- train discriminator -----------
     elif FLAGS.mode == "pretrain_dis":
         print('Going to pretrain the discriminator')
         dis_batcher = DisBatcher(
             hps_dis.data_path, "decode", dis_vocab, hps_dis.batch_size * hps_dis.num_models,
             single_pass=hps_dis.single_pass)
         try:
-            pretrain_discriminator(sess, discriminator, dis_vocab, dis_batcher)
+            pretrain_discriminator(sess, discriminator, dis_vocab, dis_batcher, dis_saver)
         except KeyboardInterrupt:
             tf.logging.info("Caught keyboard interrupt on worker....")
 
-    # --------------- finetune the generator --------
     elif FLAGS.mode == "train_gan":
         print('Going to tune the two using Gan')
         # decode_model_hps = hps_gen
@@ -498,8 +536,9 @@ def main(argv):
             # Train the generator for one step
             for it in range(hps_gan.gan_gen_iter):
                 # can this be self.batch in decoder?
+                batch = gen_batcher_train.next_batch()
                 source_batch, enc_states, enc_padding_mask, dec_in_state, best_samples = decoder.generate(
-                    gen_batcher_train, saver, include_start_token=True)
+                    batch, include_start_token=True)
                 rewards = rollout.get_reward(
                     sess, gen_vocab, dis_vocab, source_batch, enc_states, source_batch.enc_padding_mask,
                     dec_in_state, best_samples, 16, discriminator)
@@ -519,9 +558,12 @@ def main(argv):
                 _ = sess.run(generator.g_updates, feed_dict=feed_dict)
 
             # Test
-            print('Going to test the generator.' % it)
+            print('Going to test the generator.')
             if hps_gan.i_gan % 5 == 0 or hps_gan.i_gan == hps_gan.gan_iter - 1:
-                source_batch, enc_states, dec_in_state, best_samples = decoder.generate(gen_batcher_val, saver)
+                batch = gen_batcher_val.next_batch()
+                if batch is None:
+                    return
+                source_batch, enc_states, dec_in_state, best_samples = decoder.generate(batch)
                 # the true abstract is source_batch.dec_batch
                 summary, test_loss, step = generator.run_eval_step(sess, source_batch)
                 buffer = 'step:\t' + str(step) + '\tloss:\t' + str(test_loss) + '\n'
@@ -532,7 +574,8 @@ def main(argv):
             print('Going to train the discriminator.' % it)
             for _ in range(hps_gan.gan_dis_iter):
                 for _ in range(3):
-                    source_batch, enc_states, dec_in_state, samples_words = decoder.generate(gen_batcher_train)
+                    batch = gen_batcher_train.next_batch()
+                    source_batch, enc_states, dec_in_state, samples_words = decoder.generate(batch)
                     articles_oovs = source_batch.art_oovs if hps_gen.pointer_gen else None
 
                     samples_chars = gen_vocab2dis_vocab(
@@ -554,9 +597,10 @@ def main(argv):
 
                     discriminator.run_one_step(sess, inputs, conditions, targets)
 
+    # --------------- decoding samples ---------------
     elif FLAGS.mode == "decode":
         print('Going to decode from the generator.')
-        decoder.decode(gen_batcher_train, saver)
+        decoder.decode(gen_batcher_train)
         print("Finished decoding..")
         # decode for generating corpus for discriminator
 
