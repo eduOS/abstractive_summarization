@@ -32,9 +32,9 @@ def load_ckpt(saver, sess, dire, force=False):
             saver.restore(sess, ckpt_state.model_checkpoint_path)
             return ckpt_state.model_checkpoint_path
         except:
-            print("Failed to load checkpoint from %s. Sleeping for %i secs..." %
-                  (dire, 10))
+            print("Failed to load checkpoint from %s." % dire)
             if not force:
                 return
             else:
+                print("Failed to load checkpoint from %s. Sleeping %s munites to waite." % (dire, 10))
                 time.sleep(10)

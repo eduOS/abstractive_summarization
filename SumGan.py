@@ -240,9 +240,9 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
         inputs, conditions, targets = data.prepare_dis_pretraining_batch(batch)
         if inputs.shape[0] != hps.batch_size * hps.num_models * 2:
             print("The expected batch_size is %s but given %s, escape.." %
-                  (hps.batch_size * hps.num_models, inputs.shape[0]))
+                  (hps.batch_size * hps.num_models * 2, inputs.shape[0]))
             continue
-        step_loss = model.run_one_step(
+        step_loss, _ = model.run_one_step(
             sess, inputs, conditions, targets, update=True)
         step_time += (time.time() - start_time) / hps.steps_per_checkpoint
         loss += step_loss / hps.steps_per_checkpoint
@@ -259,6 +259,7 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
                 dump_model = False
                 # Run evals on development set and print their perplexity.
                 eval_losses = []
+                eval_accuaracies = []
                 while True:
                     batch = eval_batcher.next_batch()
                     if not batch[0]:
@@ -266,12 +267,18 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
                         break
                     eval_inputs, eval_conditions, eval_targets = \
                         data.prepare_dis_pretraining_batch(batch)
-                    step_loss = model.run_one_step(
+                    if eval_inputs.shape[0] != hps.batch_size * hps.num_models * 2:
+                        print("The expected batch_size is %s but given %s, escape.." %
+                              (hps.batch_size * hps.num_models * 2, eval_inputs.shape[0]))
+                        continue
+                    step_loss, accuracy = model.run_one_step(
                         sess, eval_inputs, eval_conditions,
                         eval_targets, update=False)
                     eval_losses.append(step_loss)
+                    eval_accuaracies.append(accuracy)
                 eval_loss = sum(eval_losses) / len(eval_losses)
-                print("Eval loss %.4f" % eval_loss)
+                eval_accuaracy = sum(eval_accuaracies) / len(eval_accuaracies)
+                print("Eval loss %.4f, accuracy is %.4f" % (eval_loss, eval_accuaracy))
                 previous_losses.append(eval_loss)
                 sys.stdout.flush()
                 threshold = 10
@@ -333,7 +340,7 @@ def main(argv):
             hps_dict[key] = val  # add it to the dict
 
     hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
-    if FLAGS.mode is not "pretrain_dis":
+    if FLAGS.mode != "pretrain_dis":
         print("Building vocabulary for generator ...")
         gen_vocab = Vocab(join_path(hps_gen.data_path, 'gen_vocab'), hps_gen.gen_vocab_size)
 
@@ -350,8 +357,8 @@ def main(argv):
         hps_gen = hps_gen._replace(batch_size=FLAGS.batch_size * FLAGS.num_models)
 
     with tf.variable_scope("generator"):
-        generator = PointerGenerator(hps_gen, gen_vocab)
-        if FLAGS.mode is not "pretrain_dis":
+        if FLAGS.mode != "pretrain_dis":
+            generator = PointerGenerator(hps_gen, gen_vocab)
             print("Building generator graph ...")
             gen_decoder_scope = generator.build_graph()
 
@@ -447,9 +454,10 @@ def main(argv):
             discriminator.init_emb(sess, join_path(FLAGS.model_dir, "init_embed"))
 
     # --------------- train models ---------------
-    decoder = BeamSearchDecoder(sess, generator, gen_vocab)
-    gen_batcher_train = GenBatcher("train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
-    gen_batcher_val = GenBatcher("val", gen_vocab, hps_gen, single_pass=True)
+    if FLAGS.mode != "pretrain_dis":
+        decoder = BeamSearchDecoder(sess, generator, gen_vocab)
+        gen_batcher_train = GenBatcher("train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
+        gen_batcher_val = GenBatcher("val", gen_vocab, hps_gen, single_pass=True)
     if FLAGS.mode == "pretrain_gen":
         print('Going to pretrain the generator')
         try:

@@ -557,7 +557,7 @@ class DisBatcher:
         if self.end_of_data:
             self.end_of_data = False
             self.reset()
-            raise StopIteration
+            # raise StopIteration
 
         positive = []
         negative = []
@@ -575,9 +575,9 @@ class DisBatcher:
                     # the generated negative abstract may be empty
                     continue
 
-                abs_p = text2charlist(abs_p)
-                abs_n = text2charlist(abs_n)
-                art = text2charlist(art)
+                abs_p = text2charlist(abs_p, keep_word='[UNK]')
+                abs_n = text2charlist(abs_n, keep_word='[UNK]')
+                art = text2charlist(art, keep_word='[UNK]')
 
                 if not self.clip_length:
                     if len(abs_p) > self.max_abs_steps or len(abs_n) > self.max_abs_steps or len(art) > self.max_art_steps:

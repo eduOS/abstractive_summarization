@@ -79,7 +79,8 @@ class Seq2ClassModel(object):
       probs = []
       for m in xrange(self.num_models):
         with tf.variable_scope("model"+str(m)):
-          probs.append(self._seq2class_model(self.inputs, self.condition, self.targets, self.is_decoding))
+          prob, _ = self._seq2class_model(self.inputs, self.condition, self.targets, self.is_decoding)
+          probs.append(prob)
       self.output = tf.argmax(sum(probs), axis=1)
       # would this lead the value run out to be a list of only one two
       # dimensional numpy array?
@@ -89,15 +90,15 @@ class Seq2ClassModel(object):
       self.loaders = []
       for m in xrange(self.num_models):
         with tf.variable_scope("model"+str(m)) as sc:
-          loss_train.append(tf.expand_dims(
-              self._seq2class_model(
-                  self.inputs_splitted[m], self.conditions_splitted[m],
-                  self.targets_splitted[m], self.is_decoding), 0))
+          loss, self.accuracy = self._seq2class_model(
+              self.inputs_splitted[m], self.conditions_splitted[m],
+              self.targets_splitted[m], self.is_decoding)
+          loss_train.append(tf.expand_dims(loss, 0))
           sc.reuse_variables()
-          loss_cv.append(tf.expand_dims(
-              self._seq2class_model(
-                self.inputs_splitted[m], self.conditions_splitted[m],
-                self.targets_splitted[m], self.is_decoding), 0))
+          loss_, _ = self._seq2class_model(
+            self.inputs_splitted[m], self.conditions_splitted[m],
+            self.targets_splitted[m], self.is_decoding)
+          loss_cv.append(tf.expand_dims(loss_, 0))
           var_dict = {}
           var_dict["embed/char_embedding"] = tf.get_variable("embed/char_embedding")
           self.loaders.append(tf.train.Saver(var_dict))
@@ -156,11 +157,12 @@ class Seq2ClassModel(object):
     with tf.variable_scope("projection"):
       logits = tf.matmul(conditional_encoder_outputs, tf.transpose(class_output_weights/(tf.norm(class_output_weights, axis=1, keep_dims=True)+1e-20)))
       if is_decoding:
-        return tf.nn.softmax(logits)
+        return (tf.nn.softmax(logits), None)
       else:
         # loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=targets))
         loss = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=targets)
-        return loss
+        accuracy = tf.count_nonzero(tf.equal(tf.argmax(logits, 1), tf.argmax(targets))) / logits.get_shape().as_list()[0]
+        return (loss, accuracy)
 
   def run_one_step(self, sess, inputs, conditions, targets, update=False, do_profiling=False):
     """Run a step of the model feeding the given inputs.
@@ -194,7 +196,7 @@ class Seq2ClassModel(object):
     elif update:
       output_feed = [self.loss, self.update]  # Update Op that does SGD. Loss for this batch.
     else:
-      output_feed = [self.indicator]  # Loss for this batch.
+      output_feed = [self.indicator, self.accuracy]  # Loss for this batch.
 
     if do_profiling:
       self.run_metadata = tf.RunMetadata()
@@ -207,4 +209,4 @@ class Seq2ClassModel(object):
     else:
       outputs = sess.run(output_feed, input_feed)
 
-    return outputs[0]
+    return outputs
