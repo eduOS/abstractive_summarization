@@ -238,7 +238,7 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
         start_time = time.time()
         batch = batcher.next_batch()
         inputs, conditions, targets = data.prepare_dis_pretraining_batch(batch)
-        if inputs.shape[0] != hps.batch_size * hps.num_models:
+        if inputs.shape[0] != hps.batch_size * hps.num_models * 2:
             print("The expected batch_size is %s but given %s, escape.." %
                   (hps.batch_size * hps.num_models, inputs.shape[0]))
             continue
