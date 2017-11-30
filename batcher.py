@@ -584,7 +584,7 @@ class DisBatcher:
                         continue
                 else:
                     abs_p = abs_p[:self.max_abs_steps]
-                    abs_n = abs_p[:self.max_abs_steps]
+                    abs_n = abs_n[:self.max_abs_steps]
                     art = art[:self.max_art_steps]
 
                 abs_p = [self.vocab.word2id(w) for w in abs_p]
@@ -602,7 +602,7 @@ class DisBatcher:
                 if len(positive) >= self.batch_size:
                     break
         except IOError:
-            print("IOError")
+            print("IOError, reaches the end")
             if self.single_pass:
                 return None, None, None
             self.end_of_data = True

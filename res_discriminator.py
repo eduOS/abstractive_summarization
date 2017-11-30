@@ -161,7 +161,7 @@ class Seq2ClassModel(object):
       else:
         # loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=targets))
         loss = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=targets)
-        accuracy = tf.count_nonzero(tf.equal(tf.argmax(logits, 1), tf.argmax(targets))) / logits.get_shape().as_list()[0]
+        accuracy = tf.count_nonzero(tf.equal(tf.argmax(logits, 1), tf.argmax(targets, 1))) / logits.get_shape().as_list()[0]
         return (loss, accuracy)
 
   def run_one_step(self, sess, inputs, conditions, targets, update=False, do_profiling=False):

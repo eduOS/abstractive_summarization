@@ -32,6 +32,7 @@ tf.app.flags.DEFINE_string(
 tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training.")
 tf.app.flags.DEFINE_boolean('restore_best_model', False, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_integer('steps_per_checkpoint', 1000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
+tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decay by this rate')
 
 # ------------------------------------- discriminator
 
@@ -233,7 +234,7 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
     previous_losses = [eval_loss_best]
     if hps.early_stop:
         eval_batcher = DisBatcher(
-            hps.data_path, "eval", vocab, hps.batch_size * hps.num_models, single_pass=hps.single_pass)
+            hps.data_path, "eval", vocab, hps.batch_size * hps.num_models, single_pass=True)
     while True:
         start_time = time.time()
         batch = batcher.next_batch()
@@ -367,6 +368,7 @@ def main(argv):
         'model_dir',
         'dis_vocab_size',
         'steps_per_checkpoint',
+        'learning_rate_decay_factor',
         'dis_vocab',
         'num_class',
         'layer_size',
