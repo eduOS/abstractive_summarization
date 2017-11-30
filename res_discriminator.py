@@ -37,7 +37,8 @@ class Seq2ClassModel(object):
     """
     # TODO: is_decoding affects the graph loading? since the graph is differenct
     # if this differs
-    self.is_decoding = 'gan' in hps.mode
+    self.hps = hps
+    self.is_decoding = ('gan' in hps.mode)
     self.vocab_size = hps.dis_vocab_size
     with tf.variable_scope("OptimizeLoss"):
       self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(hps.dis_lr))
@@ -98,7 +99,7 @@ class Seq2ClassModel(object):
                 self.inputs_splitted[m], self.conditions_splitted[m],
                 self.targets_splitted[m], self.is_decoding), 0))
           var_dict = {}
-          var_dict["embed/char_embeddings"] = tf.get_variable("embed/char_embeddings")
+          var_dict["embed/char_embedding"] = tf.get_variable("embed/char_embedding")
           self.loaders.append(tf.train.Saver(var_dict))
       loss_train = tf.reduce_mean(tf.concat(loss_train, 0))
       loss_cv = tf.reduce_mean(tf.concat(loss_cv, 0))
@@ -118,14 +119,14 @@ class Seq2ClassModel(object):
     batch_size = inputs.get_shape()[0].value
     input_length = inputs.get_shape()[1].value
     condition_length = conditions.get_shape()[1].value
-    # embeddings params
+    # embedding params
     with tf.variable_scope("embed"):
-      char_embeddings = tf.contrib.framework.model_variable("char_embeddings",
-                                                            shape=[self.vocab_size, self.layer_size],
-                                                            dtype=tf.float32,
-                                                            initializer=tf.truncated_normal_initializer(0.0, 0.01),
-                                                            collections=[tf.GraphKeys.WEIGHTS],
-                                                            trainable=True)
+      char_embedding = tf.contrib.framework.model_variable("char_embedding",
+                                                           shape=[self.vocab_size, self.layer_size],
+                                                           dtype=tf.float32,
+                                                           initializer=tf.truncated_normal_initializer(0.0, 0.01),
+                                                           collections=[tf.GraphKeys.WEIGHTS],
+                                                           trainable=True)
       class_output_weights = tf.contrib.framework.model_variable("class_output_weights",
                                                                  shape=[self.num_class, self.layer_size*2],
                                                                  dtype=tf.float32,
@@ -136,8 +137,8 @@ class Seq2ClassModel(object):
     with tf.variable_scope("encoder"):
       input_masks = tf.greater(inputs, 0)
       condition_masks = tf.greater(conditions, 0)
-      emb_inputs = tf.nn.embedding_lookup(char_embeddings, inputs)
-      emb_conditions = tf.nn.embedding_lookup(char_embeddings, conditions)
+      emb_inputs = tf.nn.embedding_lookup(char_embedding, inputs)
+      emb_conditions = tf.nn.embedding_lookup(char_embedding, conditions)
       # substitute pads with zeros
       emb_inputs = tf.reshape(tf.where(tf.reshape(input_masks, [-1]),
                                        tf.reshape(emb_inputs, [-1, self.layer_size]),
@@ -182,10 +183,10 @@ class Seq2ClassModel(object):
     """
     # Input feed: encoder inputs, decoder inputs, target_weights, as provided.
     input_feed = {}
-    input_feed[self.inputs.name] = inputs
-    input_feed[self.conditions.name] = conditions
+    input_feed[self.inputs] = inputs
+    input_feed[self.conditions] = conditions
     if not self.is_decoding:
-      input_feed[self.targets.name] = targets
+      input_feed[self.targets] = targets
 
     # Output feed.
     if self.is_decoding:

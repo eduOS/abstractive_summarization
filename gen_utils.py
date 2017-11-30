@@ -1,55 +1,58 @@
-# Copyright 2016 The TensorFlow Authors. All Rights Reserved.
-# Modifications Copyright 2017 Abigail See
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
+# -*- coding: utf-8 -*-
 
-"""This file contains some utility functions"""
 from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
-
-
 import tensorflow as tf
-import time
-FLAGS = tf.app.flags.FLAGS
+import utils
 
 
-def get_config():
-    """Returns config for tf.session"""
-    config = tf.ConfigProto(allow_soft_placement=True)
-    config.gpu_options.per_process_gpu_memory_fraction = 0.9
-    config.gpu_options.allow_growth = True
-    return config
+def convert_to_coverage_model():
+    """Load non-coverage checkpoint, add initialized extra variables for
+    coverage, and save as new checkpoint"""
+    print("converting non-coverage model to coverage model..")
+
+    # initialize an entire coverage model from scratch
+    sess = tf.Session(config=utils.get_config())
+    print("initializing everything...")
+    sess.run(tf.global_variables_initializer())
+
+    # load all non-coverage weights from checkpoint
+    saver = tf.train.Saver([v for v in tf.global_variables() if "coverage" not in v.name and "Adagrad" not in v.name])
+    print("restoring non-coverage variables...")
+    curr_ckpt = utils.load_ckpt(saver, sess)
+    print("restored.")
+
+    # save this model and quit
+    new_fname = curr_ckpt + '_cov_init'
+    print("saving model to %s..." % (new_fname))
+    new_saver = tf.train.Saver()
+    # this one will save all variables that now exist
+    new_saver.save(sess, new_fname)
+    print("saved.")
+    exit()
 
 
-def load_ckpt(saver, sess):
-    """Load checkpoint from the train directory and restore it to saver and sess,
-    waiting 10 secs in the case of failure. Also returns checkpoint name."""
-    while True:
-        try:
-            ckpt_state = tf.train.get_checkpoint_state(FLAGS.model_dir)
-            tf.logging.info(
-                'Loading checkpoint %s',
-                ckpt_state.model_checkpoint_path)
-            saver.restore(sess, ckpt_state.model_checkpoint_path)
-            return ckpt_state.model_checkpoint_path
-        except:
-            tf.logging.info(
-                "Failed to load checkpoint from %s. Sleeping for %i secs...",
-                FLAGS.model_dir, 10)
-            time.sleep(10)
+def calc_running_avg_loss(loss, running_avg_loss, step, decay=0.9):
+    """Calculate the running average loss via exponential decay.
+    This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
 
+    Args:
+        loss: loss on the most recent eval step
+        running_avg_loss: running_avg_loss so far
+        step: training iteration step
+        decay: rate of exponential decay, a float between 0 and 1. Larger is smoother.
 
-def shuffle_batch(batch):
-    return batch
+    Returns:
+        running_avg_loss: new running average loss
+    """
+    if running_avg_loss == 0:  # on the first iteration just take the loss
+        running_avg_loss = loss
+    else:
+        running_avg_loss = running_avg_loss * decay + (1 - decay) * loss
+    running_avg_loss = min(running_avg_loss, 12)  # clip
+    loss_sum = tf.Summary()
+    tag_name = 'running_avg_loss/decay=%f' % (decay)
+    loss_sum.value.add(tag=tag_name, simple_value=running_avg_loss)
+    tf.logging.info('running_avg_loss: %f', running_avg_loss)
+    return running_avg_loss

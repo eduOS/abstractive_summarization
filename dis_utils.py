@@ -27,13 +27,11 @@ def convolution2d(inputs,
                               shape=weights_shape,
                               dtype=dtype,
                               initializer=tf.contrib.layers.xavier_initializer(),
-                              collections=[tf.GraphKeys.WEIGHTS],
                               trainable=True)
     biases = tf.get_variable(name='biases',
                              shape=[num_outputs, ],
                              dtype=dtype,
                              initializer=tf.zeros_initializer(),
-                             collections=[tf.GraphKeys.BIASES],
                              trainable=True)
     outputs = tf.nn.conv2d(inputs, weights, [1, 1, 1, 1], padding='SAME')
     if is_training:

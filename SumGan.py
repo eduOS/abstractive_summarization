@@ -7,9 +7,8 @@ from collections import namedtuple
 import numpy as np
 import sys
 import datetime
-import gen_utils
+import utils
 import time
-import re
 import data
 from batcher import GenBatcher, DisBatcher
 from decode import BeamSearchDecoder
@@ -18,6 +17,7 @@ from rollout import Rollout
 from data import gen_vocab2dis_vocab
 from os.path import join as join_path
 from utils import ensure_exists
+from gen_utils import calc_running_avg_loss
 
 from res_discriminator import Seq2ClassModel
 from data import Vocab
@@ -31,7 +31,7 @@ tf.app.flags.DEFINE_string(
 # ------------------------------------- common
 tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training.")
 tf.app.flags.DEFINE_boolean('restore_best_model', False, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
-tf.app.flags.DEFINE_boolean('steps_per_checkpoint', 1000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
+tf.app.flags.DEFINE_integer('steps_per_checkpoint', 1000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 
 # ------------------------------------- discriminator
 
@@ -43,6 +43,7 @@ tf.app.flags.DEFINE_integer("kernel_size", 3, "Number of layers in the model.")
 tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
 tf.app.flags.DEFINE_integer("dis_vocab_size", 10000, "vocabulary size.")
+tf.app.flags.DEFINE_string("dis_vocab", "dis_vocab", "vocabulary size.")
 tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_integer("num_models", 8, "Size of each model layer. The actural size is doubled.")
 
@@ -54,14 +55,8 @@ tf.app.flags.DEFINE_boolean("early_stop", False, "Set to True to turn on early s
 tf.app.flags.DEFINE_integer("max_steps", -1, "max number of steps to train")
 
 # Misc
-tf.app.flags.DEFINE_string("dis_data_dir", "./js_corpus", "Data directory")
 tf.app.flags.DEFINE_string("model_dir", "./model", "Training directory.")
 tf.app.flags.DEFINE_string("val_dir", "val", "Training directory.")
-tf.app.flags.DEFINE_integer("gpu_id", 0, "Select which gpu to use.")
-
-# Mode
-tf.app.flags.DEFINE_boolean("interactive_test", False, "Set to True for interactive testing.")
-tf.app.flags.DEFINE_boolean("test", False, "Run a test on the eval set.")
 
 # ------------------------------------- generator
 
@@ -131,38 +126,13 @@ if FLAGS.mode == "train_gan":
 ensure_exists(FLAGS.model_dir)
 
 
-def calc_running_avg_loss(loss, running_avg_loss, step, decay=0.9):
-    """Calculate the running average loss via exponential decay.
-    This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
-
-    Args:
-        loss: loss on the most recent eval step
-        running_avg_loss: running_avg_loss so far
-        step: training iteration step
-        decay: rate of exponential decay, a float between 0 and 1. Larger is smoother.
-
-    Returns:
-        running_avg_loss: new running average loss
-    """
-    if running_avg_loss == 0:  # on the first iteration just take the loss
-        running_avg_loss = loss
-    else:
-        running_avg_loss = running_avg_loss * decay + (1 - decay) * loss
-    running_avg_loss = min(running_avg_loss, 12)  # clip
-    loss_sum = tf.Summary()
-    tag_name = 'running_avg_loss/decay=%f' % (decay)
-    loss_sum.value.add(tag=tag_name, simple_value=running_avg_loss)
-    tf.logging.info('running_avg_loss: %f', running_avg_loss)
-    return running_avg_loss
-
-
 def pretrain_generator(model, batcher, sess, val_batcher, saver):
     """Repeatedly runs training iterations, logging loss to screen and writing
     summaries"""
     print("starting run_training")
     # get reload the
     val_saver = tf.train.Saver(max_to_keep=10,
-                               var_list=[v for v in tf.all_variables() if "generator" in v.name])
+                               var_list=[v for v in tf.global_variables() if "generator" in v.name])
 
     best_loss = None  # will hold the best loss achieved so far
     val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
@@ -173,7 +143,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver):
         best_loss = reader.get_tensor(
             [key for key in var_to_shape_map if "least_val_loss" in key][0])
     # get the val loss score
-    bestmodel_save_path = join_path(FLAGS.val_dir, 'bestmodel')
+    bestmodel_save_path = join_path(val_dir, 'bestmodel')
     coverage_loss = None
     hps = model.hps
     # this is where checkpoints of best models are saved
@@ -203,7 +173,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver):
             np.asscalar(loss), running_avg_loss, step)
 
         if step % FLAGS.steps_per_checkpoint == 0:
-            model_path = join_path(hps.model_dir, "model")
+            model_path = join_path(hps.model_dir, "model", "generator")
             saver.save(sess, model_path, global_step=step)
             print(
                 'Saving model with %.3f running_avg_loss. Saving to %s %s' %
@@ -252,98 +222,77 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver):
             )
 
 
-def pretrain_discriminator(sess_context_manager, model, vocab, batcher, saver):
+def pretrain_discriminator(sess, model, vocab, batcher, saver):
     """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
     # TODO: load two pretained model: the generator and the embedding
     hps = model.hps
-    with sess_context_manager as sess:
-        # This is the training loop.
-        step_time, loss = 0.0, 0.0
-        current_step = 0
-        eval_loss_best = sys.float_info.max
-        previous_losses = [eval_loss_best]
-        if hps.early_stop:
-            eval_batcher = DisBatcher(
-                hps.data_path, "eval", vocab, hps.batch_size, single_pass=hps.single_pass)
-        while True:
-            start_time = time.time()
-            batch = batcher.next_batch()
-            inputs, conditions, targets = data.prepare_dis_pretraining_batch(batch)
-            step_loss = model.run_one_step(
-                sess_context_manager, inputs, conditions, targets, update=True)
-            step_time += (time.time() - start_time) / hps.steps_per_checkpoint
-            loss += step_loss / hps.steps_per_checkpoint
-            current_step += 1
+    # This is the training loop.
+    step_time, loss = 0.0, 0.0
+    current_step = 0
+    eval_loss_best = sys.float_info.max
+    previous_losses = [eval_loss_best]
+    if hps.early_stop:
+        eval_batcher = DisBatcher(
+            hps.data_path, "eval", vocab, hps.batch_size * hps.num_models, single_pass=hps.single_pass)
+    while True:
+        start_time = time.time()
+        batch = batcher.next_batch()
+        inputs, conditions, targets = data.prepare_dis_pretraining_batch(batch)
+        if inputs.shape[0] != hps.batch_size * hps.num_models:
+            print("The expected batch_size is %s but given %s, escape.." %
+                  (hps.batch_size * hps.num_models, inputs.shape[0]))
+            continue
+        step_loss = model.run_one_step(
+            sess, inputs, conditions, targets, update=True)
+        step_time += (time.time() - start_time) / hps.steps_per_checkpoint
+        loss += step_loss / hps.steps_per_checkpoint
+        current_step += 1
 
-            # Once in a while, we save checkpoint, print statistics, and run evals.
-            if current_step % hps.steps_per_checkpoint == 0:
-                # Print statistics for the previous epoch.
-                print("global step %d learning rate %.4f step-time %.4f loss "
-                      "%.4f" % (model.global_step.eval(), model.learning_rate.eval(), step_time, loss))
-                dump_model = True
-                if hps.early_stop:
-                    dump_model = False
-                    # Run evals on development set and print their perplexity.
-                    eval_losses = []
-                    while True:
-                        batch = eval_batcher.next_batch()
-                        if not batch[0]:
-                            eval_batcher.reset()
-                            break
-                        eval_inputs, eval_conditions, eval_targets = \
-                            data.prepare_dis_pretraining_batch(batch)
-                        step_loss = model.run_one_step(
-                            sess_context_manager, eval_inputs, eval_conditions,
-                            eval_targets, update=False)
-                        eval_losses.append(step_loss)
-                    eval_loss = sum(eval_losses) / len(eval_losses)
-                    print("Eval loss %.4f" % eval_loss)
-                    previous_losses.append(eval_loss)
-                    sys.stdout.flush()
-                    threshold = 10
-                    if eval_loss > 0.99 * previous_losses[-2]:
-                        sess.run(model.learning_rate.assign(
-                            tf.maximum(hps.learning_rate_decay_factor*model.learning_rate, 1e-4)))
-                    if len(previous_losses) > threshold and \
-                            eval_loss > max(previous_losses[-threshold-1:-1]) and \
-                            eval_loss_best < min(previous_losses[-threshold:]):
+        # Once in a while, we save checkpoint, print statistics, and run evals.
+        if current_step % hps.steps_per_checkpoint == 0:
+            # Print statistics for the previous epoch.
+            print("global step %d learning rate %.4f step-time %.4f loss "
+                  "%.4f" % (model.global_step.eval(session=sess),
+                            model.learning_rate.eval(session=sess), step_time, loss))
+            dump_model = True
+            if hps.early_stop:
+                dump_model = False
+                # Run evals on development set and print their perplexity.
+                eval_losses = []
+                while True:
+                    batch = eval_batcher.next_batch()
+                    if not batch[0]:
+                        eval_batcher.reset()
                         break
-                    if eval_loss < eval_loss_best:
-                        dump_model = True
-                        eval_loss_best = eval_loss
-                # Save checkpoint and zero timer and loss.
-                if dump_model:
-                    checkpoint_path = ensure_exists(join_path(hps.model_dir, "translate.ckpt"))
-                    model.saver.save(sess, checkpoint_path, global_step=model.global_step)
-                step_time, loss = 0.0, 0.0
-                if current_step >= hps.max_steps:
+                    eval_inputs, eval_conditions, eval_targets = \
+                        data.prepare_dis_pretraining_batch(batch)
+                    step_loss = model.run_one_step(
+                        sess, eval_inputs, eval_conditions,
+                        eval_targets, update=False)
+                    eval_losses.append(step_loss)
+                eval_loss = sum(eval_losses) / len(eval_losses)
+                print("Eval loss %.4f" % eval_loss)
+                previous_losses.append(eval_loss)
+                sys.stdout.flush()
+                threshold = 10
+                if eval_loss > 0.99 * previous_losses[-2]:
+                    sess.run(model.learning_rate.assign(
+                        tf.maximum(hps.learning_rate_decay_factor*model.learning_rate, 1e-4)))
+                if len(previous_losses) > threshold and \
+                        eval_loss > max(previous_losses[-threshold-1:-1]) and \
+                        eval_loss_best < min(previous_losses[-threshold:]):
                     break
-
-
-def convert_to_coverage_model():
-    """Load non-coverage checkpoint, add initialized extra variables for
-    coverage, and save as new checkpoint"""
-    print("converting non-coverage model to coverage model..")
-
-    # initialize an entire coverage model from scratch
-    sess = tf.Session(config=gen_utils.get_config())
-    print("initializing everything...")
-    sess.run(tf.global_variables_initializer())
-
-    # load all non-coverage weights from checkpoint
-    saver = tf.train.Saver([v for v in tf.global_variables() if "coverage" not in v.name and "Adagrad" not in v.name])
-    print("restoring non-coverage variables...")
-    curr_ckpt = gen_utils.load_ckpt(saver, sess)
-    print("restored.")
-
-    # save this model and quit
-    new_fname = curr_ckpt + '_cov_init'
-    print("saving model to %s..." % (new_fname))
-    new_saver = tf.train.Saver()
-    # this one will save all variables that now exist
-    new_saver.save(sess, new_fname)
-    print("saved.")
-    exit()
+                if eval_loss < eval_loss_best:
+                    dump_model = True
+                    eval_loss_best = eval_loss
+            # Save checkpoint and zero timer and loss.
+            if dump_model:
+                checkpoint_path = ensure_exists(join_path(hps.model_dir, "discriminator")) + "/model.ckpt"
+                saver.save(sess, checkpoint_path, global_step=model.global_step)
+                print("Saving the checkpoint to %s" % checkpoint_path)
+            step_time, loss = 0.0, 0.0
+            if current_step >= hps.max_steps:
+                break
 
 
 def main(argv):
@@ -357,6 +306,7 @@ def main(argv):
         'mode',
         'model_dir',
         'adagrad_init_acc',
+        'steps_per_checkpoint',
         'batch_size',
         'beam_size',
         'cov_loss_wt',
@@ -383,8 +333,9 @@ def main(argv):
             hps_dict[key] = val  # add it to the dict
 
     hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
-    print("Building vocabulary for generator ...")
-    gen_vocab = Vocab(join_path(hps_gen.data_path, 'gen_vocab'), hps_gen.gen_vocab_size)
+    if FLAGS.mode is not "pretrain_dis":
+        print("Building vocabulary for generator ...")
+        gen_vocab = Vocab(join_path(hps_gen.data_path, 'gen_vocab'), hps_gen.gen_vocab_size)
 
     if FLAGS.segment is not True:
         hps_gen = hps_gen._replace(max_enc_steps=110)
@@ -398,19 +349,24 @@ def main(argv):
     if FLAGS.mode == "train_gan":
         hps_gen = hps_gen._replace(batch_size=FLAGS.batch_size * FLAGS.num_models)
 
-    print("Building generator graph ...")
     with tf.variable_scope("generator"):
         generator = PointerGenerator(hps_gen, gen_vocab)
-        gen_decoder_scope = generator.build_graph()
+        if FLAGS.mode is not "pretrain_dis":
+            print("Building generator graph ...")
+            gen_decoder_scope = generator.build_graph()
 
     hparam_dis = [
         'mode',
         'model_dir',
         'dis_vocab_size',
+        'steps_per_checkpoint',
+        'dis_vocab',
         'num_class',
         'layer_size',
         'conv_layers',
+        'max_steps',
         'kernel_size',
+        'early_stop',
         'pool_size',
         'pool_layers',
         'dis_max_gradient',
@@ -430,13 +386,15 @@ def main(argv):
             hps_dict[key] = val  # add it to the dict
 
     hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
-    print("Building vocabulary for discriminator ...")
-    dis_vocab = Vocab(join_path(hps_dis.data_path, 'dis_vocab'), hps_dis.dis_vocab_size)
+    if FLAGS.mode in ['train_gan', 'pretrain_dis']:
+        print("Building vocabulary for discriminator ...")
+        dis_vocab = Vocab(join_path(hps_dis.data_path, hps_dis.dis_vocab), hps_dis.dis_vocab_size)
     # the decode mode is refering to the decoding process of the generator
-    print("Building discriminator graph ...")
     with tf.variable_scope("discriminator"), tf.device("/gpu:0"):
         discriminator = Seq2ClassModel(hps_dis)
-        discriminator.build_graph()
+        if FLAGS.mode in ['train_gan', 'pretrain_dis']:
+            print("Building discriminator graph ...")
+            discriminator.build_graph()
 
     hparam_gan = [
         'mode',
@@ -452,58 +410,41 @@ def main(argv):
 
     hps_gan = namedtuple("HParams4GAN", hps_dict.keys())(**hps_dict)
     hps_gan = hps_gan._replace(mode="gan")
-    print("Preparing rollout...")
     with tf.variable_scope("rollout"), tf.device("/gpu:0"):
         print("Creating rollout...")
-        rollout = Rollout(generator, 0.8, gen_decoder_scope)
+        if FLAGS.mode is "train_gan":
+            print("Preparing rollout...")
+            rollout = Rollout(generator, 0.8, gen_decoder_scope)
 
     # --------------- initializing variables ---------------
-    sess = tf.Session(config=gen_utils.get_config())
+    sess = tf.Session(config=utils.get_config())
     sess.run(tf.global_variables_initializer())
     if FLAGS.mode == "pretrain_gen":
         print("Restoring the generator model from the latest checkpoint...")
         gen_saver = tf.train.Saver(
-            max_to_keep=3, var_list=[v for v in tf.all_variables() if "generator" in v.name])
+            max_to_keep=3, var_list=[v for v in tf.global_variables() if "generator" in v.name])
         gen_dir = ensure_exists(join_path(FLAGS.model_dir, "generator"))
-        ckpt = tf.train.get_checkpoint_state(gen_dir)
-        if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
-            gen_saver.restore(sess, tf.train.latest_checkpoint(gen_dir))
-        else:
-            print("No model stored..")
+        utils.load_ckpt(gen_saver, sess, gen_dir)
 
     elif FLAGS.mode in ["decode", "train_gan"]:
         print("Restoring the generator model from the best checkpoint...")
         dec_saver = tf.train.Saver(
-            max_to_keep=3, var_list=[v for v in tf.all_variables() if "generator" in v.name])
+            max_to_keep=3, var_list=[v for v in tf.global_variables() if "generator" in v.name])
         rollout_saver = tf.train.Saver(
-            max_to_keep=3, var_list=[v for v in tf.all_variables() if "rollout" in v.name])
+            max_to_keep=3, var_list=[v for v in tf.global_variables() if "rollout" in v.name])
         val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
-        ckpt = tf.train.get_checkpoint_state(val_dir, latest_filename="checkpoint_best")
-        if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
-            dec_saver.restore(sess, ckpt.model_checkpoint_path)
-        else:
-            print("No model stored..")
-            if FLAGS.mode == "train_gan":
-                print("Something went wrong you need to figure the right generator checkpoint.")
-                raise
+        utils.load_ckpt(dec_saver, sess, val_dir, (FLAGS.mode == "train_gan"))
+
         rlt_dir = ensure_exists(join_path(FLAGS.model_dir, 'rollout'))
-        ckpt = tf.train.get_checkpoint_state(rlt_dir)
-        if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
-            rollout_saver.restore(sess, tf.train.latest_checkpoint(rlt_dir))
-        else:
-            print("No previous rollout model stored..")
+        utils.load_ckpt(rollout_saver, sess, rlt_dir)
 
     elif FLAGS.mode in ["pretrain_dis", "train_gan"]:
         dis_saver = tf.train.Saver(
-            max_to_keep=3, var_list=[v for v in tf.all_variables() if "discriminator" in v.name])
+            max_to_keep=3, var_list=[v for v in tf.global_variables() if "discriminator" in v.name])
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
-        ckpt = tf.train.get_checkpoint_state(dis_dir)
-        if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path+".meta"):
-            dis_saver.restore(sess, ckpt.model_checkpoint_path)
-        else:
-            # initialize the embeddings at the begging of training
+        ckpt = utils.load_ckpt(dis_saver, sess, dis_dir)
+        if not ckpt:
             discriminator.init_emb(sess, join_path(FLAGS.model_dir, "init_embed"))
-            print("No model stored..")
 
     # --------------- train models ---------------
     decoder = BeamSearchDecoder(sess, generator, gen_vocab)
@@ -603,6 +544,8 @@ def main(argv):
         decoder.decode(gen_batcher_train)
         print("Finished decoding..")
         # decode for generating corpus for discriminator
+
+    sess.close()
 
 
 if __name__ == '__main__':

@@ -35,10 +35,9 @@ class Rollout(object):
         self.given_num = tf.placeholder(tf.int32)
 
         # processed for batch
-        with tf.device("/cpu:0"):
-            self.emb_summ = tf.transpose(
-                tf.nn.embedding_lookup(self.g_embeddings, self.summ), perm=[1, 0, 2])
-            # seq_length x batch_size x emb_dim
+        self.emb_summ = tf.transpose(
+            tf.nn.embedding_lookup(self.g_embeddings, self.summ), perm=[1, 0, 2])
+        # seq_length x batch_size x emb_dim
 
         emb_summ_ar = tensor_array_ops.TensorArray(
             dtype=tf.float32, size=self._gen_hps.max_dec_steps)

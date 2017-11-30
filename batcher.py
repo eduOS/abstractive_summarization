@@ -37,7 +37,7 @@ from codecs import open
 def fopen(filename, mode='r'):
     if filename.endswith('.gz'):
         return gzip.open(filename, mode)
-    return open(filename, mode)
+    return open(filename, mode, "utf-8")
 
 
 class Example(object):
