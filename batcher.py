@@ -602,9 +602,10 @@ class DisBatcher:
                 if len(positive) >= self.batch_size:
                     break
         except IOError:
-            print("IOError, reaches the end")
             if self.single_pass:
                 return None, None, None
+            else:
+                print("Reaches the end..")
             self.end_of_data = True
 
         if len(positive) <= 0 or len(negative) <= 0:

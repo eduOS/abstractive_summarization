@@ -56,6 +56,10 @@ class Seq2ClassModel(object):
     self.pool_size = hps.pool_size
     self.num_class = hps.num_class
 
+  def init_collections(self, sess):
+    params = tf.get_collection_ref(tf.GraphKeys.WEIGHTS) + tf.get_collection_ref(tf.GraphKeys.BIASES)
+    sess.run(tf.variables_initializer(params))
+
   def init_emb(self, sess, emb_dir):
     for ld in self.loaders:
       ld.restore(sess, tf.train.get_checkpoint_state(emb_dir).model_checkpoint_path)
@@ -110,7 +114,7 @@ class Seq2ClassModel(object):
       self.update = tf.contrib.layers.optimize_loss(
           self.loss, self.global_step, tf.identity(self.learning_rate),
           'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
-      del tf.get_collection_ref(tf.GraphKeys.UPDATE_OPS)[:]
+      # del tf.get_collection_ref(tf.GraphKeys.UPDATE_OPS)[:]
 
   def _seq2class_model(self, inputs, conditions, targets, is_decoding):
     """
@@ -194,7 +198,7 @@ class Seq2ClassModel(object):
     if self.is_decoding:
       output_feed = [self.output]
     elif update:
-      output_feed = [self.loss, self.update]  # Update Op that does SGD. Loss for this batch.
+      output_feed = [self.loss, self.accuracy, self.update]  # Update Op that does SGD. Loss for this batch.
     else:
       output_feed = [self.indicator, self.accuracy]  # Loss for this batch.
 

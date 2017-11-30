@@ -235,6 +235,7 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
     if hps.early_stop:
         eval_batcher = DisBatcher(
             hps.data_path, "eval", vocab, hps.batch_size * hps.num_models, single_pass=True)
+    train_accuaracies = []
     while True:
         start_time = time.time()
         batch = batcher.next_batch()
@@ -243,8 +244,9 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
             print("The expected batch_size is %s but given %s, escape.." %
                   (hps.batch_size * hps.num_models * 2, inputs.shape[0]))
             continue
-        step_loss, _ = model.run_one_step(
+        step_loss, train_accuracy, _ = model.run_one_step(
             sess, inputs, conditions, targets, update=True)
+        train_accuaracies.append(train_accuracy)
         step_time += (time.time() - start_time) / hps.steps_per_checkpoint
         loss += step_loss / hps.steps_per_checkpoint
         current_step += 1
@@ -272,14 +274,16 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
                         print("The expected batch_size is %s but given %s, escape.." %
                               (hps.batch_size * hps.num_models * 2, eval_inputs.shape[0]))
                         continue
-                    step_loss, accuracy = model.run_one_step(
+                    step_loss, eval_accuracy = model.run_one_step(
                         sess, eval_inputs, eval_conditions,
                         eval_targets, update=False)
                     eval_losses.append(step_loss)
-                    eval_accuaracies.append(accuracy)
+                    eval_accuaracies.append(eval_accuracy)
                 eval_loss = sum(eval_losses) / len(eval_losses)
                 eval_accuaracy = sum(eval_accuaracies) / len(eval_accuaracies)
-                print("Eval loss %.4f, accuracy is %.4f" % (eval_loss, eval_accuaracy))
+                train_accuracy = sum(train_accuaracies) / len(train_accuaracies)
+                train_accuaracies = []
+                print("Eval loss %.4f, train accuracy is %.4f and eval accuracy is %.4f" % (eval_loss, train_accuracy, eval_accuaracy))
                 previous_losses.append(eval_loss)
                 sys.stdout.flush()
                 threshold = 10
@@ -453,6 +457,7 @@ def main(argv):
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
         ckpt = utils.load_ckpt(dis_saver, sess, dis_dir)
         if not ckpt:
+            discriminator.init_collections(sess)
             discriminator.init_emb(sess, join_path(FLAGS.model_dir, "init_embed"))
 
     # --------------- train models ---------------
