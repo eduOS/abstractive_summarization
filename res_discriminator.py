@@ -56,10 +56,6 @@ class Seq2ClassModel(object):
     self.pool_size = hps.pool_size
     self.num_class = hps.num_class
 
-  def init_collections(self, sess):
-    params = tf.get_collection_ref(tf.GraphKeys.WEIGHTS) + tf.get_collection_ref(tf.GraphKeys.BIASES)
-    sess.run(tf.variables_initializer(params))
-
   def init_emb(self, sess, emb_dir):
     for ld in self.loaders:
       ld.restore(sess, tf.train.get_checkpoint_state(emb_dir).model_checkpoint_path)
@@ -114,7 +110,6 @@ class Seq2ClassModel(object):
       self.update = tf.contrib.layers.optimize_loss(
           self.loss, self.global_step, tf.identity(self.learning_rate),
           'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
-      # del tf.get_collection_ref(tf.GraphKeys.UPDATE_OPS)[:]
 
   def _seq2class_model(self, inputs, conditions, targets, is_decoding):
     """
@@ -166,9 +161,10 @@ class Seq2ClassModel(object):
         # loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=targets))
         loss = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=targets)
         accuracy = tf.count_nonzero(tf.equal(tf.argmax(logits, 1), tf.argmax(targets, 1))) / logits.get_shape().as_list()[0]
+        # tf.nn.in_top_k() is a little better
         return (loss, accuracy)
 
-  def run_one_step(self, sess, inputs, conditions, targets, update=False, do_profiling=False):
+  def run_one_step(self, sess, inputs, conditions, targets, update=True, do_profiling=False):
     """Run a step of the model feeding the given inputs.
 
     Args:

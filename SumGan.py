@@ -119,7 +119,7 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 
 FLAGS = tf.app.flags.FLAGS
 
-assert FLAGS.mode in ["pretrain_gen", "pretrain_dis", "train_gan", "decode"]
+assert FLAGS.mode in ["pretrain_gen", "pretrain_dis", "train_gan", "decode", "test"]
 
 if FLAGS.mode == "train_gan":
     FLAGS.single_pass = False
@@ -127,14 +127,10 @@ if FLAGS.mode == "train_gan":
 ensure_exists(FLAGS.model_dir)
 
 
-def pretrain_generator(model, batcher, sess, val_batcher, saver):
+def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
     """Repeatedly runs training iterations, logging loss to screen and writing
     summaries"""
     print("starting run_training")
-    # get reload the
-    val_saver = tf.train.Saver(max_to_keep=10,
-                               var_list=[v for v in tf.global_variables() if "generator" in v.name])
-
     best_loss = None  # will hold the best loss achieved so far
     val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
     ckpt = tf.train.get_checkpoint_state(val_dir)
@@ -174,7 +170,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver):
             np.asscalar(loss), running_avg_loss, step)
 
         if step % FLAGS.steps_per_checkpoint == 0:
-            model_path = join_path(hps.model_dir, "model", "generator")
+            model_path = join_path(hps.model_dir, "generator", "model")
             saver.save(sess, model_path, global_step=step)
             print(
                 'Saving model with %.3f running_avg_loss. Saving to %s %s' %
@@ -245,7 +241,7 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
                   (hps.batch_size * hps.num_models * 2, inputs.shape[0]))
             continue
         step_loss, train_accuracy, _ = model.run_one_step(
-            sess, inputs, conditions, targets, update=True)
+            sess, inputs, conditions, targets)
         train_accuaracies.append(train_accuracy)
         step_time += (time.time() - start_time) / hps.steps_per_checkpoint
         loss += step_loss / hps.steps_per_checkpoint
@@ -430,45 +426,53 @@ def main(argv):
             rollout = Rollout(generator, 0.8, gen_decoder_scope)
 
     # --------------- initializing variables ---------------
+    all_variables = tf.get_collection_ref(tf.GraphKeys.GLOBAL_VARIABLES) + \
+        tf.get_collection_ref(tf.GraphKeys.WEIGHTS) + \
+        tf.get_collection_ref(tf.GraphKeys.BIASES)
     sess = tf.Session(config=utils.get_config())
-    sess.run(tf.global_variables_initializer())
+    sess.run(tf.variables_initializer(all_variables))
     if FLAGS.mode == "pretrain_gen":
         print("Restoring the generator model from the latest checkpoint...")
         gen_saver = tf.train.Saver(
-            max_to_keep=3, var_list=[v for v in tf.global_variables() if "generator" in v.name])
+            max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         gen_dir = ensure_exists(join_path(FLAGS.model_dir, "generator"))
+        # gen_dir = ensure_exists(FLAGS.model_dir)
         utils.load_ckpt(gen_saver, sess, gen_dir)
 
     elif FLAGS.mode in ["decode", "train_gan"]:
         print("Restoring the generator model from the best checkpoint...")
         dec_saver = tf.train.Saver(
-            max_to_keep=3, var_list=[v for v in tf.global_variables() if "generator" in v.name])
-        rollout_saver = tf.train.Saver(
-            max_to_keep=3, var_list=[v for v in tf.global_variables() if "rollout" in v.name])
+            max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
         utils.load_ckpt(dec_saver, sess, val_dir, (FLAGS.mode == "train_gan"))
 
-        rlt_dir = ensure_exists(join_path(FLAGS.model_dir, 'rollout'))
-        utils.load_ckpt(rollout_saver, sess, rlt_dir)
-
     elif FLAGS.mode in ["pretrain_dis", "train_gan"]:
         dis_saver = tf.train.Saver(
-            max_to_keep=3, var_list=[v for v in tf.global_variables() if "discriminator" in v.name])
+            max_to_keep=3, var_list=[v for v in all_variables if "discriminator" in v.name])
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
         ckpt = utils.load_ckpt(dis_saver, sess, dis_dir)
         if not ckpt:
-            discriminator.init_collections(sess)
             discriminator.init_emb(sess, join_path(FLAGS.model_dir, "init_embed"))
+
+    if FLAGS.mode == "train_gan":
+        rollout_saver = tf.train.Saver(
+            max_to_keep=3, var_list=[v for v in all_variables if "rollout" in v.name])
+        rlt_dir = ensure_exists(join_path(FLAGS.model_dir, 'rollout'))
+        utils.load_ckpt(rollout_saver, sess, rlt_dir)
 
     # --------------- train models ---------------
     if FLAGS.mode != "pretrain_dis":
-        decoder = BeamSearchDecoder(sess, generator, gen_vocab)
         gen_batcher_train = GenBatcher("train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
+        decoder = BeamSearchDecoder(sess, generator, gen_vocab)
         gen_batcher_val = GenBatcher("val", gen_vocab, hps_gen, single_pass=True)
     if FLAGS.mode == "pretrain_gen":
+        # get reload the
+        val_saver = tf.train.Saver(max_to_keep=10,
+                                   var_list=[v for v in all_variables if "generator" in v.name])
+
         print('Going to pretrain the generator')
         try:
-            pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, gen_saver)
+            pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, gen_saver, val_saver)
         except KeyboardInterrupt:
             tf.logging.info("Caught keyboard interrupt on worker....")
 
@@ -521,8 +525,9 @@ def main(argv):
                     return
                 source_batch, enc_states, dec_in_state, best_samples = decoder.generate(batch)
                 # the true abstract is source_batch.dec_batch
-                summary, test_loss, step = generator.run_eval_step(sess, source_batch)
-                buffer = 'step:\t' + str(step) + '\tloss:\t' + str(test_loss) + '\n'
+                results = generator.run_one_step(sess, source_batch, update=False)
+                buffer = 'step:\t' + str(results["global_step"]) + \
+                    '\tloss:\t' + str(results['loss']) + '\n'
                 # training would terminate here if the test loss is sound
                 print(buffer)
 
