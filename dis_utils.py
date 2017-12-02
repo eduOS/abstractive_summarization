@@ -65,8 +65,8 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
   """ a convolutaional neural net with conv2d and max_pool layers
 
   """
-  with tf.variable_scope(scope, "CResCNN", [inputs], reuse=reuse):
-    layer_size = inputs.get_shape()[-1].value
+  with tf.variable_scope(scope, "CResCNN", [inputs, conditions], reuse=reuse):
+    i_layer_size = inputs.get_shape()[-1].value
     if not pool_size:
       pool_layers = 0
     i_outputs = inputs
@@ -79,7 +79,7 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
         i_outputs = inputs
       with tf.variable_scope("input_layer{0}".format(j)):
         for i in range(conv_layers):
-          i_outputs -= convolution2d(activation_fn(i_outputs), layer_size, kernel_size, decay=decay,
+          i_outputs -= convolution2d(activation_fn(i_outputs), i_layer_size, kernel_size, decay=decay,
                                      activation_fn=activation_fn, is_training=is_training)
     # maybe dropout is useful
     # squeeze the highth dimension
@@ -87,6 +87,7 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
     # make the embedding sequence to be only one embedding
     inputs_emb = tf.reduce_max(i_outputs, axis=1)
 
+    c_layer_size = inputs.get_shape()[-1].value
     c_outputs = conditions
     for j in range(pool_layers*2):
       if j > 0:
@@ -96,7 +97,7 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
         c_outputs = conditions
       with tf.variable_scope("condition_layer{0}".format(j)):
         for i in range(conv_layers*2):
-          c_outputs -= convolution2d(activation_fn(c_outputs), layer_size, kernel_size, decay=decay,
+          c_outputs -= convolution2d(activation_fn(c_outputs), c_layer_size, kernel_size, decay=decay,
                                      activation_fn=activation_fn, is_training=is_training)
 
     c_outputs = tf.squeeze(c_outputs, [1])
