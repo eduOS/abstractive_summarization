@@ -122,7 +122,9 @@ FLAGS = tf.app.flags.FLAGS
 assert FLAGS.mode in ["pretrain_gen", "pretrain_dis", "train_gan", "decode", "test"]
 
 if FLAGS.mode == "train_gan":
-    FLAGS.single_pass = False
+    assert FLAGS.single_pass is False, "in train_gan mode single pass should be False"
+elif FLAGS.mode == "decode":
+    assert FLAGS.single_pass is True, "in decoding mode single pass should be true"
 
 ensure_exists(FLAGS.model_dir)
 
@@ -463,8 +465,9 @@ def main(argv):
     # --------------- train models ---------------
     if FLAGS.mode != "pretrain_dis":
         gen_batcher_train = GenBatcher("train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
-        decoder = BeamSearchDecoder(sess, generator, gen_vocab)
         gen_batcher_val = GenBatcher("val", gen_vocab, hps_gen, single_pass=True)
+        decoder = BeamSearchDecoder(sess, generator, gen_vocab)
+        decoder.start_generate(gen_batcher_train)
     if FLAGS.mode == "pretrain_gen":
         # get reload the
         val_saver = tf.train.Saver(max_to_keep=10,
@@ -496,9 +499,9 @@ def main(argv):
             # Train the generator for one step
             for it in range(hps_gan.gan_gen_iter):
                 # can this be self.batch in decoder?
-                batch = gen_batcher_train.next_batch()
                 source_batch, enc_states, enc_padding_mask, dec_in_state, best_samples = decoder.generate(
-                    batch, include_start_token=True)
+                    gen_batcher_train)
+                best_samples = np.concatenate([np.zeros((best_samples.shape[0], 1), dtype=best_samples.dtype), best_samples], axis=1)
                 rewards = rollout.get_reward(
                     sess, gen_vocab, dis_vocab, source_batch, enc_states, source_batch.enc_padding_mask,
                     dec_in_state, best_samples, 16, discriminator)
@@ -520,10 +523,7 @@ def main(argv):
             # Test
             print('Going to test the generator.')
             if hps_gan.i_gan % 5 == 0 or hps_gan.i_gan == hps_gan.gan_iter - 1:
-                batch = gen_batcher_val.next_batch()
-                if batch is None:
-                    return
-                source_batch, enc_states, dec_in_state, best_samples = decoder.generate(batch)
+                source_batch, enc_states, dec_in_state, best_samples = decoder.generate(gen_batcher_val)
                 # the true abstract is source_batch.dec_batch
                 results = generator.run_one_step(sess, source_batch, update=False)
                 buffer = 'step:\t' + str(results["global_step"]) + \

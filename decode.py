@@ -28,6 +28,9 @@ import beam_search
 import data
 import json
 from codecs import open
+import Queue
+from threading import Thread
+from multiprocessing.pool import ThreadPool
 # import pyrouge
 import gen_utils
 import logging
@@ -41,7 +44,9 @@ SECS_UNTIL_NEW_CKPT = 60  # max number of seconds before loading new checkpoint
 class BeamSearchDecoder(object):
     """Beam search decoder."""
 
-    def __init__(self, sess, model, vocab):
+    TRIPLE_QUEUE_MAX = 200
+
+    def __init__(self, sess, model, vocab, multithreading=False):
         """Initialize decoder.
 
         Args:
@@ -85,20 +90,36 @@ class BeamSearchDecoder(object):
             if not os.path.exists(self._rouge_dec_dir):
                 os.mkdir(self._rouge_dec_dir)
 
-    def generate(self, batch, include_start_token=False):
-        # the abstract should also be generated
-        # Run beam search to get best Hypothesis
-        enc_states, dec_in_state, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+        self._triple_queue = Queue.Queue(self.TRIPLE_QUEUE_MAX)
 
-        # Extract the output ids from the hypothesis and convert back to
-        # words
-        if include_start_token:
-            outputs_ids = [[int(t) for t in best_hyp.tokens[:]] for best_hyp in best_hyps]
+        if multithreading:
+            self._num_beam_searcher = int(multithreading.cpu_count() * 2 / 3)
         else:
-            outputs_ids = [[int(t) for t in best_hyp.tokens[1:]] for best_hyp in best_hyps]
-        return enc_states, dec_in_state, outputs_ids
+            self._num_beam_searcher = 1
 
-    def decode(self, batcher):
+    def fill_triplet_queue(self, triplet):
+        self._triple_queue.put(triplet)
+
+    def start_generate(self, batcher):
+        self._triple_queue = Queue.Queue(self.TRIPLE_QUEUE_MAX)
+        # if batcher changed start from scratch
+        pool = ThreadPool(self._num_beam_searcher)
+        while(True):
+            batch = batcher.next_batch()
+            if not batch:
+                break
+            pool.apply_async(
+                self.beam_search.run_beam_search,
+                [self._sess, self._model, self._vocab, batch],
+                call_back=self.fill_batch_queue)
+
+    def generate(self):
+        while(len(self._triple_queue)):
+            print("triple queue is empty, going to sleep 10 minutes...")
+            time.sleep(10)
+        return self._triple_queue.get()
+
+    def decode(self):
         """Decode examples until data is exhausted (if self._hps.single_pass) and
         return, or decode indefinitely, loading latest checkpoint at regular
         intervals"""
@@ -106,64 +127,30 @@ class BeamSearchDecoder(object):
         counter = 0
         while True:
             # 1 example repeated across batch
-            batch = batcher.next_batch()
-            if batch is None:
-                # finished decoding dataset in single_pass mode
-                assert self._hps.single_pass, (
-                    "Dataset exhausted, but we are not in single_pass mode")
-                print("Decoder has finished reading dataset for single_pass.")
-                # print(
-                #     "Output has been saved in %s and %s. \
-                #     Now starting ROUGE eval..." % (
-                #         self._rouge_ref_dir, self._rouge_dec_dir))
-                # results_dict = rouge_eval(
-                #     self._rouge_ref_dir, self._rouge_dec_dir)
-                # rouge_log(results_dict, self._decode_dir)
-                return
+            if len(self._triple_queue) == 0:
+                time.sleep(20)
+            if len(self._triple_queue) == 0:
+                return None
 
-            original_articles = batch.original_articles
-            original_abstracts = batch.original_abstracts
+            # Run beam search to get best Hypothesis
+            articles, abstracts, decoded_outputs = self._triple_queue.get()
             # original_abstract_sents = batch.original_abstracts_sents[0]
             # list of strings
 
-            art_oovs = [batch.art_oovs[i]
-                        for i in xrange(self._hps.batch_size)]
-            articles_withunks = data.show_art_oovs(original_articles, self._vocab)
-            abstracts_withunks = data.show_abs_oovs(original_abstracts, self._vocab,
-                                                    (art_oovs if self._hps.pointer_gen else None))
-
-            # Run beam search to get best Hypothesis
-            _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
-            # is the beam_size here 1?
-            outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps]
-
-            decoded_words_list = data.outputsids2words(
-                outputs_ids, self._vocab, (art_oovs if self._hps.pointer_gen else None))
-            # art_oovs[0] should be changed, batch size examples should be
-            # concluded
-            decoded_outputs = []
-
-            # Remove the [STOP] token from decoded_words, if necessary
-            for decoded_words in decoded_words_list:
-                try:
-                    fst_stop_idx = decoded_words.index(data.STOP_DECODING)
-                    decoded_words = decoded_words[:fst_stop_idx]
-                except ValueError:
-                    pass
-                decoded_outputs.append(' '.join(decoded_words))
-
-            if self._hps.single_pass:
+            if self._hps.mode == "decode":
                 # write ref summary and decoded summary to file, to eval with
                 # pyrouge later
-                self.write_for_rouge(
-                    original_articles, original_abstracts, decoded_outputs, counter)
+                # self.write_for_rouge(
+                #     original_articles, original_abstracts, decoded_outputs, counter)
                 self.write_for_discriminator(
-                    original_articles, original_abstracts, decoded_outputs)
+                    articles, abstracts, decoded_outputs)
                 counter += 1  # this is how many examples we've decoded
                 if counter % 10000 == 0:
                     print("Have decoded %s samples." % (counter * FLAGS.batch_size))
-            else:
-                print_results(articles_withunks, abstracts_withunks, decoded_outputs)
+
+            # --------------- only for visualizing testing ---------------
+            elif self._hps.mode == "test":
+                print_results(articles, abstracts, decoded_outputs)
                 # log output to screen
                 self.write_for_attnvis(articles_withunks, abstracts_withunks,
                                        decoded_words, best_hyps.attn_dists, best_hyps.p_gens)

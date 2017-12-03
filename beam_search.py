@@ -126,6 +126,8 @@ def run_beam_search(sess, model, vocab, batch):
     enc_states, dec_in_state = model.run_encoder(sess, batch)
     # enc_states and dec_in_state should be scaled to match the latter setting
     attn_dists = None
+    original_articles = batch.original_articles
+    original_abstracts = batch.original_abstracts
 
     best_hyps = []
     batch_hyps = []
@@ -243,8 +245,42 @@ def run_beam_search(sess, model, vocab, batch):
         best_hyp = hyps_sorted[0]
         best_hyps.append(best_hyp)
 
-    # Return the hypothesis with highest average log prob
-    return enc_states, dec_in_state, best_hyps
+    if model.hps.mode != "test":
+        # if the mode is test best_hyps should be returned for visualization,
+        # if not only best ids are needed
+        art_oovs = [batch.art_oovs[i]
+                    for i in xrange(batch_size)]
+
+        # is the beam_size here 1?
+        outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps]
+
+        decoded_words_list = data.outputsids2words(
+            outputs_ids, vocab, (art_oovs if model.hps.pointer_gen else None))
+        # art_oovs[0] should be changed, batch size examples should be
+        # concluded
+        decoded_outputs = []
+
+        # Remove the [STOP] token from decoded_words, if necessary
+        for decoded_words in decoded_words_list:
+            try:
+                fst_stop_idx = decoded_words.index(data.STOP_DECODING)
+                decoded_words = decoded_words[:fst_stop_idx]
+            except ValueError:
+                pass
+            decoded_outputs.append(' '.join(decoded_words))
+
+        articles, abstracts = original_articles, original_abstracts
+    else:
+        articles_withunks = data.show_art_oovs(original_articles, vocab)
+        abstracts_withunks = data.show_abs_oovs(original_abstracts, vocab,
+                                                (art_oovs if model.hps.pointer_gen else None))
+        articles, abstracts = articles_withunks, abstracts_withunks
+
+    if model.hps.mode == "decode":
+        # return all words not ids
+        return (articles, abstracts, decoded_outputs)
+    # if generating for gan the encode and decode in states are needed
+    return (enc_states, dec_in_state, best_hyps)
 
 
 def sort_hyps(hyps):

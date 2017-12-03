@@ -42,3 +42,4 @@
 32. train my own vocabulary for the discriminator
 33. rollout weights decay
 34. the beam search is too slow thus a multithread function should be added
+35. oov in rollout
