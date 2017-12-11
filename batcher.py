@@ -32,6 +32,7 @@ import gzip
 import os
 from cntk.tokenizer import text2charlist
 from codecs import open
+import datetime
 
 
 def fopen(filename, mode='r'):
@@ -491,6 +492,9 @@ class GenBatcher(object):
                     if article_text.startswith("ART: ") and abstract_text.startswith("ABS: "):
                         yield (article_text, abstract_text)
                     elif len(article_text) == 0 and len(abstract_text) == 0:
+                        print(
+                            "file %s reach the end of the data file %s"
+                            % (f, datetime.datetime.now().strftime("on %m-%d at %H:%M")))
                         break
                     else:
                         print('Found an example with empty article text. Skipping it.')
@@ -596,7 +600,7 @@ class DisBatcher:
                 art = art + [0] * (self.max_art_steps - len(art))
 
                 positive.append(abs_p)
-                negative.append(abs_p)
+                negative.append(abs_n)
                 source.append(art)
 
                 if len(positive) >= self.batch_size:

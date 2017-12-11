@@ -39,6 +39,7 @@ class Seq2ClassModel(object):
     # if this differs
     self.hps = hps
     self.is_decoding = ('gan' in hps.mode)
+    # self.is_decoding = True
     self.vocab_size = hps.dis_vocab_size
     with tf.variable_scope("OptimizeLoss"):
       self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(hps.dis_lr))
@@ -79,9 +80,10 @@ class Seq2ClassModel(object):
       probs = []
       for m in xrange(self.num_models):
         with tf.variable_scope("model"+str(m)):
-          prob, _ = self._seq2class_model(self.inputs, self.condition, self.targets, self.is_decoding)
+          prob, _ = self._seq2class_model(self.inputs, self.conditions, self.targets, self.is_decoding)
           probs.append(prob)
       self.output = tf.argmax(sum(probs), axis=1)
+      # self.output = probs[0]
       # would this lead the value run out to be a list of only one two
       # dimensional numpy array?
     else:
@@ -190,23 +192,31 @@ class Seq2ClassModel(object):
     if not self.is_decoding:
       input_feed[self.targets] = targets
 
+    to_return = {
+        "global_step": self.global_step,
+        "learning_rate": self.learning_rate,
+    }
     # Output feed.
     if self.is_decoding:
-      output_feed = [self.output]
+      to_return["output"] = self.output
     elif update:
-      output_feed = [self.loss, self.accuracy, self.update]  # Update Op that does SGD. Loss for this batch.
+      to_return["loss"] = self.loss
+      to_return["accuracy"] = self.accuracy
+      to_return["update"] = self.update
+      # to_return["output"] = self.output
     else:
-      output_feed = [self.indicator, self.accuracy]  # Loss for this batch.
+      to_return["loss"] = self.indicator
+      to_return["accuracy"] = self.accuracy
 
     if do_profiling:
       self.run_metadata = tf.RunMetadata()
-      outputs = sess.run(output_feed, input_feed,
+      outputs = sess.run(to_return, input_feed,
                          options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE), run_metadata=self.run_metadata)
       trace = timeline.Timeline(step_stats=self.run_metadata.step_stats)
       trace_file = open('timeline.ctf.json', 'w')
       trace_file.write(trace.generate_chrome_trace_format())
       trace_file.close()
     else:
-      outputs = sess.run(output_feed, input_feed)
+      outputs = sess.run(to_return, input_feed)
 
     return outputs

@@ -139,6 +139,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
         var_to_shape_map = reader.get_variable_to_shape_map()
         best_loss = reader.get_tensor(
             [key for key in var_to_shape_map if "least_val_loss" in key][0])
+        print("the stored best loss is %s" % best_loss)
     # get the val loss score
     bestmodel_save_path = join_path(val_dir, 'bestmodel')
     coverage_loss = None
@@ -231,7 +232,7 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
     if hps.early_stop:
         eval_batcher = DisBatcher(
             hps.data_path, "eval", vocab, hps.batch_size * hps.num_models, single_pass=True)
-    train_accuaracies = []
+    train_accuracies = []
     while True:
         start_time = time.time()
         batch = batcher.next_batch()
@@ -240,25 +241,23 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
             print("The expected batch_size is %s but given %s, escape.." %
                   (hps.batch_size * hps.num_models * 2, inputs.shape[0]))
             continue
-        step_loss, train_accuracy, _ = model.run_one_step(
-            sess, inputs, conditions, targets)
-        train_accuaracies.append(train_accuracy)
+        results = model.run_one_step(sess, inputs, conditions, targets)
+        train_accuracies.append(results["accuracy"])
         step_time += (time.time() - start_time) / hps.steps_per_checkpoint
-        loss += step_loss / hps.steps_per_checkpoint
+        loss += results["loss"] / hps.steps_per_checkpoint
         current_step += 1
 
         # Once in a while, we save checkpoint, print statistics, and run evals.
         if current_step % hps.steps_per_checkpoint == 0:
             # Print statistics for the previous epoch.
-            print("global step %d learning rate %.4f step-time %.4f loss "
-                  "%.4f" % (model.global_step.eval(session=sess),
-                            model.learning_rate.eval(session=sess), step_time, loss))
+            print("global step %d learning rate %.4f step-time %.4f loss %.4f"
+                  % (results["global_step"], results['learning_rate'], step_time, loss))
             dump_model = True
             if hps.early_stop:
                 dump_model = False
                 # Run evals on development set and print their perplexity.
                 eval_losses = []
-                eval_accuaracies = []
+                eval_accuracies = []
                 while True:
                     batch = eval_batcher.next_batch()
                     if not batch[0]:
@@ -270,16 +269,15 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
                         print("The expected batch_size is %s but given %s, escape.." %
                               (hps.batch_size * hps.num_models * 2, eval_inputs.shape[0]))
                         continue
-                    step_loss, eval_accuracy = model.run_one_step(
-                        sess, eval_inputs, eval_conditions,
-                        eval_targets, update=False)
-                    eval_losses.append(step_loss)
-                    eval_accuaracies.append(eval_accuracy)
+                    eval_results = model.run_one_step(
+                        sess, eval_inputs, eval_conditions, eval_targets, update=False)
+                    eval_losses.append(eval_results["loss"])
+                    eval_accuracies.append(eval_results["accuracy"])
                 eval_loss = sum(eval_losses) / len(eval_losses)
-                eval_accuaracy = sum(eval_accuaracies) / len(eval_accuaracies)
-                train_accuracy = sum(train_accuaracies) / len(train_accuaracies)
-                train_accuaracies = []
-                print("Eval loss %.4f, train accuracy is %.4f and eval accuracy is %.4f" % (eval_loss, train_accuracy, eval_accuaracy))
+                eval_accuracy = sum(eval_accuracies) / len(eval_accuracies)
+                train_accuracy = sum(train_accuracies) / len(train_accuracies)
+                train_accuracies = []
+                print("Eval loss %.4f, train accuracy is %.4f and eval accuracy is %.4f" % (eval_loss, train_accuracy, eval_accuracy))
                 previous_losses.append(eval_loss)
                 sys.stdout.flush()
                 threshold = 10
@@ -289,7 +287,8 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
                 if len(previous_losses) > threshold and \
                         eval_loss > max(previous_losses[-threshold-1:-1]) and \
                         eval_loss_best < min(previous_losses[-threshold:]):
-                    break
+                    print("Proper time to stop...")
+                    # break
                 if eval_loss < eval_loss_best:
                     dump_model = True
                     eval_loss_best = eval_loss
@@ -420,10 +419,11 @@ def main(argv):
     hps_gan = namedtuple("HParams4GAN", hps_dict.keys())(**hps_dict)
     hps_gan = hps_gan._replace(mode="gan")
     with tf.variable_scope("rollout"), tf.device("/gpu:0"):
-        print("Creating rollout...")
-        if FLAGS.mode is "train_gan":
-            print("Preparing rollout...")
-            rollout = Rollout(generator, 0.8, gen_decoder_scope)
+        if FLAGS.mode == 'train_gan':
+            print("Creating rollout...")
+            if FLAGS.mode is "train_gan":
+                print("Preparing rollout...")
+                rollout = Rollout(generator, 0.8, gen_decoder_scope)
 
     # --------------- initializing variables ---------------
     all_variables = tf.get_collection_ref(tf.GraphKeys.GLOBAL_VARIABLES) + \
