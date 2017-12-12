@@ -496,9 +496,10 @@ class GenBatcher(object):
                             % (f.name, datetime.datetime.now().strftime("on %m-%d at %H:%M")))
                         if self._mode == "val":
                             f.seek(0)
-                            yield None
+                            yield (None, None)
                         else:
                             f.close()
+                            print("closing file %s" % ff)
                             break
                     else:
                         print('Found an example with empty article text. Skipping it.')
