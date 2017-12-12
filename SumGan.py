@@ -133,12 +133,12 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
     print("starting run_training")
     best_loss = None  # will hold the best loss achieved so far
     val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
-    ckpt = tf.train.get_checkpoint_state(val_dir)
+    ckpt = tf.train.get_checkpoint_state(val_dir, "checkpoint_best")
     if ckpt:
         reader = pywrap_tensorflow.NewCheckpointReader(ckpt.model_checkpoint_path)
         var_to_shape_map = reader.get_variable_to_shape_map()
         best_loss = reader.get_tensor(
-            [key for key in var_to_shape_map if "least_val_loss" in key][0])
+            [key for key in var_to_shape_map if "least_val_loss" in key][0]).item()
         print("the stored best loss is %s" % best_loss)
     # get the val loss score
     bestmodel_save_path = join_path(val_dir, 'bestmodel')
@@ -416,11 +416,10 @@ def main(argv):
 
     hps_gan = namedtuple("HParams4GAN", hps_dict.keys())(**hps_dict)
     hps_gan = hps_gan._replace(mode="gan")
-    with tf.variable_scope("rollout"), tf.device("/gpu:0"):
-        if FLAGS.mode == 'train_gan':
+    if FLAGS.mode == 'train_gan':
+        with tf.device("/gpu:0"):
             print("Creating rollout...")
-            rollout = Rollout(generator, 0.8)
-            rollout.build_graph(gen_decoder_scope)
+            rollout = Rollout(generator, 0.8, gen_decoder_scope)
 
     # --------------- initializing variables ---------------
     all_variables = tf.get_collection_ref(tf.GraphKeys.GLOBAL_VARIABLES) + \
@@ -451,11 +450,11 @@ def main(argv):
         if not ckpt:
             discriminator.init_emb(sess, join_path(FLAGS.model_dir, "init_embed"))
 
-    if FLAGS.mode == "train_gan":
-        rollout_saver = tf.train.Saver(
-            max_to_keep=3, var_list=[v for v in all_variables if "rollout" in v.name])
-        rlt_dir = ensure_exists(join_path(FLAGS.model_dir, 'rollout'))
-        utils.load_ckpt(rollout_saver, sess, rlt_dir)
+    # if FLAGS.mode == "train_gan":
+    #     rollout_saver = tf.train.Saver(
+    #         max_to_keep=3, var_list=[v for v in all_variables if "rollout" in v.name])
+    #     rlt_dir = ensure_exists(join_path(FLAGS.model_dir, 'rollout'))
+    #     utils.load_ckpt(rollout_saver, sess, rlt_dir)
 
     # --------------- train models ---------------
     if FLAGS.mode != "pretrain_dis":
@@ -485,10 +484,6 @@ def main(argv):
 
     elif FLAGS.mode == "train_gan":
         print('Going to tune the two using Gan')
-        # decode_model_hps = hps_gen
-        # decode_model_hps = decode_model_hps._replace(mode="gan")
-        # model = PointerGenerator(decode_model_hps, gen_vocab)
-        # get_reward, update_params
         for i_gan in range(hps_gan.gan_iter):
             # Train the generator for one step
             for it in range(hps_gan.gan_gen_iter):

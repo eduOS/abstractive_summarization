@@ -499,6 +499,7 @@ class GenBatcher(object):
                         if self._mode == "val":
                             f.seek(0)
                             yield (None, None)
+                            continue
                         else:
                             f.close()
                             print("closing file %s" % ff)

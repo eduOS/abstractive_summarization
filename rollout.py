@@ -11,7 +11,7 @@ STOP_DECODING = '[STOP]'
 
 
 class Rollout(object):
-    def __init__(self, generator, update_rate):
+    def __init__(self, generator, update_rate, decoder_scope):
         self.generator = generator
         self.update_rate = update_rate
         # TODO: for the variables update
@@ -21,7 +21,6 @@ class Rollout(object):
         #######################################################################
         # placeholder definition
 
-    def build_graph(self, decoder_scope):
         self.summ = tf.placeholder(
             tf.int32, shape=[self._gen_hps.batch_size, self._gen_hps.max_dec_steps])
         self.cell_c = tf.placeholder(
