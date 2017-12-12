@@ -62,7 +62,7 @@ class Example(object):
         stop_decoding = vocab.word2id(data.STOP_DECODING)
 
         # Process the article
-        article_words = article.split()[1:]
+        article_words = article.split()
         if len(article_words) > hps.max_enc_steps:
             article_words = article_words[:hps.max_enc_steps]
         # store the length after truncation but before padding
@@ -71,7 +71,7 @@ class Example(object):
         self.enc_input = [vocab.word2id(w) for w in article_words]
 
         # Process the abstract
-        abstract_words = abstract.split()[1:]  # list of strings
+        abstract_words = abstract.split()  # list of strings
         # list of word ids; OOVs are represented by the id for UNK token
         self.abs_ids = [vocab.word2id(w) for w in abstract_words]
 
@@ -303,8 +303,11 @@ class GenBatcher(object):
         """
         self._vocab = vocab
         self._hps = hps
+        self._mode = mode
         self._single_pass = single_pass
         self._data_path = os.path.join(hps.data_path, mode) + "*"
+        if self._mode == "val":
+            self._single_pass = True
 
         # Initialize a queue of Batches waiting to be used, and a queue of
         # Examples waiting to be batched
@@ -375,10 +378,6 @@ class GenBatcher(object):
 
         batch = self._batch_queue.get()  # get the next Batch
         return batch
-
-    def reset(self):
-        if self._hps == "val":
-            self.f.seek(0)
 
     def fill_example_queue(self):
         """Reads data from file and processes into Examples which are then
@@ -472,7 +471,7 @@ class GenBatcher(object):
         """
         while True:
             filelist = glob.glob(self._data_path)  # get the list of datafiles
-            if self._hps == "val":
+            if self._mode == "val":
                 assert len(filelist) == 1, \
                     "in val mode the len should be 1 but %s given." % len(filelist)
             assert filelist, ('Error: Empty filelist at %s' % self._data_path)
@@ -481,21 +480,26 @@ class GenBatcher(object):
             else:
                 random.shuffle(filelist)
             for ff in filelist:
+                print("opening file %s" % ff)
                 f = open(ff, "r", 'utf-8')
-                if self._hps == "val":
-                    self.f = f
-                while(True):
-                    article_text = f.readline().strip()
-                    abstract_text = f.readline().strip()
-                    blank = f.readline().strip()
-                    assert not blank, "source file may be wrong"
-                    if article_text.startswith("ART: ") and abstract_text.startswith("ABS: "):
+                while True:
+                    art_abs = f.readline().strip().split("\t")
+                    if len(art_abs) != 2:
+                        print(art_abs[0] + " not match arttababs..")
+                        continue
+                    article_text, abstract_text = art_abs
+                    if article_text and abstract_text:
                         yield (article_text, abstract_text)
                     elif len(article_text) == 0 and len(abstract_text) == 0:
                         print(
-                            "file %s reach the end of the data file %s"
+                            "file %s reaches the end of the data file %s"
                             % (f.name, datetime.datetime.now().strftime("on %m-%d at %H:%M")))
-                        break
+                        if self._mode == "val":
+                            f.seek(0)
+                            yield None
+                        else:
+                            f.close()
+                            break
                     else:
                         print('Found an example with empty article text. Skipping it.')
 
@@ -541,7 +545,7 @@ class DisBatcher:
         self.negative = fopen(os.path.join(data_dir, mode + "_negative"), 'r')
         self.source = fopen(os.path.join(data_dir, mode + "_source"), 'r')
         self.dis_vocab = dis_vocab
-        self.gen_vocab_keys = gen_vocab.keys()
+        self.gen_vocab_keys = gen_vocab.word_keys
 
         self.batch_size = batch_size
         self.max_art_steps = max_art_steps

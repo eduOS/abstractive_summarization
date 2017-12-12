@@ -183,7 +183,6 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
             while True:
                 val_batch = val_batcher.next_batch()
                 if not val_batch:
-                    val_batcher.reset()
                     break
                 results_val = model.run_one_step(
                     sess, val_batch, update=False)

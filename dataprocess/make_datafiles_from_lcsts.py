@@ -110,9 +110,7 @@ def write_to_txt(source_path, out_file, makevocab=False, max_length=100000):
             writer = open(out_file + "_" + str(file_num), 'w', 'utf-8')
             length = 0
 
-        writer.write("ART: " + " ".join(art_tokens)+"\n")
-        writer.write("ABS: " + " ".join(abs_tokens)+"\n")
-        writer.write("\n")
+        writer.write(" ".join(art_tokens) + "\t" + " ".join(abs_tokens) + "\n")
         length += 1
 
         if length % (max_length / 10) == 0:
