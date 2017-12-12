@@ -220,7 +220,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
             )
 
 
-def pretrain_discriminator(sess, model, vocab, batcher, saver):
+def pretrain_discriminator(sess, model, gen_vocab, dis_vocab, batcher, saver):
     """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
     # TODO: load two pretained model: the generator and the embedding
     hps = model.hps
@@ -231,7 +231,7 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
     previous_losses = [eval_loss_best]
     if hps.early_stop:
         eval_batcher = DisBatcher(
-            hps.data_path, "eval", vocab, hps.batch_size * hps.num_models, single_pass=True)
+            hps.data_path, "eval", gen_vocab, dis_vocab, hps.batch_size * hps.num_models, single_pass=True)
     train_accuracies = []
     while True:
         start_time = time.time()
@@ -287,8 +287,8 @@ def pretrain_discriminator(sess, model, vocab, batcher, saver):
                 if len(previous_losses) > threshold and \
                         eval_loss > max(previous_losses[-threshold-1:-1]) and \
                         eval_loss_best < min(previous_losses[-threshold:]):
-                    print("Proper time to stop...")
-                    # break
+                    # print("Proper time to stop...")
+                    break
                 if eval_loss < eval_loss_best:
                     dump_model = True
                     eval_loss_best = eval_loss
@@ -340,9 +340,8 @@ def main(argv):
             hps_dict[key] = val  # add it to the dict
 
     hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
-    if FLAGS.mode != "pretrain_dis":
-        print("Building vocabulary for generator ...")
-        gen_vocab = Vocab(join_path(hps_gen.data_path, 'gen_vocab'), hps_gen.gen_vocab_size)
+    print("Building vocabulary for generator ...")
+    gen_vocab = Vocab(join_path(hps_gen.data_path, 'gen_vocab'), hps_gen.gen_vocab_size)
 
     if FLAGS.segment is not True:
         hps_gen = hps_gen._replace(max_enc_steps=110)
@@ -479,10 +478,10 @@ def main(argv):
     elif FLAGS.mode == "pretrain_dis":
         print('Going to pretrain the discriminator')
         dis_batcher = DisBatcher(
-            hps_dis.data_path, "decode", dis_vocab, hps_dis.batch_size * hps_dis.num_models,
+            hps_dis.data_path, "decode", gen_vocab, dis_vocab, hps_dis.batch_size * hps_dis.num_models,
             single_pass=hps_dis.single_pass)
         try:
-            pretrain_discriminator(sess, discriminator, dis_vocab, dis_batcher, dis_saver)
+            pretrain_discriminator(sess, discriminator, gen_vocab, dis_vocab, dis_batcher, dis_saver)
         except KeyboardInterrupt:
             tf.logging.info("Caught keyboard interrupt on worker....")
 

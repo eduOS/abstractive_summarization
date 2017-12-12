@@ -494,7 +494,7 @@ class GenBatcher(object):
                     elif len(article_text) == 0 and len(abstract_text) == 0:
                         print(
                             "file %s reach the end of the data file %s"
-                            % (f, datetime.datetime.now().strftime("on %m-%d at %H:%M")))
+                            % (f.name, datetime.datetime.now().strftime("on %m-%d at %H:%M")))
                         break
                     else:
                         print('Found an example with empty article text. Skipping it.')
@@ -536,11 +536,12 @@ class DisBatcher:
     all training data have a compared negative abstract which can be ignored in the gan training
     """
 
-    def __init__(self, data_dir, mode, vocab, batch_size=1, max_art_steps=80, max_abs_steps=15, single_pass=False, clip_length=True):
+    def __init__(self, data_dir, mode, gen_vocab, dis_vocab, batch_size=1, max_art_steps=80, max_abs_steps=15, single_pass=False, clip_length=True):
         self.positive = fopen(os.path.join(data_dir, mode + "_positive"), 'r')
         self.negative = fopen(os.path.join(data_dir, mode + "_negative"), 'r')
         self.source = fopen(os.path.join(data_dir, mode + "_source"), 'r')
-        self.vocab = vocab
+        self.dis_vocab = dis_vocab
+        self.gen_vocab_keys = gen_vocab.keys()
 
         self.batch_size = batch_size
         self.max_art_steps = max_art_steps
@@ -569,15 +570,18 @@ class DisBatcher:
 
         try:
             while True:
-                abs_p = self.positive.readline()
-                abs_n = self.negative.readline()
-                art = self.source.readline()
+                abs_p = self.positive.readline().strip()
+                abs_n = self.negative.readline().strip()
+                art = self.source.readline().strip()
 
                 if abs_p == "" or art == "":
                     raise IOError
                 if abs_n == "":
                     # the generated negative abstract may be empty
                     continue
+                gen_vocab = art.split() + self.gen_vocab_keys
+                abs_p = abs_p.split()
+                abs_p = ' '.join([p if p in gen_vocab else "[UNK]" for p in abs_p])
 
                 abs_p = text2charlist(abs_p, keep_word='[UNK]')
                 abs_n = text2charlist(abs_n, keep_word='[UNK]')
@@ -591,9 +595,9 @@ class DisBatcher:
                     abs_n = abs_n[:self.max_abs_steps]
                     art = art[:self.max_art_steps]
 
-                abs_p = [self.vocab.word2id(w) for w in abs_p]
-                abs_n = [self.vocab.word2id(w) for w in abs_n]
-                art = [self.vocab.word2id(w) for w in art]
+                abs_p = [self.dis_vocab.word2id(w) for w in abs_p]
+                abs_n = [self.dis_vocab.word2id(w) for w in abs_n]
+                art = [self.dis_vocab.word2id(w) for w in art]
 
                 abs_p = abs_p + [0] * (self.max_abs_steps - len(abs_p))
                 abs_n = abs_n + [0] * (self.max_abs_steps - len(abs_n))
