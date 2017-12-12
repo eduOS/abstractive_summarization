@@ -1,7 +1,7 @@
 #!/bin/bash
 
 python  SumGan.py \
-  --mode "gan" \
+  --mode "train_gan" \
   --batch_size 4 \
   --num_models 3 \
   --single_pass False \

@@ -182,7 +182,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
             losses = []
             while True:
                 val_batch = val_batcher.next_batch()
-                if not val_batch[0]:
+                if not val_batch:
                     break
                 results_val = model.run_one_step(
                     sess, val_batch, update=False)
@@ -345,7 +345,7 @@ def main(argv):
     if FLAGS.segment is not True:
         hps_gen = hps_gen._replace(max_enc_steps=110)
         hps_gen = hps_gen._replace(max_dec_steps=25)
-    elif FLAGS.mode != "decode":
+    elif FLAGS.mode not in ["decode", "train_gan"]:
         assert hps_gen.max_enc_steps == 80, "No segmentation, max_enc_steps wrong"
         assert hps_gen.max_dec_steps == 15, "No segmentation, max_dec_steps wrong"
 
@@ -419,9 +419,8 @@ def main(argv):
     with tf.variable_scope("rollout"), tf.device("/gpu:0"):
         if FLAGS.mode == 'train_gan':
             print("Creating rollout...")
-            if FLAGS.mode is "train_gan":
-                print("Preparing rollout...")
-                rollout = Rollout(generator, 0.8, gen_decoder_scope)
+            rollout = Rollout(generator, 0.8)
+            rollout.build_graph(gen_decoder_scope)
 
     # --------------- initializing variables ---------------
     all_variables = tf.get_collection_ref(tf.GraphKeys.GLOBAL_VARIABLES) + \

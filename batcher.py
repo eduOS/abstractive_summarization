@@ -411,11 +411,14 @@ class GenBatcher(object):
             # ]
             # Use the <s> and </s> tags in abstract to get a list of sentences.
             # Process into an Example.
-            example = Example(
-                article, abstract, self._vocab, self._hps)
-            # what is the vocab here? the extended vocab?
-            # place the Example in the example queue.
-            self._example_queue.put(example)
+            if article and abstract:
+                example = Example(
+                    article, abstract, self._vocab, self._hps)
+                # what is the vocab here? the extended vocab?
+                # place the Example in the example queue.
+                self._example_queue.put(example)
+            else:
+                self._example_queue.put(None)
 
     def fill_batch_queue(self):
         """Takes Examples out of example queue, sorts them by encoder sequence
@@ -429,7 +432,12 @@ class GenBatcher(object):
             # then sort
             inputs = []
             for _ in range(self._hps.batch_size * self._bucketing_cache_size):
-                inputs.append(self._example_queue.get())
+                pair = self._example_queue.get()
+                if pair:
+                    inputs.append(pair)
+                else:
+                    self._batch_queue.put(None)
+                    continue
             # sort by length of encoder sequence
             inputs = sorted(inputs, key=lambda inp: inp.enc_len)
 
@@ -485,12 +493,6 @@ class GenBatcher(object):
                 while True:
                     art_abs = f.readline().strip().split("\t")
                     if len(art_abs) != 2:
-                        print(art_abs[0] + " not match arttababs..")
-                        continue
-                    article_text, abstract_text = art_abs
-                    if article_text and abstract_text:
-                        yield (article_text, abstract_text)
-                    elif len(article_text) == 0 and len(abstract_text) == 0:
                         print(
                             "file %s reaches the end of the data file %s"
                             % (f.name, datetime.datetime.now().strftime("on %m-%d at %H:%M")))
@@ -501,6 +503,9 @@ class GenBatcher(object):
                             f.close()
                             print("closing file %s" % ff)
                             break
+                    article_text, abstract_text = art_abs
+                    if article_text and abstract_text:
+                        yield (article_text, abstract_text)
                     else:
                         print('Found an example with empty article text. Skipping it.')
 

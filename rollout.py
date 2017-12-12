@@ -3,7 +3,7 @@ from __future__ import absolute_import
 from __future__ import division
 import tensorflow as tf
 from tensorflow.python.ops import tensor_array_ops, control_flow_ops
-from tensorflow.python.ops import variable_scope
+# from tensorflow.python.ops import variable_scope
 import numpy as np
 from data import gen_vocab2dis_vocab
 PAD_TOKEN = "[PAD]"
@@ -11,7 +11,7 @@ STOP_DECODING = '[STOP]'
 
 
 class Rollout(object):
-    def __init__(self, generator, update_rate, decoder_scope):
+    def __init__(self, generator, update_rate):
         self.generator = generator
         self.update_rate = update_rate
         # TODO: for the variables update
@@ -20,6 +20,8 @@ class Rollout(object):
 
         #######################################################################
         # placeholder definition
+
+    def build_graph(self, decoder_scope):
         self.summ = tf.placeholder(
             tf.int32, shape=[self._gen_hps.batch_size, self._gen_hps.max_dec_steps])
         self.cell_c = tf.placeholder(
