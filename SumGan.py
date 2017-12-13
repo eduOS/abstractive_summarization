@@ -2,7 +2,6 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 import tensorflow as tf
-from tensorflow.python import pywrap_tensorflow
 from collections import namedtuple
 import numpy as np
 import sys
@@ -18,6 +17,11 @@ from data import gen_vocab2dis_vocab
 from os.path import join as join_path
 from utils import ensure_exists
 from gen_utils import calc_running_avg_loss
+from gen_utils import get_best_loss_from_chpt
+from gen_utils import save_best_ckpt
+from gen_utils import print_dashboard
+from dis_utils import dump_chpt
+import math
 
 from res_discriminator import Seq2ClassModel
 from data import Vocab
@@ -117,6 +121,14 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
                             'Turn this on and run in train mode. \ Your current model will be copied to a new version '
                             '(same name with _cov_init appended)\ that will be ready to run with coverage flag turned on,\ for the coverage training stage.')
 
+
+# ------------------------------------- generator
+
+tf.app.flags.DEFINE_integer('gan_iter', 200, 'how many times to run the gan')
+tf.app.flags.DEFINE_integer('gan_gen_iter', 2, 'in each gan step run how many times the generator')
+tf.app.flags.DEFINE_integer('rollout_num', 4, '20')
+
+
 FLAGS = tf.app.flags.FLAGS
 
 assert FLAGS.mode in ["pretrain_gen", "pretrain_dis", "train_gan", "decode", "test"]
@@ -133,30 +145,24 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
     print("starting run_training")
     best_loss = None  # will hold the best loss achieved so far
     val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
-    ckpt = tf.train.get_checkpoint_state(val_dir, "checkpoint_best")
-    if ckpt:
-        reader = pywrap_tensorflow.NewCheckpointReader(ckpt.model_checkpoint_path)
-        var_to_shape_map = reader.get_variable_to_shape_map()
-        best_loss = reader.get_tensor(
-            [key for key in var_to_shape_map if "least_val_loss" in key][0]).item()
-        print("the stored best loss is %s" % best_loss)
+    best_loss = get_best_loss_from_chpt(val_dir)
     # get the val loss score
-    bestmodel_save_path = join_path(val_dir, 'bestmodel')
     coverage_loss = None
     hps = model.hps
     # this is where checkpoints of best models are saved
     running_avg_loss = 0
     # the eval job keeps a smoother, running average loss to tell it when to
     # implement early stopping
+    start_time = time.time()
+    counter = 0
     while True:  # repeats until interrupted
         batch = batcher.next_batch()
         if batch is None:
             return None
 
         # print('running training step...')
-        t0 = time.time()
         results = model.run_one_step(sess, batch)
-        t1 = time.time()
+        counter += 1
         step = results['global_step']
         # print('seconds for training step: %.3f', t1-t0)
 
@@ -164,8 +170,6 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
         # print('loss: %f', loss)  # print the loss to screen
         if hps.coverage:
             coverage_loss = results['coverage_loss']
-            # print the coverage loss to screen
-            # print("coverage_loss: %f", coverage_loss)
 
         running_avg_loss = calc_running_avg_loss(
             np.asscalar(loss), running_avg_loss, step)
@@ -179,58 +183,25 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
                     datetime.datetime.now().strftime("on %m-%d at %H:%M")))
 
             # check if it is the best checkpoint so far
-            losses = []
-            while True:
-                val_batch = val_batcher.next_batch()
-                if not val_batch:
-                    break
-                results_val = model.run_one_step(
-                    sess, val_batch, update=False)
-                losses.append(results_val["loss"])
-            eval_loss = sum(losses) / len(losses)
-            if best_loss is None or eval_loss < best_loss:
-                sess.run(model.least_val_loss.assign(eval_loss))
-                print(
-                    'Found new best model with %.3f running_avg_loss. Saving to %s %s' %
-                    (eval_loss, bestmodel_save_path,
-                        datetime.datetime.now().strftime("on %m-%d at %H:%M")))
-                val_saver.save(sess, bestmodel_save_path, global_step=step, latest_filename="checkpoint_best")
-                best_loss = eval_loss
+            eval_loss = save_best_ckpt(
+                sess, model, best_loss, val_batcher, val_dir, val_saver, step)
 
-            print(
-                "\nDashboard updated %s, finished steps:\t%s\n"
-                "\tBatch size:\t%s\n"
-                "\tVocabulary size:\t%s\n"
-                "\tArticles trained:\t%s\n"
-                "\tTotal training time approxiately:\t%.4f hours\n"
-                "\tCurrent speed:\t%.4f seconds/article\n"
-                "\tLoss:\t%.4f;"
-                "\tand coverage loss:\t%s\n" % (
-                    datetime.datetime.now().strftime("on %m-%d at %H:%M"),
-                    step,
-                    hps.batch_size,
-                    hps.gen_vocab_size,
-                    hps.batch_size * step,
-                    (t1-t0) * step / 3600,
-                    (t1-t0) / hps.batch_size,
-                    running_avg_loss,
-                    coverage_loss if hps.coverage else "not set",
-                    )
-            )
+            # print the print the dashboard
+            current_speed = (time.time() - start_time) / (counter * hps.batch_size)
+            total_training_time = (time.time() - start_time) * step / (counter * 3600)
+            print_dashboard(step, hps.batch_size, hps.vocab_size,
+                            running_avg_loss, eval_loss,
+                            total_training_time, current_speed,
+                            coverage_loss if coverage_loss else "not set")
 
 
-def pretrain_discriminator(sess, model, gen_vocab, dis_vocab, batcher, saver):
+def pretrain_discriminator(sess, model, eval_batcher, dis_vocab, batcher, saver):
     """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
     # TODO: load two pretained model: the generator and the embedding
     hps = model.hps
     # This is the training loop.
     step_time, loss = 0.0, 0.0
     current_step = 0
-    eval_loss_best = sys.float_info.max
-    previous_losses = [eval_loss_best]
-    if hps.early_stop:
-        eval_batcher = DisBatcher(
-            hps.data_path, "eval", gen_vocab, dis_vocab, hps.batch_size * hps.num_models, single_pass=True)
     train_accuracies = []
     while True:
         start_time = time.time()
@@ -251,51 +222,8 @@ def pretrain_discriminator(sess, model, gen_vocab, dis_vocab, batcher, saver):
             # Print statistics for the previous epoch.
             print("global step %d learning rate %.4f step-time %.4f loss %.4f"
                   % (results["global_step"], results['learning_rate'], step_time, loss))
-            dump_model = True
-            if hps.early_stop:
-                dump_model = False
-                # Run evals on development set and print their perplexity.
-                eval_losses = []
-                eval_accuracies = []
-                while True:
-                    batch = eval_batcher.next_batch()
-                    if not batch[0]:
-                        eval_batcher.reset()
-                        break
-                    eval_inputs, eval_conditions, eval_targets = \
-                        data.prepare_dis_pretraining_batch(batch)
-                    if eval_inputs.shape[0] != hps.batch_size * hps.num_models * 2:
-                        print("The expected batch_size is %s but given %s, escape.." %
-                              (hps.batch_size * hps.num_models * 2, eval_inputs.shape[0]))
-                        continue
-                    eval_results = model.run_one_step(
-                        sess, eval_inputs, eval_conditions, eval_targets, update=False)
-                    eval_losses.append(eval_results["loss"])
-                    eval_accuracies.append(eval_results["accuracy"])
-                eval_loss = sum(eval_losses) / len(eval_losses)
-                eval_accuracy = sum(eval_accuracies) / len(eval_accuracies)
-                train_accuracy = sum(train_accuracies) / len(train_accuracies)
-                train_accuracies = []
-                print("Eval loss %.4f, train accuracy is %.4f and eval accuracy is %.4f" % (eval_loss, train_accuracy, eval_accuracy))
-                previous_losses.append(eval_loss)
-                sys.stdout.flush()
-                threshold = 10
-                if eval_loss > 0.99 * previous_losses[-2]:
-                    sess.run(model.learning_rate.assign(
-                        tf.maximum(hps.learning_rate_decay_factor*model.learning_rate, 1e-4)))
-                if len(previous_losses) > threshold and \
-                        eval_loss > max(previous_losses[-threshold-1:-1]) and \
-                        eval_loss_best < min(previous_losses[-threshold:]):
-                    # print("Proper time to stop...")
-                    break
-                if eval_loss < eval_loss_best:
-                    dump_model = True
-                    eval_loss_best = eval_loss
-            # Save checkpoint and zero timer and loss.
-            if dump_model:
-                checkpoint_path = ensure_exists(join_path(hps.model_dir, "discriminator")) + "/model.ckpt"
-                saver.save(sess, checkpoint_path, global_step=model.global_step)
-                print("Saving the checkpoint to %s" % checkpoint_path)
+            eval_accuracy, eval_loss = dump_chpt(eval_batcher, hps, model, sess, saver, True)
+            print_dashboard(train_accuracies, eval_loss, eval_accuracy)
             step_time, loss = 0.0, 0.0
             if current_step >= hps.max_steps:
                 break
@@ -461,6 +389,10 @@ def main(argv):
         gen_batcher_train = GenBatcher("train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
         decoder = BeamSearchDecoder(sess, generator, gen_vocab)
         gen_batcher_val = GenBatcher("val", gen_vocab, hps_gen, single_pass=True)
+    if FLAGS.mode != "pretrain_gen":
+        dis_batcher_val = DisBatcher(
+            hps_dis.data_path, "eval", gen_vocab, dis_vocab, hps_dis.batch_size * hps_dis.num_models, single_pass=True)
+
     if FLAGS.mode == "pretrain_gen":
         # get reload the
         val_saver = tf.train.Saver(max_to_keep=10,
@@ -478,77 +410,93 @@ def main(argv):
             hps_dis.data_path, "decode", gen_vocab, dis_vocab, hps_dis.batch_size * hps_dis.num_models,
             single_pass=hps_dis.single_pass)
         try:
-            pretrain_discriminator(sess, discriminator, gen_vocab, dis_vocab, dis_batcher, dis_saver)
+            pretrain_discriminator(sess, discriminator, dis_batcher_val, dis_vocab, dis_batcher, dis_saver)
         except KeyboardInterrupt:
             tf.logging.info("Caught keyboard interrupt on worker....")
 
     elif FLAGS.mode == "train_gan":
+        gen_best_loss = get_best_loss_from_chpt(val_dir)
         print('Going to tune the two using Gan')
         for i_gan in range(hps_gan.gan_iter):
             # Train the generator for one step
+            g_losses = []
+            start_time = time.time()
             for it in range(hps_gan.gan_gen_iter):
                 # can this be self.batch in decoder?
                 batch = gen_batcher_train.next_batch()
-                source_batch, enc_states, enc_padding_mask, dec_in_state, best_samples = decoder.generate(
+                enc_states, dec_in_state, best_samples = decoder.generate(
                     batch, include_start_token=True)
                 rewards = rollout.get_reward(
-                    sess, gen_vocab, dis_vocab, source_batch, enc_states, source_batch.enc_padding_mask,
-                    dec_in_state, best_samples, 16, discriminator)
+                    sess, gen_vocab, dis_vocab, batch, enc_states, batch.enc_padding_mask,
+                    dec_in_state, best_samples, hps_gan.rollout_num, discriminator)
                 print('Get the rewards in %s' % it)
                 # only updates parameters without the rollout scope
                 feed_dict = {}
-                feed_dict[generator.enc_batch] = source_batch.enc_batch
-                feed_dict[generator.enc_lens] = source_batch.enc_lens
+                feed_dict[generator.enc_batch] = batch.enc_batch
+                feed_dict[generator.enc_lens] = batch.enc_lens
                 # TODO: enc_lens should be added in rollout
                 feed_dict[generator.g_predictions] = best_samples
                 feed_dict[generator.rewards] = rewards
 
                 if hps_gen.pointer_gen:
-                    feed_dict[generator.enc_batch_extend_vocab] = source_batch.enc_batch_extend_vocab
+                    feed_dict[generator.enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
                     # this is the source
-                    feed_dict[generator.max_art_oovs] = source_batch.max_art_oovs
-                _ = sess.run(generator.g_updates, feed_dict=feed_dict)
+                    feed_dict[generator.max_art_oovs] = batch.max_art_oovs
+                _, g_loss, global_step = sess.run(
+                    [generator.g_updates, generator.g_loss, generator.global_step],
+                    feed_dict=feed_dict)
+                if not math.isnan(g_loss):
+                    g_losses.append(g_loss)
 
             # Test
             print('Going to test the generator.')
             if hps_gan.i_gan % 5 == 0 or hps_gan.i_gan == hps_gan.gan_iter - 1:
-                batch = gen_batcher_val.next_batch()
-                if batch is None:
-                    return
-                source_batch, enc_states, dec_in_state, best_samples = decoder.generate(batch)
-                # the true abstract is source_batch.dec_batch
-                results = generator.run_one_step(sess, source_batch, update=False)
-                buffer = 'step:\t' + str(results["global_step"]) + \
-                    '\tloss:\t' + str(results['loss']) + '\n'
-                # training would terminate here if the test loss is sound
-                print(buffer)
+                total_training_time = (time.time() - start_time) * global_step / (it * 3600)
+                current_speed = (time.time() - start_time) / (it * hps_gen.batch_size)
+                eve_g_loss = sum(g_losses) / len(g_losses)
+                eval_loss = save_best_ckpt(
+                    sess, generator, gen_best_loss, gen_batcher_val, val_dir, val_saver, global_step)
+                print_dashboard(global_step, hps_gen.batch_size, hps_gen.gen_vocab_size,
+                                eve_g_loss, eval_loss,
+                                total_training_time, current_speed)
 
             # Train the discriminator
             print('Going to train the discriminator.' % it)
+            dis_accuracies = []
             for _ in range(hps_gan.gan_dis_iter):
-                for _ in range(3):
-                    batch = gen_batcher_train.next_batch()
-                    source_batch, enc_states, dec_in_state, samples_words = decoder.generate(batch)
-                    articles_oovs = source_batch.art_oovs if hps_gen.pointer_gen else None
+                batch = gen_batcher_train.next_batch()
+                source_batch, enc_states, dec_in_state, samples_words = decoder.generate(batch)
+                articles_oovs = source_batch.art_oovs if hps_gen.pointer_gen else None
 
-                    samples_chars = gen_vocab2dis_vocab(
-                        samples_words, gen_vocab, articles_oovs,
-                        dis_vocab, 25, STOP_DECODING)
-                    dec_batch_words = source_batch.abs_ids_extend_vocab \
-                        if hps_gen.pointer_gen else source_batch.abs_ids
-                    dec_batch_chars = gen_vocab2dis_vocab(
-                        dec_batch_words, gen_vocab, articles_oovs, dis_vocab, 25, PAD_TOKEN)
-                    conditions_words = source_batch.enc_batch_extend_vocab \
-                        if hps_gen.pointer_gen else source_batch.enc_batch
-                    conditions_chars = gen_vocab2dis_vocab(
-                        conditions_words, gen_vocab, articles_oovs,
-                        dis_vocab, 110, PAD_TOKEN)
-                    inputs = np.concat([samples_chars, dec_batch_chars], 0)
-                    conditions = np.concat([conditions_chars, conditions_chars], 0)
-                    targets = np.concat(
-                        [np.zeros([hps_gan.batch_size]), np.ones([hps_gan.batch_size])], 0)
+                samples_chars = gen_vocab2dis_vocab(
+                    samples_words, gen_vocab, articles_oovs,
+                    dis_vocab, 25, STOP_DECODING)
+                dec_batch_words = source_batch.abs_ids_extend_vocab \
+                    if hps_gen.pointer_gen else source_batch.abs_ids
+                dec_batch_chars = gen_vocab2dis_vocab(
+                    dec_batch_words, gen_vocab, articles_oovs, dis_vocab, 25, PAD_TOKEN)
+                conditions_words = source_batch.enc_batch_extend_vocab \
+                    if hps_gen.pointer_gen else source_batch.enc_batch
+                conditions_chars = gen_vocab2dis_vocab(
+                    conditions_words, gen_vocab, articles_oovs,
+                    dis_vocab, 110, PAD_TOKEN)
 
-                    discriminator.run_one_step(sess, inputs, conditions, targets)
+                inputs = np.concat([samples_chars, dec_batch_chars], 0)
+                conditions = np.concat([conditions_chars, conditions_chars], 0)
+                targets = np.concat(
+                    [np.zeros([hps_gan.batch_size]), np.ones([hps_gan.batch_size])], 0)
+                # randomize the samples
+                assert len(inputs) == len(conditions) == len(targets), "lengthes of the inputs, conditions and targests should be the same."
+                indices = np.random.permutation(len(inputs))
+                inputs = inputs[indices]
+                conditions = conditions[indices]
+                targets = targets[indices]
+
+                results = discriminator.run_one_step(sess, inputs, conditions, targets)
+                dis_accuracies.append(results["accuracy"])
+
+                eval_accuracy, eval_loss = dump_chpt(dis_batcher_val, hps_dis, discriminator, sess, dis_saver)
+                print_dashboard(dis_accuracies, eval_loss, eval_accuracy)
 
     # --------------- decoding samples ---------------
     elif FLAGS.mode == "decode":

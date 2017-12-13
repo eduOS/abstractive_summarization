@@ -2,7 +2,11 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 
+from utils import ensure_exists
+from os.path import join as join_path
+import data
 import tensorflow as tf
+import sys
 
 
 # convolutional layer
@@ -105,3 +109,58 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
 
     # concatenate the two embeding and make the embedding to be twice long
     return tf.concat(values=[inputs_emb, conditions_emb], axis=1)
+
+
+def dump_chpt(eval_batcher, hps, model, sess, saver, early_stop=False):
+    dump_model = False
+    # Run evals on development set and print their perplexity.
+    eval_loss_best = sys.float_info.max
+    previous_losses = [eval_loss_best]
+    eval_losses = []
+    eval_accuracies = []
+    while True:
+        batch = eval_batcher.next_batch()
+        if not batch[0]:
+            eval_batcher.reset()
+            break
+        eval_inputs, eval_conditions, eval_targets = \
+            data.prepare_dis_pretraining_batch(batch)
+        if eval_inputs.shape[0] != hps.batch_size * hps.num_models * 2:
+            print("The expected batch_size is %s but given %s, escape.." %
+                  (hps.batch_size * hps.num_models * 2, eval_inputs.shape[0]))
+            continue
+        eval_results = model.run_one_step(
+            sess, eval_inputs, eval_conditions, eval_targets, update=False)
+        eval_losses.append(eval_results["loss"])
+        eval_accuracies.append(eval_results["accuracy"])
+
+    eval_loss = sum(eval_losses) / len(eval_losses)
+    eval_accuracy = sum(eval_accuracies) / len(eval_accuracies)
+    previous_losses.append(eval_loss)
+    sys.stdout.flush()
+    threshold = 10
+    if eval_loss > 0.99 * previous_losses[-2]:
+        sess.run(model.learning_rate.assign(
+            tf.maximum(hps.learning_rate_decay_factor*model.learning_rate, 1e-4)))
+    if len(previous_losses) > threshold and \
+            eval_loss > max(previous_losses[-threshold-1:-1]) and \
+            eval_loss_best < min(previous_losses[-threshold:]):
+        if early_stop:
+            break
+        else:
+            print("Proper time to stop...")
+    if eval_loss < eval_loss_best:
+        dump_model = True
+        eval_loss_best = eval_loss
+    # Save checkpoint and zero timer and loss.
+    if dump_model:
+        checkpoint_path = ensure_exists(join_path(hps.model_dir, "discriminator")) + "/model.ckpt"
+        saver.save(sess, checkpoint_path, global_step=model.global_step)
+        print("Saving the checkpoint to %s" % checkpoint_path)
+    return eval_accuracy, eval_loss
+
+
+def print_dashboard(train_accuracies, eval_loss, eval_accuracy):
+    train_accuracy = sum(train_accuracies) / len(train_accuracies)
+    train_accuracies = []
+    print("Eval loss %.4f, train accuracy is %.4f and eval accuracy is %.4f" % (eval_loss, train_accuracy, eval_accuracy))

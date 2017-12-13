@@ -90,11 +90,14 @@ class Rollout(object):
         rewards = []
 
         article_oovs = source_batch.art_oovs if self._gen_hps.pointer_gen else None
-        enc_inputs_words = source_batch.enc_batch_extend_vocab \
+        art_words = source_batch.enc_batch_extend_vocab \
             if self._gen_hps.pointer_gen else source_batch.enc_batch
-        enc_inputs_chars = gen_vocab2dis_vocab(
-            enc_inputs_words, gen_vocab, article_oovs,
-            dis_vocab, self._gen_hp.max_enc_steps, PAD_TOKEN)
+        art_chars = gen_vocab2dis_vocab(
+            art_words, gen_vocab, article_oovs,
+            dis_vocab, self._gen_hps.max_enc_steps, PAD_TOKEN)
+        abs_chars = gen_vocab2dis_vocab(
+            source_batch.target_batch, gen_vocab, article_oovs,
+            dis_vocab, self._gen_hps.max_dec_steps, STOP_DECODING)
 
         for i in range(rollout_num):
             for given_num in range(1, self._gen_hps.max_dec_steps):
@@ -124,7 +127,7 @@ class Rollout(object):
 
                 feed = {
                     discriminator.dis_input_x: rollout_samples_chars,
-                    discriminator.dis_input_xs: enc_inputs_chars,
+                    discriminator.dis_input_xs: art_chars,
                     discriminator.dropout_keep_prob: 1.0}
                 ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
                 ypred = np.array([item[1] for item in ypred_for_auc])
@@ -139,8 +142,8 @@ class Rollout(object):
                 dis_vocab, self._gen_hps.max_dec_steps, STOP_DECODING)
             feed = {
                 discriminator.dis_input_x: samples_chars,
-                discriminator.dis_input_xs: enc_inputs_chars,
-                discriminator.dropout_keep_prob: 1.0}
+                discriminator.dis_input_xs: art_chars,
+                discriminator.dropout_keep_prob: 0.8}
             ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
             ypred = np.array([item[1] for item in ypred_for_auc])
             if i == 0:
