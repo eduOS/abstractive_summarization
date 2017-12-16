@@ -4,7 +4,6 @@ from __future__ import division
 import tensorflow as tf
 from collections import namedtuple
 import numpy as np
-import sys
 import datetime
 import utils
 import time
@@ -22,10 +21,10 @@ from gen_utils import save_best_ckpt
 from gen_utils import print_dashboard
 from dis_utils import dump_chpt
 import math
+from data import PAD_TOKEN
 
 from res_discriminator import Seq2ClassModel
 from data import Vocab
-PAD_TOKEN = "[PAD]"
 STOP_DECODING = '[STOP]'
 
 # tf.logging.set_verbosity(tf.logging.ERROR)
@@ -109,7 +108,6 @@ tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
 
 # Pointer-generator or baseline model
 tf.app.flags.DEFINE_boolean('pointer_gen', True, 'If True, use pointer-generator model. If False, use baseline model.')
-tf.app.flags.DEFINE_boolean('segment', True, 'If True, the source text is segmented, then max_enc_steps and max_dec_steps should be much smaller')
 
 # Coverage hyperparameters
 tf.app.flags.DEFINE_boolean('coverage', False, 'Use coverage mechanism. Note, the experiments reported in the ACL '
@@ -189,7 +187,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
             # print the print the dashboard
             current_speed = (time.time() - start_time) / (counter * hps.batch_size)
             total_training_time = (time.time() - start_time) * step / (counter * 3600)
-            print_dashboard(step, hps.batch_size, hps.vocab_size,
+            print_dashboard(step, hps.batch_size, hps.gen_vocab_size,
                             running_avg_loss, eval_loss,
                             total_training_time, current_speed,
                             coverage_loss if coverage_loss else "not set")
@@ -222,7 +220,10 @@ def pretrain_discriminator(sess, model, eval_batcher, dis_vocab, batcher, saver)
             # Print statistics for the previous epoch.
             print("global step %d learning rate %.4f step-time %.4f loss %.4f"
                   % (results["global_step"], results['learning_rate'], step_time, loss))
-            eval_accuracy, eval_loss = dump_chpt(eval_batcher, hps, model, sess, saver, True)
+            eval_accuracy, eval_loss, stop_flag = dump_chpt(
+                eval_batcher, hps, model, sess, saver, hps.early_stop)
+            if stop_flag:
+                break
             print_dashboard(train_accuracies, eval_loss, eval_accuracy)
             step_time, loss = 0.0, 0.0
             if current_step >= hps.max_steps:
@@ -270,17 +271,8 @@ def main(argv):
     print("Building vocabulary for generator ...")
     gen_vocab = Vocab(join_path(hps_gen.data_path, 'gen_vocab'), hps_gen.gen_vocab_size)
 
-    if FLAGS.segment is not True:
-        hps_gen = hps_gen._replace(max_enc_steps=110)
-        hps_gen = hps_gen._replace(max_dec_steps=25)
-    elif FLAGS.mode not in ["decode", "train_gan"]:
-        assert hps_gen.max_enc_steps == 80, "No segmentation, max_enc_steps wrong"
-        assert hps_gen.max_dec_steps == 15, "No segmentation, max_dec_steps wrong"
-
-    if FLAGS.mode in ["decode", "train_gan"]:
-        hps_gen = hps_gen._replace(max_dec_steps=1)
     if FLAGS.mode == "train_gan":
-        hps_gen = hps_gen._replace(batch_size=FLAGS.batch_size * FLAGS.num_models)
+        hps_gen = hps_gen._replace(batch_size=hps_gen.batch_size * FLAGS.num_models)
 
     with tf.variable_scope("generator"):
         if FLAGS.mode != "pretrain_dis":
@@ -320,7 +312,9 @@ def main(argv):
             hps_dict[key] = val  # add it to the dict
 
     hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
-    if FLAGS.mode in ['train_gan', 'pretrain_dis']:
+    hps_dis = hps_dis._replace(max_enc_steps=hps_dis.max_enc_steps * 2)
+    hps_dis = hps_dis._replace(max_dec_steps=hps_dis.max_dec_steps * 2)
+    if FLAGS.mode != "pretrain_gen":
         print("Building vocabulary for discriminator ...")
         dis_vocab = Vocab(join_path(hps_dis.data_path, hps_dis.dis_vocab), hps_dis.dis_vocab_size)
     # the decode mode is refering to the decoding process of the generator
@@ -343,7 +337,7 @@ def main(argv):
             hps_dict[key] = val  # add it to the dict
 
     hps_gan = namedtuple("HParams4GAN", hps_dict.keys())(**hps_dict)
-    hps_gan = hps_gan._replace(mode="gan")
+    hps_gan = hps_gan._replace(mode="train_gan")
     if FLAGS.mode == 'train_gan':
         with tf.device("/gpu:0"):
             print("Creating rollout...")
@@ -368,9 +362,9 @@ def main(argv):
         dec_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
-        utils.load_ckpt(dec_saver, sess, val_dir, (FLAGS.mode == "train_gan"))
+        utils.load_ckpt(dec_saver, sess, val_dir, (FLAGS.mode in ["train_gan", "decode"]), "checkpoint_best")
 
-    elif FLAGS.mode in ["pretrain_dis", "train_gan"]:
+    if FLAGS.mode in ["pretrain_dis", "train_gan"]:
         dis_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "discriminator" in v.name])
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
@@ -389,15 +383,18 @@ def main(argv):
         gen_batcher_train = GenBatcher("train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
         decoder = BeamSearchDecoder(sess, generator, gen_vocab)
         gen_batcher_val = GenBatcher("val", gen_vocab, hps_gen, single_pass=True)
-    if FLAGS.mode != "pretrain_gen":
-        dis_batcher_val = DisBatcher(
-            hps_dis.data_path, "eval", gen_vocab, dis_vocab, hps_dis.batch_size * hps_dis.num_models, single_pass=True)
-
-    if FLAGS.mode == "pretrain_gen":
-        # get reload the
         val_saver = tf.train.Saver(max_to_keep=10,
                                    var_list=[v for v in all_variables if "generator" in v.name])
 
+    if FLAGS.mode != "pretrain_gen":
+        dis_batcher_val = DisBatcher(
+            hps_dis.data_path, "eval", gen_vocab, dis_vocab,
+            hps_dis.batch_size * hps_dis.num_models, single_pass=True,
+            max_art_steps=hps_dis.max_enc_steps, max_abs_steps=hps_dis.max_dec_steps,
+        )
+
+    if FLAGS.mode == "pretrain_gen":
+        # get reload the
         print('Going to pretrain the generator')
         try:
             pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, gen_saver, val_saver)
@@ -407,8 +404,10 @@ def main(argv):
     elif FLAGS.mode == "pretrain_dis":
         print('Going to pretrain the discriminator')
         dis_batcher = DisBatcher(
-            hps_dis.data_path, "decode", gen_vocab, dis_vocab, hps_dis.batch_size * hps_dis.num_models,
-            single_pass=hps_dis.single_pass)
+            hps_dis.data_path, "decode", gen_vocab, dis_vocab,
+            hps_dis.batch_size * hps_dis.num_models, single_pass=hps_dis.single_pass,
+            max_art_steps=hps_dis.max_enc_steps, max_abs_steps=hps_dis.max_dec_steps,
+        )
         try:
             pretrain_discriminator(sess, discriminator, dis_batcher_val, dis_vocab, dis_batcher, dis_saver)
         except KeyboardInterrupt:
@@ -422,20 +421,25 @@ def main(argv):
             g_losses = []
             start_time = time.time()
             for it in range(hps_gan.gan_gen_iter):
-                # can this be self.batch in decoder?
                 batch = gen_batcher_train.next_batch()
+                print(batch.enc_batch)
                 enc_states, dec_in_state, best_samples = decoder.generate(
-                    batch, include_start_token=True)
+                    batch, gen_vocab, include_start_token=True)
+                # print(best_samples)
+                print(best_samples)
                 rewards = rollout.get_reward(
                     sess, gen_vocab, dis_vocab, batch, enc_states, batch.enc_padding_mask,
                     dec_in_state, best_samples, hps_gan.rollout_num, discriminator)
                 print('Get the rewards in %s' % it)
+                print(rewards)
                 # only updates parameters without the rollout scope
                 feed_dict = {}
                 feed_dict[generator.enc_batch] = batch.enc_batch
                 feed_dict[generator.enc_lens] = batch.enc_lens
                 # TODO: enc_lens should be added in rollout
-                feed_dict[generator.g_predictions] = best_samples
+                print("best_samples")
+                print(best_samples)
+                feed_dict[generator.g_predictions] = [b[1:] for b in best_samples]
                 feed_dict[generator.rewards] = rewards
 
                 if hps_gen.pointer_gen:
@@ -465,7 +469,7 @@ def main(argv):
             dis_accuracies = []
             for _ in range(hps_gan.gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
-                source_batch, enc_states, dec_in_state, samples_words = decoder.generate(batch)
+                source_batch, enc_states, dec_in_state, samples_words = decoder.generate(batch, gen_vocab)
                 articles_oovs = source_batch.art_oovs if hps_gen.pointer_gen else None
 
                 samples_chars = gen_vocab2dis_vocab(
@@ -495,7 +499,7 @@ def main(argv):
                 results = discriminator.run_one_step(sess, inputs, conditions, targets)
                 dis_accuracies.append(results["accuracy"])
 
-                eval_accuracy, eval_loss = dump_chpt(dis_batcher_val, hps_dis, discriminator, sess, dis_saver)
+                eval_accuracy, eval_loss, _ = dump_chpt(dis_batcher_val, hps_dis, discriminator, sess, dis_saver)
                 print_dashboard(dis_accuracies, eval_loss, eval_accuracy)
 
     # --------------- decoding samples ---------------

@@ -46,8 +46,13 @@ class Seq2ClassModel(object):
     self.cell_type = hps.cell_type
     self.global_step = tf.Variable(0, trainable=False)
     self.mode = hps.mode
-    self.num_models = hps.num_models * 2  # the positive and negative double the samlpe size
+    if self.is_decoding:
+        self.num_models = hps.num_models  # only the negative for the reward
+    else:
+        self.num_models = hps.num_models * 2  # the positive and negative double the samlpe size
     self.batch_size = hps.batch_size * self.num_models
+    print("self.batch_size")
+    print(self.batch_size)
     self.max_enc_steps = hps.max_enc_steps
     self.max_dec_steps = hps.max_dec_steps
     self.layer_size = hps.layer_size
@@ -82,6 +87,8 @@ class Seq2ClassModel(object):
         with tf.variable_scope("model"+str(m)):
           prob, _ = self._seq2class_model(self.inputs, self.conditions, self.targets, self.is_decoding)
           probs.append(prob)
+          # print(prob.get_shape())
+      self.dis_ypred_for_auc = tf.reduce_mean(tf.cast(tf.stack(probs, 2), tf.float32), 2)
       self.output = tf.argmax(sum(probs), axis=1)
       # self.output = probs[0]
       # would this lead the value run out to be a list of only one two

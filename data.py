@@ -229,11 +229,12 @@ def outputsids2words(id_lists, vocab, articles_oovs):
                 article_oov_idx = i - vocab.size()
                 try:
                     w = articles_oovs[j][article_oov_idx]
-                except ValueError:  # i doesn't correspond to an article oov
-                    raise ValueError(
-                        'Error: model produced word ID %i which corresponds to\
-                        article OOV %i but this example only has %i article OOVs' %
-                        (i, article_oov_idx, len(articles_oovs[j])))
+                except IndexError:
+                    raise IndexError(
+                        'Error: model produced word ID %i which corresponds to'
+                        'article OOV %i but this example only has %i article OOVs,'
+                        'the oovs are [%s]' %
+                        (i, article_oov_idx, len(articles_oovs[j]), "|".join(articles_oovs[j])))
             words.append(w)
         words_lists.append(words)
     return words_lists
@@ -331,7 +332,7 @@ def prepare_dis_pretraining_batch(batch):
 
 
 def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab,
-                        max_len, STOP_MARK=STOP_DECODING):
+                        max_len, STOP_MARK=STOP_DECODING, p=False):
     """
     transfer the generator vocabulary which is word based to discriminator
     vocabualry which is char based
@@ -351,6 +352,7 @@ def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab,
     """
     # TODO: keep the [unk] and such words
     samples_ids = []
+    assert len(gen_ids) == len(article_oovs)
     samples_words = outputsids2words(gen_ids, gen_vocab, article_oovs)
     for sample_words in samples_words:
         try:
@@ -358,7 +360,10 @@ def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab,
             sample_chars = text2charlist(sample_words[:fst_stop_idx], keep_word="[UNK]")
         except ValueError:
             sample_chars = text2charlist(sample_words, keep_word="[UNK]")
-        sample_ids = [dis_vocab.word2id(char) for char in sample_chars]
+        if p:
+            print("sample_chars: ")
+            print(" ".join(sample_chars))
+        sample_ids = [dis_vocab.word2id(char) for char in sample_chars[:max_len]]
         while len(sample_ids) < max_len:
             sample_ids.append(0)
         samples_ids.append(sample_ids)

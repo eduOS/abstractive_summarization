@@ -8,6 +8,7 @@ import numpy as np
 from data import gen_vocab2dis_vocab
 PAD_TOKEN = "[PAD]"
 STOP_DECODING = '[STOP]'
+FLAGS = tf.app.flags.FLAGS
 
 
 class Rollout(object):
@@ -22,7 +23,7 @@ class Rollout(object):
         # placeholder definition
 
         self.summ = tf.placeholder(
-            tf.int32, shape=[self._gen_hps.batch_size, self._gen_hps.max_dec_steps])
+            tf.int32, shape=[self._gen_hps.batch_size, self._gen_hps.max_dec_steps+1])
         self.cell_c = tf.placeholder(
             tf.float32, shape=[self._gen_hps.batch_size, self._gen_hps.hidden_dim])
         self.cell_h = tf.placeholder(
@@ -41,10 +42,10 @@ class Rollout(object):
         # seq_length x batch_size x emb_dim
 
         emb_summ_ar = tensor_array_ops.TensorArray(
-            dtype=tf.float32, size=self._gen_hps.max_dec_steps)
+            dtype=tf.float32, size=self._gen_hps.max_dec_steps + 1)
         emb_summ_ar = emb_summ_ar.unstack(self.emb_summ)
 
-        summ_ar = tensor_array_ops.TensorArray(dtype=tf.int32, size=self._gen_hps.max_dec_steps)
+        summ_ar = tensor_array_ops.TensorArray(dtype=tf.int32, size=self._gen_hps.max_dec_steps + 1)
         summ_ar = summ_ar.unstack(tf.transpose(self.summ, perm=[1, 0]))
         ######################################################################
 
@@ -55,13 +56,13 @@ class Rollout(object):
             def recurrence_given(i, dec_input, dec_in_state, given_num, gen_summ):
                 next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state)
                 next_input = emb_summ_ar.read(i)
-                gen_summ = gen_summ.write(i, summ_ar.read(i))
+                gen_summ = gen_summ.write(i-1, summ_ar.read(i))
                 return i+1, next_input, new_state, given_num, gen_summ
 
             def recurrence_rollout(i, dec_input, dec_in_state, given_num, gen_summ):
                 next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state)
                 next_input = tf.nn.embedding_lookup(self.g_embeddings, next_input_id)
-                gen_summ = gen_summ.write(i, next_input_id)
+                gen_summ = gen_summ.write(i-1, next_input_id)
                 return i+1, next_input, new_state, given_num, gen_summ
 
             i, next_input, new_state, given_num, self.gen_summ_ar = control_flow_ops.while_loop(
@@ -74,7 +75,7 @@ class Rollout(object):
             # reuse variables between python loops is needed
 
             _, _, _, _, self.gen_summ_ar = control_flow_ops.while_loop(
-                cond=lambda i, _1, _2, _3, _4: i < self._gen_hps.max_dec_steps,
+                cond=lambda i, _1, _2, _3, _4: i < self._gen_hps.max_dec_steps+1,
                 body=recurrence_rollout,
                 loop_vars=(i, next_input, new_state, given_num, self.gen_summ_ar))
 
@@ -84,7 +85,8 @@ class Rollout(object):
         # batch_size x seq_length
 
     def get_reward(self, sess, gen_vocab, dis_vocab, source_batch,
-                   enc_states, enc_padding_mask, dec_in_state, samples, rollout_num, discriminator):
+                   enc_states, enc_padding_mask, dec_in_state, samples,
+                   rollout_num, discriminator):
         # dec_in_state is [batch_size, hidden_dim * 2] and that should be
         # changed to [batch_size, hidden_dim] for the attention_decoder
         rewards = []
@@ -94,13 +96,13 @@ class Rollout(object):
             if self._gen_hps.pointer_gen else source_batch.enc_batch
         art_chars = gen_vocab2dis_vocab(
             art_words, gen_vocab, article_oovs,
-            dis_vocab, self._gen_hps.max_enc_steps, PAD_TOKEN)
-        abs_chars = gen_vocab2dis_vocab(
-            source_batch.target_batch, gen_vocab, article_oovs,
-            dis_vocab, self._gen_hps.max_dec_steps, STOP_DECODING)
+            dis_vocab, discriminator.hps.max_enc_steps, PAD_TOKEN)
+        # abs_chars = np.array(gen_vocab2dis_vocab(
+        #     source_batch.target_batch, gen_vocab, article_oovs,
+        #     dis_vocab, self._gen_hps.max_dec_steps, STOP_DECODING))
 
         for i in range(rollout_num):
-            for given_num in range(1, self._gen_hps.max_dec_steps):
+            for given_num in range(2, self._gen_hps.max_dec_steps+1):
                 feed_dict = {}
                 feed_dict[self.summ] = samples
                 feed_dict[self.generator.enc_batch] = source_batch.enc_batch
@@ -109,8 +111,8 @@ class Rollout(object):
                 feed_dict[self.given_num] = given_num
                 feed_dict[self.generator.enc_states] = enc_states
                 feed_dict[self.generator.enc_padding_mask] = enc_padding_mask
-                feed_dict[self.init_dec_in_state.c] = dec_in_state.c
-                feed_dict[self.init_dec_in_state.h] = dec_in_state.h
+                feed_dict[self.cell_c] = dec_in_state.c
+                feed_dict[self.cell_h] = dec_in_state.h
                 if self._gen_hps.pointer_gen:
                     feed_dict[self.generator.enc_batch_extend_vocab] = source_batch.enc_batch_extend_vocab
                     # this is the source
@@ -121,14 +123,18 @@ class Rollout(object):
                 # enc_batch_extend_vocab and the max_art_oovs
                 rollout_samples_words = sess.run(self.gen_summ_ar, feed_dict)
                 # how about multiple generators for one discriminator?
-                rollout_samples_chars = gen_vocab2dis_vocab(
-                    rollout_samples_words, gen_vocab, article_oovs,
-                    dis_vocab, self._gen_hps.max_dec_steps, STOP_DECODING)
+                try:
+                    rollout_samples_chars = gen_vocab2dis_vocab(
+                        rollout_samples_words, gen_vocab, article_oovs,
+                        dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, p=True)
+                except:
+                    print("the max art oovs of source batch is %s, the article oovs is: \n" % source_batch.max_art_oovs)
+                    print(article_oovs)
+                    raise
 
                 feed = {
-                    discriminator.dis_input_x: rollout_samples_chars,
-                    discriminator.dis_input_xs: art_chars,
-                    discriminator.dropout_keep_prob: 1.0}
+                    discriminator.inputs: rollout_samples_chars,
+                    discriminator.conditions: art_chars}
                 ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
                 ypred = np.array([item[1] for item in ypred_for_auc])
                 if i == 0:
@@ -137,13 +143,13 @@ class Rollout(object):
                     rewards[given_num - 1] += ypred
 
             # the last token reward
+            samples_without_start = [s[1:] for s in samples]
             samples_chars = gen_vocab2dis_vocab(
-                samples, gen_vocab, article_oovs,
-                dis_vocab, self._gen_hps.max_dec_steps, STOP_DECODING)
+                samples_without_start, gen_vocab, article_oovs,
+                dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING)
             feed = {
-                discriminator.dis_input_x: samples_chars,
-                discriminator.dis_input_xs: art_chars,
-                discriminator.dropout_keep_prob: 0.8}
+                discriminator.inputs: samples_chars,
+                discriminator.conditions: art_chars}
             ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
             ypred = np.array([item[1] for item in ypred_for_auc])
             if i == 0:

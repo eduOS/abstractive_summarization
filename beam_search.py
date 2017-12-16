@@ -23,7 +23,6 @@ import tensorflow as tf
 import numpy as np
 import data
 from six.moves import xrange
-import sys
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -118,7 +117,7 @@ def run_beam_search(sess, model, vocab, batch):
         dec_in_state: one of the outputs of the encoder which is of shape [batch_size, 2*hidden_dim],
         best_hyp: Hypothesis object; the best hypothesis found by beam search.
     """
-    batch_size = FLAGS.batch_size
+    batch_size = model.hps.batch_size
     beam_size = FLAGS.beam_size
     # Run the encoder to get the encoder hidden states and decoder initial state
     # dec_in_state is a LSTMStateTuple

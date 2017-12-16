@@ -46,6 +46,10 @@ class PointerGenerator(object):
         data."""
         hps = self.hps
         batch_size = None
+        if hps.mode in ["decode", "train_gan"]:
+            max_dec_steps = 1
+        else:
+            max_dec_steps = hps.max_dec_steps
 
         # encoder part
         self.enc_batch = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch')
@@ -56,13 +60,14 @@ class PointerGenerator(object):
             self.max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
 
         # decoder part
-        self._dec_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='dec_batch')
-        self._target_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='target_batch')
-        self._padding_mask = tf.placeholder(tf.float32, [batch_size, hps.max_dec_steps], name='padding_mask')
+        self._dec_batch = tf.placeholder(tf.int32, [batch_size, max_dec_steps], name='dec_batch')
+        self._target_batch = tf.placeholder(tf.int32, [batch_size, max_dec_steps], name='target_batch')
+        self._padding_mask = tf.placeholder(tf.float32, [batch_size, max_dec_steps], name='padding_mask')
+        # padding should be use in calculating the gan loss
         self.rewards = tf.placeholder(tf.float32, shape=[batch_size, hps.max_dec_steps])
         self.g_predictions = tf.placeholder(tf.int32, shape=[batch_size, hps.max_dec_steps])
 
-        if hps.mode in ["decode", 'gan'] and hps.coverage:
+        if hps.mode in ["decode", 'train_gan'] and hps.coverage:
             self.prev_coverage = tf.placeholder(tf.float32, [None, None], name='prev_coverage')
             # so this need not to be reloaded and taken gradient hps
 
@@ -163,7 +168,6 @@ class PointerGenerator(object):
             new_c = tf.nn.relu(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
             new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
             return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
-
 
     def _calc_final_dist(self, p_gens, vocab_dists, attn_dists):
         # this is the core function
@@ -375,12 +379,12 @@ class PointerGenerator(object):
         # In decode mode, we run attention_decoder one step at a time and so
         # need to pass in the previous step's coverage vector each time
         # a placeholder, why not a variable?
-        prev_coverage = self.prev_coverage if self.hps.coverage and self.hps.mode in ["gan", "decode"] else None
+        prev_coverage = self.prev_coverage if self.hps.coverage and self.hps.mode in ["train_gan", "decode"] else None
         # coverage is for decoding in beam_search and gan training
 
         outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
             emb_dec_inputs, dec_in_state, self.enc_states, self.enc_padding_mask, cell,
-            initial_state_attention=(self.hps.mode in ["decode", 'gan']),
+            initial_state_attention=(self.hps.mode in ["decode", 'train_gan']),
             pointer_gen=self.hps.pointer_gen, use_coverage=self.hps.coverage,
             prev_coverage=prev_coverage)
 

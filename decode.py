@@ -32,6 +32,7 @@ from codecs import open
 import gen_utils
 import logging
 from six.moves import xrange
+from data import PAD_TOKEN
 # import numpy as np
 FLAGS = tf.app.flags.FLAGS
 
@@ -85,17 +86,27 @@ class BeamSearchDecoder(object):
             if not os.path.exists(self._rouge_dec_dir):
                 os.mkdir(self._rouge_dec_dir)
 
-    def generate(self, batch, include_start_token=False):
+    def generate(self, batch, vocab, include_start_token=False):
         # the abstract should also be generated
         # Run beam search to get best Hypothesis
         enc_states, dec_in_state, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
 
         # Extract the output ids from the hypothesis and convert back to
         # words
+        pad_id = vocab.word2id(PAD_TOKEN)
         if include_start_token:
             outputs_ids = [[int(t) for t in best_hyp.tokens[:]] for best_hyp in best_hyps]
+            max_len = self._hps.max_dec_steps + 1
         else:
             outputs_ids = [[int(t) for t in best_hyp.tokens[1:]] for best_hyp in best_hyps]
+            # this is for the rollout and the effective length should be adding
+            # the same then the total length should add one
+            max_len = self._hps.max_dec_steps
+        outputs_ids = [i + (max_len - len(i)) * [pad_id]
+                       if len(i) < max_len else i[:max_len] for i in outputs_ids]
+        # for o in outputs_ids:
+        #     while len(o) < self._hps.max_dec_steps:
+        #         o.append(vocab.word2id(PAD_TOKEN))
         return enc_states, dec_in_state, outputs_ids
 
     def decode(self, batcher):
@@ -121,6 +132,10 @@ class BeamSearchDecoder(object):
                 # rouge_log(results_dict, self._decode_dir)
                 return
 
+            _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+            # is the beam_size here 1?
+            outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps]
+
             original_articles = batch.original_articles
             original_abstracts = batch.original_abstracts
             # original_abstract_sents = batch.original_abstracts_sents[0]
@@ -133,9 +148,6 @@ class BeamSearchDecoder(object):
                                                     (art_oovs if self._hps.pointer_gen else None))
 
             # Run beam search to get best Hypothesis
-            _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
-            # is the beam_size here 1?
-            outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps]
 
             decoded_words_list = data.outputsids2words(
                 outputs_ids, self._vocab, (art_oovs if self._hps.pointer_gen else None))

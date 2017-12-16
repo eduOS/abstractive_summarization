@@ -22,22 +22,22 @@ def get_config():
     return config
 
 
-def load_ckpt(saver, sess, dire, force=False):
+def load_ckpt(saver, sess, dire, force=False, lastest_filename="checkpoint"):
     """Load checkpoint from the train directory and restore it to saver and sess,
     waiting 10 secs in the case of failure. Also returns checkpoint name."""
     while True:
         try:
-            ckpt_state = tf.train.get_checkpoint_state(dire)
+            ckpt_state = tf.train.get_checkpoint_state(dire, lastest_filename)
             print('Loading checkpoint %s' % ckpt_state.model_checkpoint_path)
             saver.restore(sess, ckpt_state.model_checkpoint_path)
             return ckpt_state.model_checkpoint_path
         except Exception as ex:
             print(ex)
-            print("Failed to load checkpoint from %s." % dire)
+            print("Failed to load checkpoint from %s" % dire)
             if not force:
                 return
             else:
-                print("Failed to load checkpoint from %s. Sleeping %s munites to waite." % (dire, 10))
+                print("Failed to load checkpoint from %s Sleeping %s munites to waite." % (dire, 10))
                 time.sleep(10)
 
 

@@ -146,8 +146,9 @@ def dump_chpt(eval_batcher, hps, model, sess, saver, early_stop=False):
             eval_loss > max(previous_losses[-threshold-1:-1]) and \
             eval_loss_best < min(previous_losses[-threshold:]):
         if early_stop:
-            break
+            stop_flag = True
         else:
+            stop_flag = False
             print("Proper time to stop...")
     if eval_loss < eval_loss_best:
         dump_model = True
@@ -157,7 +158,7 @@ def dump_chpt(eval_batcher, hps, model, sess, saver, early_stop=False):
         checkpoint_path = ensure_exists(join_path(hps.model_dir, "discriminator")) + "/model.ckpt"
         saver.save(sess, checkpoint_path, global_step=model.global_step)
         print("Saving the checkpoint to %s" % checkpoint_path)
-    return eval_accuracy, eval_loss
+    return eval_accuracy, eval_loss, stop_flag
 
 
 def print_dashboard(train_accuracies, eval_loss, eval_accuracy):
