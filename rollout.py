@@ -6,6 +6,7 @@ from tensorflow.python.ops import tensor_array_ops, control_flow_ops
 # from tensorflow.python.ops import variable_scope
 import numpy as np
 from data import gen_vocab2dis_vocab
+import data
 PAD_TOKEN = "[PAD]"
 STOP_DECODING = '[STOP]'
 FLAGS = tf.app.flags.FLAGS
@@ -60,19 +61,20 @@ class Rollout(object):
                 return i+1, next_input, new_state, given_num, gen_summ
 
             def recurrence_rollout(i, dec_input, dec_in_state, given_num, gen_summ):
-                next_input_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state)
-                next_input = tf.nn.embedding_lookup(self.g_embeddings, next_input_id)
-                gen_summ = gen_summ.write(i-1, next_input_id)
-                return i+1, next_input, new_state, given_num, gen_summ
+                output_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state)
+                gen_summ = gen_summ.write(i-1, output_id)
+                next_input_id_without_oovs = tf.where(
+                    tf.less(output_id, self._gen_hps.gen_vocab_size),
+                    output_id, tf.constant(
+                        [self.generator._vocab.word2id(data.UNKNOWN_TOKEN)] * self._gen_hps.batch_size))
+                next_input_emb = tf.nn.embedding_lookup(self.g_embeddings, next_input_id_without_oovs)
+                return i+1, next_input_emb, new_state, given_num, gen_summ
 
             i, next_input, new_state, given_num, self.gen_summ_ar = control_flow_ops.while_loop(
                 cond=lambda i, _1, _2, given_num, _4: i < given_num,
                 body=recurrence_given,
                 loop_vars=(tf.constant(1, dtype=tf.int32), emb_summ_ar.read(0),
                            init_dec_in_state, self.given_num, self.gen_summ_ar))
-
-            # variable_scope.get_variable_scope().reuse_variables()
-            # reuse variables between python loops is needed
 
             _, _, _, _, self.gen_summ_ar = control_flow_ops.while_loop(
                 cond=lambda i, _1, _2, _3, _4: i < self._gen_hps.max_dec_steps+1,
