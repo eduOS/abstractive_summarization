@@ -78,15 +78,6 @@ def save_best_ckpt(sess, model, best_loss, val_batcher,
                    val_dir, val_saver, step, model_name='bestmodel', latest_filename="checkpoint_best"):
     bestmodel_save_path = join_path(val_dir, model_name)
 
-    # for the gan evaluation, because the length of the dec_batch placeholder
-    # cannot be changed once it is set as 1 for generating
-    if not model:
-        if best_loss:
-            val_saver.save(
-                sess, bestmodel_save_path, global_step=step, latest_filename=latest_filename)
-            return best_loss
-        return None
-
     losses = []
     while True:
         val_batch = val_batcher.next_batch()

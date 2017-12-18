@@ -458,19 +458,15 @@ def main(argv):
                 current_speed = (time.time() - start_time) / (i_gan * hps_gan.gan_gen_iter * hps_gen.batch_size)
                 eve_g_loss = sum(g_losses) / len(g_losses)
                 # one more process hould be opened for the evaluation
-                rst = save_best_ckpt(
-                    sess, None, (eve_g_loss if eve_g_loss < gen_best_loss else None),
-                    None, None, None, gen_global_step)
-                gen_best_loss = rst if rst else gen_best_loss
+                eval_loss = save_best_ckpt(
+                    sess, generator, gen_best_loss, gen_batcher_val, gen_batcher_val, val_saver, gen_global_step)
 
                 print_dashboard("Generator", gen_global_step, hps_gen.batch_size, hps_gen.gen_vocab_size,
                                 eve_g_loss, eve_g_loss,
                                 total_training_time, current_speed)
 
-def print_dashboard(type, step, batch_size, vocab_size,
-                    running_avg_loss, eval_loss,
-                    total_training_time, current_speed,
-                    coverage_loss="not set"):
+# def save_best_ckpt(sess, model, best_loss, val_batcher,
+#                    val_dir, val_saver, step, model_name='bestmodel', latest_filename="checkpoint_best"):
 
             # Train the discriminator
             print('Going to train the discriminator.')
