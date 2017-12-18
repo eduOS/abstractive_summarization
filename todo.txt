@@ -19,7 +19,7 @@
   while decoding in the decode process, the words after the stop sign is cutted
 15. batch_size and oovs may cause issues while decoding [check]
 16. compatibility between decode and gan in beam_search, or just support batch sized beam search and delete the decode mode in batcher [check]
-14. shuffle the generated sample before putting into the discriminator
+14. shuffle the generated sample before putting into the discriminator [check]
 17. positive and negative samples, the strategy to train GAN
 18. graph compatibility among different modes in chenyu's code
 19. process traditional chinese and nonprintable characters in the material and then the corpus and the vocabulary should be updated

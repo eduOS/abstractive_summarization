@@ -6,6 +6,7 @@ from utils import ensure_exists
 from os.path import join as join_path
 import data
 import tensorflow as tf
+import numpy as np
 import sys
 
 
@@ -16,7 +17,6 @@ def convolution2d(inputs,
                   pool_size=None,
                   decay=0.999,
                   activation_fn=None,
-                  is_training=True,
                   reuse=None,
                   scope=None):
   """Adds a 2D convolution followed by a maxpool layer.
@@ -40,10 +40,7 @@ def convolution2d(inputs,
                              collections=[tf.GraphKeys.BIASES],
                              trainable=True)
     outputs = tf.nn.conv2d(inputs, weights, [1, 1, 1, 1], padding='SAME')
-    if is_training:
-      outputs = outputs + biases
-    else:
-      outputs = outputs + biases
+    outputs = outputs + biases
     if pool_size:
       pool_shape = [1, 1] + [pool_size] + [1]
       outputs = tf.nn.max_pool(outputs, pool_shape, pool_shape, padding='SAME')
@@ -65,7 +62,7 @@ def params_decay(decay):
 
 # ResCNN
 def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers=1,
-            decay=0.99999, activation_fn=tf.nn.relu, is_training=True, reuse=None, scope=None):
+            decay=0.99999, activation_fn=tf.nn.relu, reuse=None, scope=None):
   """ a convolutaional neural net with conv2d and max_pool layers
 
   """
@@ -84,7 +81,7 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
       with tf.variable_scope("input_layer{0}".format(j)):
         for i in range(conv_layers):
           i_outputs -= convolution2d(activation_fn(i_outputs), i_layer_size, kernel_size, decay=decay,
-                                     activation_fn=activation_fn, is_training=is_training)
+                                     activation_fn=activation_fn)
     # maybe dropout is useful
     # squeeze the highth dimension
     i_outputs = tf.squeeze(i_outputs, [1])
@@ -102,7 +99,7 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
       with tf.variable_scope("condition_layer{0}".format(j)):
         for i in range(conv_layers*2):
           c_outputs -= convolution2d(activation_fn(c_outputs), c_layer_size, kernel_size, decay=decay,
-                                     activation_fn=activation_fn, is_training=is_training)
+                                     activation_fn=activation_fn)
 
     c_outputs = tf.squeeze(c_outputs, [1])
     conditions_emb = tf.reduce_max(c_outputs, axis=1)
@@ -118,6 +115,7 @@ def dump_chpt(eval_batcher, hps, model, sess, saver, early_stop=False):
     previous_losses = [eval_loss_best]
     eval_losses = []
     eval_accuracies = []
+    stop_flag = False
     while True:
         batch = eval_batcher.next_batch()
         if not batch[0]:
@@ -125,10 +123,9 @@ def dump_chpt(eval_batcher, hps, model, sess, saver, early_stop=False):
             break
         eval_inputs, eval_conditions, eval_targets = \
             data.prepare_dis_pretraining_batch(batch)
-        if eval_inputs.shape[0] != hps.batch_size * hps.num_models * 2:
-            print("The expected batch_size is %s but given %s, escape.." %
-                  (hps.batch_size * hps.num_models * 2, eval_inputs.shape[0]))
-            continue
+        eval_inputs = np.split(eval_inputs, 2)[0]
+        eval_conditions = np.split(eval_conditions, 2)[0]
+        eval_targets = np.split(eval_targets, 2)[0]
         eval_results = model.run_one_step(
             sess, eval_inputs, eval_conditions, eval_targets, update=False)
         eval_losses.append(eval_results["loss"])

@@ -4,6 +4,7 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 import os
+import datetime
 import tensorflow as tf
 import time
 
@@ -49,3 +50,30 @@ def initialize_uninitialized(sess):
     print([str(i.name) for i in not_initialized_vars])  # only for testing
     if len(not_initialized_vars):
         sess.run(tf.variables_initializer(not_initialized_vars))
+
+
+def print_dashboard(type, step, batch_size, vocab_size,
+                    running_avg_loss, eval_loss,
+                    total_training_time, current_speed,
+                    coverage_loss="not set"):
+    print(
+        "\nDashboard for %s updated %s, finished steps:\t%s\n"
+        "\tBatch size:\t%s\n"
+        "\tVocabulary size:\t%s\n"
+        "\tArticles trained:\t%s\n"
+        "\tTotal training time approxiately:\t%.4f hours\n"
+        "\tCurrent speed:\t%.4f seconds/article\n"
+        "\tTraining loss:\t%.4f; eval loss \t%.4f"
+        "\tand coverage loss:\t%s\n" % (
+            type,
+            datetime.datetime.now().strftime("on %m-%d at %H:%M"),
+            step,
+            batch_size,
+            vocab_size,
+            batch_size * step,
+            total_training_time,
+            current_speed,
+            running_avg_loss, eval_loss,
+            coverage_loss,
+            )
+    )

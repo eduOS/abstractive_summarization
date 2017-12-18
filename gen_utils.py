@@ -77,6 +77,16 @@ def get_best_loss_from_chpt(val_dir):
 def save_best_ckpt(sess, model, best_loss, val_batcher,
                    val_dir, val_saver, step, model_name='bestmodel', latest_filename="checkpoint_best"):
     bestmodel_save_path = join_path(val_dir, model_name)
+
+    # for the gan evaluation, because the length of the dec_batch placeholder
+    # cannot be changed once it is set as 1 for generating
+    if not model:
+        if best_loss:
+            val_saver.save(
+                sess, bestmodel_save_path, global_step=step, latest_filename=latest_filename)
+            return best_loss
+        return None
+
     losses = []
     while True:
         val_batch = val_batcher.next_batch()
@@ -98,29 +108,3 @@ def save_best_ckpt(sess, model, best_loss, val_batcher,
         val_saver.save(sess, bestmodel_save_path, global_step=step, latest_filename=latest_filename)
         best_loss = eval_loss
     return eval_loss
-
-
-def print_dashboard(step, batch_size, vocab_size,
-                    running_avg_loss, eval_loss,
-                    total_training_time, current_speed,
-                    coverage_loss="not set"):
-    print(
-        "\nDashboard updated %s, finished steps:\t%s\n"
-        "\tBatch size:\t%s\n"
-        "\tVocabulary size:\t%s\n"
-        "\tArticles trained:\t%s\n"
-        "\tTotal training time approxiately:\t%.4f hours\n"
-        "\tCurrent speed:\t%.4f seconds/article\n"
-        "\tTraining loss:\t%.4f; eval loss \t%.4f"
-        "\tand coverage loss:\t%s\n" % (
-            datetime.datetime.now().strftime("on %m-%d at %H:%M"),
-            step,
-            batch_size,
-            vocab_size,
-            batch_size * step,
-            total_training_time,
-            current_speed,
-            running_avg_loss, eval_loss,
-            coverage_loss,
-            )
-    )

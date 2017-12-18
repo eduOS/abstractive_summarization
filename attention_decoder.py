@@ -34,7 +34,7 @@ from tensorflow.python.ops import math_ops
 
 
 def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding_mask,
-                      cell, initial_state_attention=False, pointer_gen=True,
+                      cell, initial_state_attention=False,
                       use_coverage=False, prev_coverage=None):
     """
     Args:
@@ -244,12 +244,11 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
             attn_dists.append(attn_dist)
 
             # Calculate p_gen
-            if pointer_gen:
-                with tf.variable_scope('calculate_pgen'):
-                    p_gen = linear([context_vector, state.c, state.h, x], 1, True)
-                    # a scalar
-                    p_gen = tf.sigmoid(p_gen)
-                    p_gens.append(p_gen)
+            with tf.variable_scope('calculate_pgen'):
+                p_gen = linear([context_vector, state.c, state.h, x], 1, True)
+                # a scalar
+                p_gen = tf.sigmoid(p_gen)
+                p_gens.append(p_gen)
 
             # Concatenate the cell_output (= decoder state) and the context
             # vector, and pass them through a linear layer

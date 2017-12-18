@@ -25,6 +25,7 @@ import sys
 import time
 import numpy as np
 import tensorflow as tf
+import data
 from attention_decoder import attention_decoder
 # from share_function import tableLookup
 from tensorflow.contrib.tensorboard.plugins import projector
@@ -51,18 +52,22 @@ class PointerGenerator(object):
         else:
             max_dec_steps = hps.max_dec_steps
 
+        if hps.mode == "train_gan":
+            gan_target_steps = hps.max_dec_steps
+        elif hps.mode == "decode":
+            gan_target_steps = 1
+
         # encoder part
         self.enc_batch = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch')
         self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
         self.enc_padding_mask = tf.placeholder(tf.float32, [batch_size, None], name='enc_padding_mask')
-        if FLAGS.pointer_gen:
-            self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch_extend_vocab')
-            self.max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
+        self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch_extend_vocab')
+        self.max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
 
         # decoder part
         self._dec_batch = tf.placeholder(tf.int32, [batch_size, max_dec_steps], name='dec_batch')
-        self._target_batch = tf.placeholder(tf.int32, [batch_size, max_dec_steps], name='target_batch')
-        self._padding_mask = tf.placeholder(tf.float32, [batch_size, max_dec_steps], name='padding_mask')
+        self.target_batch = tf.placeholder(tf.int32, [batch_size, gan_target_steps], name='target_batch')
+        self._padding_mask = tf.placeholder(tf.float32, [batch_size, gan_target_steps], name='padding_mask')
         # padding should be use in calculating the gan loss
         self.rewards = tf.placeholder(tf.float32, shape=[batch_size, hps.max_dec_steps])
         self.g_predictions = tf.placeholder(tf.int32, shape=[batch_size, hps.max_dec_steps])
@@ -84,14 +89,11 @@ class PointerGenerator(object):
         feed_dict[self.enc_batch] = batch.enc_batch
         feed_dict[self.enc_lens] = batch.enc_lens
         feed_dict[self.enc_padding_mask] = batch.enc_padding_mask
-        if FLAGS.pointer_gen:
-            feed_dict[self.enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
-            feed_dict[self.max_art_oovs] = batch.max_art_oovs
-            # the unique feature for the pointer gen is the
-            # enc_batch_extend_vocab and the max_art_oovs
+        feed_dict[self.enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
+        feed_dict[self.max_art_oovs] = batch.max_art_oovs
         if not just_enc:
             feed_dict[self._dec_batch] = batch.dec_batch
-            feed_dict[self._target_batch] = batch.target_batch
+            feed_dict[self.target_batch] = batch.target_batch
             feed_dict[self._padding_mask] = batch.padding_mask
         return feed_dict
 
@@ -301,24 +303,17 @@ class PointerGenerator(object):
 
             # Calculate the loss
             with tf.variable_scope('generator_loss'):
-                if FLAGS.pointer_gen:  # calculate loss from log_dists
-                    loss_per_step = []
-                    batch_nums = tf.range(0, tf.shape(emb_dec_inputs[0])[0])
-                    for dec_step, dist in enumerate(final_dists):
-                        targets = self._target_batch[:, dec_step]
-                        indices = tf.stack((batch_nums, targets), axis=1)
-                        gold_probs = tf.gather_nd(dist, indices)
-                        losses = -tf.log(gold_probs)
-                        loss_per_step.append(losses)
+                loss_per_step = []
+                batch_nums = tf.range(0, tf.shape(emb_dec_inputs[0])[0])
+                for dec_step, dist in enumerate(final_dists):
+                    targets = self.target_batch[:, dec_step]
+                    indices = tf.stack((batch_nums, targets), axis=1)
+                    gold_probs = tf.gather_nd(dist, indices)
+                    losses = -tf.log(gold_probs)
+                    loss_per_step.append(losses)
 
-                    # Apply padding_mask mask and get loss
-                    self._loss = _mask_and_avg(loss_per_step, self._padding_mask)
-
-                else:  # baseline model
-                    self._loss = tf.contrib.seq2seq.sequence_loss(
-                        tf.stack(vocab_scores, axis=1), self._target_batch,
-                        self._padding_mask, average_across_timesteps=True,
-                        average_across_batch=True)
+                # Apply padding_mask mask and get loss
+                self._loss = _mask_and_avg(loss_per_step, self._padding_mask)
 
                 tf.summary.scalar('loss', self._loss)
                 # Calculate coverage loss from the attention distributions
@@ -343,13 +338,19 @@ class PointerGenerator(object):
             self._topk_log_probs = tf.log(topk_probs)
 
         with tf.variable_scope('gan_loss'):
-            g_predictions = tf.nn.embedding_lookup(self.embeddings, self.g_predictions)
+            g_predictions = tf.where(
+                tf.less(self.g_predictions, self.hps.gen_vocab_size),
+                self.g_predictions, tf.constant(
+                    [[self._vocab.word2id(data.UNKNOWN_TOKEN)] * self.hps.max_dec_steps] * self.hps.batch_size)
+            )
+            g_predictions = tf.nn.embedding_lookup(self.embeddings, g_predictions)
             self.g_loss = -tf.reduce_sum(
                 tf.reduce_sum(
-                    tf.one_hot(tf.to_int32(tf.reshape(self.enc_batch, [-1])),
-                               self.hps.emb_dim, 1.0, 0.0) * tf.clip_by_value(
-                                   tf.reshape(g_predictions, [-1, self.hps.emb_dim]), 1e-20, 1.0), 1
-                ) * tf.reshape(self.rewards, [-1])
+                    tf.one_hot(
+                        tf.to_int32(tf.reshape(self.target_batch, [-1])), self.hps.emb_dim, 1.0, 0.0
+                    ) * tf.clip_by_value(
+                        tf.reshape(g_predictions, [-1, self.hps.emb_dim]), 1e-20, 1.0
+                    ), 1) * tf.reshape(self.rewards, [-1])
             )
             # rewards and g_predictions should be placeholders
 
@@ -385,8 +386,7 @@ class PointerGenerator(object):
         outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
             emb_dec_inputs, dec_in_state, self.enc_states, self.enc_padding_mask, cell,
             initial_state_attention=(self.hps.mode in ["decode", 'train_gan']),
-            pointer_gen=self.hps.pointer_gen, use_coverage=self.hps.coverage,
-            prev_coverage=prev_coverage)
+            use_coverage=self.hps.coverage, prev_coverage=prev_coverage)
 
         # Add the output projection to obtain the vocabulary distribution
         with tf.variable_scope('output_projection'):
@@ -413,13 +413,7 @@ class PointerGenerator(object):
 
         # For pointer-generator model, calc final distribution from copy
         # distribution and vocabulary distribution, then take log
-        if FLAGS.pointer_gen:
-            final_dists = self._calc_final_dist(p_gens, vocab_dists, attn_dists)
-            # Take log of final distribution
-            # log_dists = [tf.log(dist) for dist in final_dists]
-        else:  # just take log of vocab_dists
-            final_dists = vocab_dists
-            # log_dists = [tf.log(dist) for dist in vocab_dists]
+        final_dists = self._calc_final_dist(p_gens, vocab_dists, attn_dists)
         return attn_dists, p_gens, coverage, vocab_scores, final_dists, out_state
 
     def _add_train_op(self):
@@ -593,10 +587,9 @@ class PointerGenerator(object):
           "final_dists": self.final_dists,
         }
 
-        if FLAGS.pointer_gen:
-            feed[self.enc_batch_extend_vocab] = enc_batch_extend_vocab
-            feed[self.max_art_oovs] = max_art_oovs
-            to_return['p_gens'] = self.p_gens
+        feed[self.enc_batch_extend_vocab] = enc_batch_extend_vocab
+        feed[self.max_art_oovs] = max_art_oovs
+        to_return['p_gens'] = self.p_gens
 
         if self.hps.coverage:
             feed[self.prev_coverage] = prev_coverage
@@ -615,12 +608,9 @@ class PointerGenerator(object):
         assert len(results['attn_dists']) == 1
         attn_dists = results['attn_dists'][0].tolist()
 
-        if FLAGS.pointer_gen:
-            # Convert singleton list containing a tensor to a list of k arrays
-            assert len(results['p_gens']) == 1
-            p_gens = results['p_gens'][0].tolist()
-        else:
-            p_gens = [None for _ in xrange(FLAGS.beam_size)]
+        # Convert singleton list containing a tensor to a list of k arrays
+        assert len(results['p_gens']) == 1
+        p_gens = results['p_gens'][0].tolist()
 
         # Convert the coverage tensor to a list length k containing the coverage
         # vector for each hypothesis

@@ -144,13 +144,12 @@ class BeamSearchDecoder(object):
             art_oovs = [batch.art_oovs[i]
                         for i in xrange(self._hps.batch_size)]
             articles_withunks = data.show_art_oovs(original_articles, self._vocab)
-            abstracts_withunks = data.show_abs_oovs(original_abstracts, self._vocab,
-                                                    (art_oovs if self._hps.pointer_gen else None))
+            abstracts_withunks = data.show_abs_oovs(original_abstracts, self._vocab, art_oovs)
 
             # Run beam search to get best Hypothesis
 
             decoded_words_list = data.outputsids2words(
-                outputs_ids, self._vocab, (art_oovs if self._hps.pointer_gen else None))
+                outputs_ids, self._vocab, art_oovs)
             # art_oovs[0] should be changed, batch size examples should be
             # concluded
             decoded_outputs = []
@@ -265,8 +264,7 @@ class BeamSearchDecoder(object):
             'abstract_str': make_html_safe(abstract),
             'attn_dists': attn_dists
         }
-        if self._hps.pointer_gen:
-            to_write['p_gens'] = p_gens
+        to_write['p_gens'] = p_gens
         output_fname = os.path.join(self._decode_dir, 'attn_vis_data.json')
         with open(output_fname, 'w', 'utf-8') as output_file:
             json.dump(to_write, output_file)
