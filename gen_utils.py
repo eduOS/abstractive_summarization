@@ -83,8 +83,7 @@ def save_best_ckpt(sess, model, best_loss, val_batcher,
         val_batch = val_batcher.next_batch()
         if not val_batch:
             break
-        results_val = model.run_one_step(
-            sess, val_batch, update=False)
+        results_val = model.run_eval_step(sess, val_batch)
         loss_eval = results_val["loss"]
         # why there exists nan?
         if not math.isnan(loss_eval):

@@ -52,11 +52,6 @@ class PointerGenerator(object):
         else:
             max_dec_steps = hps.max_dec_steps
 
-        if hps.mode in ["train_gan", "pretrain_gen"]:
-            changable_steps = hps.max_dec_steps
-        elif hps.mode == "decode":
-            changable_steps = 1
-
         # encoder part
         self.enc_batch = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch')
         self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
@@ -65,15 +60,15 @@ class PointerGenerator(object):
         self.max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
 
         # decoder part
-        self._dec_batch = tf.placeholder(tf.int32, [batch_size, changable_steps], name='dec_batch')
+        self._dec_batch = tf.placeholder(tf.int32, [batch_size, max_dec_steps], name='dec_batch')
         # in gan training all three modes of the generator are used:
         # decoding for the generating process; training for the tuning and
         # evaluation for its evaluation
-        if self.hps.mode == "train_gan":
-            self._eval_dec_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='dec_batch')
-            # this is for the evaluation of the generator in gan training
-        self.target_batch = tf.placeholder(tf.int32, [batch_size, changable_steps], name='target_batch')
-        self._padding_mask = tf.placeholder(tf.float32, [batch_size, changable_steps], name='padding_mask')
+        self.full_dec_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='dec_batch')
+        self.padding_mask = tf.placeholder(tf.float32, [batch_size, hps.max_dec_steps], name='padding_mask')
+        # this is for the evaluation of the generator in gan training
+        self.target_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='target_batch')
+        self._padding_mask = tf.placeholder(tf.float32, [batch_size, hps.max_dec_steps], name='padding_mask')
         # padding should be use in calculating the gan loss
         self.rewards = tf.placeholder(tf.float32, shape=[batch_size, hps.max_dec_steps])
         self.g_predictions = tf.placeholder(tf.int32, shape=[batch_size, hps.max_dec_steps])
@@ -102,8 +97,9 @@ class PointerGenerator(object):
             feed_dict[self.target_batch] = batch.target_batch
             feed_dict[self._padding_mask] = batch.padding_mask
             if self.hps.mode == "train_gan" and not update:
-                feed_dict[self._eval_dec_batch] = batch.dec_batch
-            else:
+                feed_dict[self.full_dec_batch] = batch.dec_batch
+                # this is for the evaluation step in gan
+            elif self.hps.mode != "train_gan":
                 feed_dict[self._dec_batch] = batch.dec_batch
         return feed_dict
 
@@ -302,9 +298,8 @@ class PointerGenerator(object):
                 emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
                 emb_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
                                   for x in tf.unstack(self._dec_batch, axis=1)]
-                if self.hps.mode == "train_gan":
-                    emb_eval_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
-                                           for x in tf.unstack(self._eval_dec_batch, axis=1)]
+                emb_full_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
+                                       for x in tf.unstack(self.full_dec_batch, axis=1)]
 
             # Add the encoder.
             enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
@@ -313,29 +308,30 @@ class PointerGenerator(object):
             with tf.variable_scope('decoder') as decoder_scope:
                 self.attn_dists, self.p_gens, self.coverage, vocab_scores, \
                     final_dists, self._dec_out_state = self._add_decoder(emb_dec_inputs, self.dec_in_state)
-                if self.hps.mode == "train_gan":
-                    decoder_scope.reuse_variables()
-                    self.eval_attn_dists, self.eval_p_gens, self.eval_coverage, eval_vocab_scores, \
-                        eval_final_dists, self._eval_dec_out_state = self._add_decoder(emb_eval_dec_inputs, self.dec_in_state)
-                    # can I use this directly?
+                decoder_scope.reuse_variables()
+                self.full_attn_dists, self.full_p_gens, self.full_coverage, full_vocab_scores, \
+                    full_final_dists, self._full_dec_out_state = self._add_decoder(emb_full_dec_inputs, self.dec_in_state)
+                # can I use this directly?
 
             # Calculate the loss
             with tf.variable_scope('generator_loss'):
                 loss_per_step = []
+                g_loss_per_step = []
                 batch_nums = tf.range(0, tf.shape(
-                    emb_dec_inputs[0] if hps.mode != "train_gan" else self.emb_eval_dec_inputs
+                    emb_dec_inputs[0] if hps.mode != "train_gan" else emb_full_dec_inputs[0]
                 )[0])
                 # in the gan training the loss is not use, two kinds of
                 # generating are employed: beamsearch generating for generating
                 # samples and normal attention generating for the rollout, so
                 # the loss is here for the evaluation while gan training. This
                 # part of code can be shared
-                for dec_step, dist in enumerate(final_dists if hps.mode != "train_gan" else eval_final_dists):
+                for dec_step, dist in enumerate(final_dists if hps.mode != "train_gan" else full_final_dists):
                     targets = self.target_batch[:, dec_step]
                     indices = tf.stack((batch_nums, targets), axis=1)
                     gold_probs = tf.gather_nd(dist, indices)
                     losses = -tf.log(gold_probs)
                     loss_per_step.append(losses)
+                    g_loss_per_step.append(losses * self.rewards[:, dec_step])
 
                 # Apply padding_mask mask and get loss
                 self._loss = _mask_and_avg(loss_per_step, self._padding_mask)
@@ -363,26 +359,11 @@ class PointerGenerator(object):
             self._topk_log_probs = tf.log(topk_probs)
 
         with tf.variable_scope('gan_loss'):
-            g_predictions = tf.where(
-                tf.less(self.g_predictions, self.hps.gen_vocab_size),
-                self.g_predictions, tf.constant(
-                    [[self._vocab.word2id(data.UNKNOWN_TOKEN)] * self.hps.max_dec_steps] * self.hps.batch_size)
-            )
-            g_predictions = tf.nn.embedding_lookup(self.embeddings, g_predictions)
-            self.g_loss = -tf.reduce_sum(
-                tf.reduce_sum(
-                    tf.one_hot(
-                        tf.to_int32(tf.reshape(self.target_batch, [-1])), self.hps.emb_dim, 1.0, 0.0
-                    ) * tf.clip_by_value(
-                        tf.reshape(g_predictions, [-1, self.hps.emb_dim]), 1e-20, 1.0
-                    ), 1) * tf.reshape(self.rewards, [-1])
-            )
-            # rewards and g_predictions should be placeholders
-
+            self.g_loss = _mask_and_avg(g_loss_per_step, self.padding_mask)
             g_opt = self.g_optimizer(self.hps.gen_lr)
-
             trainable_variables = tf.trainable_variables()
             self.g_grad, _ = tf.clip_by_global_norm(tf.gradients(self.g_loss, trainable_variables), self.hps.gen_max_gradient)
+
             self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables))
 
         return decoder_scope
@@ -481,17 +462,30 @@ class PointerGenerator(object):
         tf.logging.info('Time to build graph: %i seconds', t1 - t0)
         return decoder_scope
 
-    def run_one_step(self, sess, batch, update=True):
+    def run_one_step(self, sess, batch):
         """Runs one training iteration. Returns a dictionary containing train
         op, summaries, loss, global_step and (optionally) coverage loss."""
-        feed_dict = self._make_feed_dict(batch, update=update)
+        feed_dict = self._make_feed_dict(batch, update=True)
+
         to_return = {
-            'loss': self._loss,
             'global_step': self.global_step,
         }
-        if update:
-            to_return['train_op'] = self._train_op,
-            to_return['summaries'] = self._summaries,
+        to_return['loss'] = self._loss
+        to_return['train_op'] = self._train_op
+        if self.hps.coverage:
+            to_return['coverage_loss'] = self._coverage_loss
+        return sess.run(to_return, feed_dict)
+
+    def run_gan_step(self, sess, batch, rewards, full_dec_batch, padding_mask):
+        feed_dict = self._make_feed_dict(batch, update=True)
+        feed_dict[self.rewards] = rewards
+        feed_dict[self.full_dec_batch] = full_dec_batch
+        feed_dict[self.padding_mask] = padding_mask
+        to_return = {
+            'global_step': self.global_step,
+        }
+        to_return['g_updates'] = self.g_updates
+        to_return['g_loss'] = self.g_loss
         if self.hps.coverage:
             to_return['coverage_loss'] = self._coverage_loss
         return sess.run(to_return, feed_dict)
@@ -499,9 +493,8 @@ class PointerGenerator(object):
     def run_eval_step(self, sess, batch):
         """Runs one evaluation iteration. Returns a dictionary containing
         summaries, loss, global_step and (optionally) coverage loss."""
-        feed_dict = self._make_feed_dict(batch)
+        feed_dict = self._make_feed_dict(batch, update=False)
         to_return = {
-            'summaries': self._summaries,
             'loss': self._loss,
             'global_step': self.global_step,
         }

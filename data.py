@@ -232,18 +232,17 @@ def outputsids2words(id_lists, vocab, articles_oovs, art_ids=None):
                 except IndexError:
                     print(
                         'Error: model produced word ID %i which corresponds to'
-                        'article OOV %i but this example only has %i article OOVs,'
-                        'the oovs are:\n' %
+                        'article OOV %i but this example only has %i article OOVs' %
                         (i, article_oov_idx, len(articles_oovs[j])))
                     w = UNKNOWN_TOKEN
                     # this happen in the gan generated samples
                     # ids may out of the oovs, quite strange
-                    print("article oovs")
-                    print("|".join(articles_oovs[j]))
-                    print("artcle ids")
-                    print(art_ids[j])
-                    print("generated ids ")
-                    print(id_lists[j])
+                    # print("article oovs")
+                    # print("|".join(articles_oovs[j]))
+                    # print("artcle ids")
+                    # print(art_ids[j])
+                    # print("generated ids ")
+                    # print(id_lists[j])
             words.append(w)
         words_lists.append(words)
     return words_lists
@@ -341,7 +340,7 @@ def prepare_dis_pretraining_batch(batch):
 
 
 def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab,
-                        max_len, STOP_MARK=STOP_DECODING, art_ids=None):
+                        max_len, STOP_MARK=STOP_DECODING, art_ids=None, print_sample=False):
     """
     transfer the generator vocabulary which is word based to discriminator
     vocabualry which is char based
@@ -364,6 +363,9 @@ def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab,
     assert len(gen_ids) == len(article_oovs)
     samples_words = outputsids2words(gen_ids, gen_vocab, article_oovs, art_ids)
     for sample_words in samples_words:
+        if print_sample:
+            print(print_sample + ":")
+            print(" ".join(sample_words))
         try:
             fst_stop_idx = sample_words.index(STOP_MARK)  # index of the (first) [STOP] symbol
             sample_chars = text2charlist(sample_words[:fst_stop_idx], keep_word="[UNK]")

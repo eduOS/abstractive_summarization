@@ -7,6 +7,8 @@ import os
 import datetime
 import tensorflow as tf
 import time
+import numpy as np
+import data
 
 
 def ensure_exists(dire):
@@ -77,3 +79,16 @@ def print_dashboard(type, step, batch_size, vocab_size,
             coverage_loss,
             )
     )
+
+
+def pad_sample(best_samples, hps):
+    sample_padding_mask = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.float32)
+
+    # Fill in the numpy arrays
+    for i, sp in enumerate(best_samples):
+        for j, p in enumerate(sp):
+            if p == data.STOP_DECODING:
+                break
+            else:
+                sample_padding_mask[i][j] = 1
+    return sample_padding_mask

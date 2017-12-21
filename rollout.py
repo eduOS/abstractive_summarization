@@ -124,7 +124,7 @@ class Rollout(object):
                 # how about multiple generators for one discriminator?
                 rollout_samples_chars = gen_vocab2dis_vocab(
                     rollout_samples_words, gen_vocab, article_oovs,
-                    dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, art_words)
+                    dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, art_words, print_sample=False)
 
                 feed = {
                     discriminator.inputs: rollout_samples_chars,
