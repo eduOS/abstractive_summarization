@@ -358,9 +358,9 @@ def main(argv):
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         gen_dir = ensure_exists(join_path(FLAGS.model_dir, "generator"))
         # gen_dir = ensure_exists(FLAGS.model_dir)
-        temp_saver = tf.train.Saver(
-            var_list=[v for v in all_variables if "generator" in v.name and "Adagrad" not in v.name])
-        utils.load_ckpt(temp_saver, sess, gen_dir)
+        # temp_saver = tf.train.Saver(
+        #     var_list=[v for v in all_variables if "generator" in v.name and "Adagrad" not in v.name])
+        utils.load_ckpt(gen_saver, sess, gen_dir)
 
     elif FLAGS.mode in ["decode", "train_gan"]:
         print("Restoring the generator model from the best checkpoint...")
@@ -377,12 +377,6 @@ def main(argv):
         ckpt = utils.load_ckpt(dis_saver, sess, dis_dir)
         if not ckpt:
             discriminator.init_emb(sess, join_path(FLAGS.model_dir, "init_embed"))
-
-    # if FLAGS.mode == "train_gan":
-    #     rollout_saver = tf.train.Saver(
-    #         max_to_keep=3, var_list=[v for v in all_variables if "rollout" in v.name])
-    #     rlt_dir = ensure_exists(join_path(FLAGS.model_dir, 'rollout'))
-    #     utils.load_ckpt(rollout_saver, sess, rlt_dir)
 
     # --------------- train models ---------------
     if FLAGS.mode != "pretrain_dis":

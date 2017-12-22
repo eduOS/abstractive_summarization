@@ -92,7 +92,7 @@ def save_best_ckpt(sess, model, best_loss, val_batcher,
     if best_loss is None or eval_loss < best_loss:
         sess.run(model.least_val_loss.assign(eval_loss))
         print(
-            'Found new best model with %.3f running_avg_loss. Saving to %s %s' %
+            'Found new best model with %.3f evaluation loss. Saving to %s %s' %
             (eval_loss, bestmodel_save_path,
                 datetime.datetime.now().strftime("on %m-%d at %H:%M")))
         val_saver.save(sess, bestmodel_save_path, global_step=step, latest_filename=latest_filename)
