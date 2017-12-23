@@ -114,6 +114,7 @@ class BeamSearchDecoder(object):
         return, or decode indefinitely, loading latest checkpoint at regular
         intervals"""
         t0 = time.time()
+        temp = beam_search.Temp(self._sess, self._model, self._vocab)
         counter = 0
         while True:
             # 1 example repeated across batch
@@ -132,7 +133,9 @@ class BeamSearchDecoder(object):
                 # rouge_log(results_dict, self._decode_dir)
                 return
 
-            _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+            # _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+            _, _, best_hyps = temp.my_run_beam_search(batch)
+
             # is the beam_size here 1?
             outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps]
 
