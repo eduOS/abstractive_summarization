@@ -239,6 +239,7 @@ class PointerGenerator(object):
             attn_dists_projected = [
                 tf.scatter_nd(indices, copy_dist, shape)
                 for copy_dist in attn_dists]
+            # this causes the error in the rollout!
             # a detailed article should be written about this
             # list length max_dec_steps (batch_size, extended_vsize)
 
@@ -306,10 +307,10 @@ class PointerGenerator(object):
             self.enc_states = enc_outputs
             self.dec_in_state = self._reduce_states(fw_st, bw_st)
             with tf.variable_scope('decoder') as decoder_scope:
-                self.attn_dists, self.p_gens, self.coverage, vocab_scores, \
+                self.attn_dists, self.p_gens, self.coverage, \
                     final_dists, self._dec_out_state = self._add_decoder(emb_dec_inputs, self.dec_in_state)
                 decoder_scope.reuse_variables()
-                self.full_attn_dists, self.full_p_gens, self.full_coverage, full_vocab_scores, \
+                self.full_attn_dists, self.full_p_gens, self.full_coverage, \
                     full_final_dists, self._full_dec_out_state = self._add_decoder(emb_full_dec_inputs, self.dec_in_state)
                 # can I use this directly?
 
@@ -420,7 +421,7 @@ class PointerGenerator(object):
         # For pointer-generator model, calc final distribution from copy
         # distribution and vocabulary distribution, then take log
         final_dists = self._calc_final_dist(p_gens, vocab_dists, attn_dists)
-        return attn_dists, p_gens, coverage, vocab_scores, final_dists, out_state
+        return attn_dists, p_gens, coverage, final_dists, out_state
 
     def _add_train_op(self):
         """Sets self._train_op, the op to run for training."""
@@ -546,9 +547,10 @@ class PointerGenerator(object):
             the embedded input
         """
         # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
-        _, _, _, _, final_dists, new_states = self._add_decoder(emb_dec_inputs, dec_in_state)
+        _, _, _, final_dists, new_states = self._add_decoder(emb_dec_inputs, dec_in_state)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
-        output_id = tf.squeeze(tf.cast(tf.multinomial(final_dists[0], 1), tf.int32))
+        final_dists_sliced = tf.slice(final_dists[0], [0, 0], [-1, self._vocab.size()])
+        output_id = tf.squeeze(tf.cast(tf.reshape(tf.multinomial(final_dists_sliced, 1), [self.hps.batch_size]), tf.int32))
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
         return output_id, new_states
 

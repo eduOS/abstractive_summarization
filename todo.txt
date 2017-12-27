@@ -46,3 +46,5 @@
 36. what should the validation of the generator be in processing the gan, cross entropy or rouge etc.?
 37. initialize the variables in the graph but cannot be loaded from the checkpoint
 38. update the validation dataset with the improvement of the quality of the generated sample
+39. while processing the data, I should tokenize the article into sentences first and then segment them into words.
+40. vocabulary should be rebuilt because there were traditional chinese in corpus when building it
