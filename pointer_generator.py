@@ -550,7 +550,7 @@ class PointerGenerator(object):
         _, _, _, final_dists, new_states = self._add_decoder(emb_dec_inputs, dec_in_state)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         final_dists_sliced = tf.slice(final_dists[0], [0, 0], [-1, self._vocab.size()])
-        output_id = tf.squeeze(tf.cast(tf.reshape(tf.multinomial(final_dists_sliced, 1), [self.hps.batch_size]), tf.int32))
+        output_id = tf.squeeze(tf.cast(tf.reshape(tf.multinomial(tf.log(final_dists_sliced), 1), [self.hps.batch_size]), tf.int32))
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
         return output_id, new_states
 
