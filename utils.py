@@ -81,13 +81,13 @@ def print_dashboard(type, step, batch_size, vocab_size,
     )
 
 
-def pad_sample(best_samples, hps):
+def pad_sample(best_samples, vocab, hps):
     sample_padding_mask = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.float32)
 
     # Fill in the numpy arrays
     for i, sp in enumerate(best_samples):
         for j, p in enumerate(sp):
-            if p == data.STOP_DECODING:
+            if p == vocab.word2id(data.STOP_DECODING):
                 break
             else:
                 sample_padding_mask[i][j] = 1

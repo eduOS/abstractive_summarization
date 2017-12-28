@@ -42,9 +42,9 @@ tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate deca
 
 # Model parameters
 tf.app.flags.DEFINE_integer("layer_size", 512, "Size of each model layer.")
-tf.app.flags.DEFINE_integer("conv_layers", 2, "Number of layers in the model.")
-tf.app.flags.DEFINE_integer("pool_layers", 2, "Number of layers in the model.")
-tf.app.flags.DEFINE_integer("kernel_size", 3, "Number of layers in the model.")
+tf.app.flags.DEFINE_integer("conv_layers", 2, "Number of convolution layers in the model.")
+tf.app.flags.DEFINE_integer("pool_layers", 2, "Number of pooling layers in the model.")
+tf.app.flags.DEFINE_integer("kernel_size", 3, "The kernel size of the filters along the sentence length dimension.")
 tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
 tf.app.flags.DEFINE_integer("dis_vocab_size", 10000, "vocabulary size.")
@@ -430,15 +430,16 @@ def main(argv):
                     sess, gen_vocab, dis_vocab, batch, enc_states,
                     dec_in_state, best_samples, hps_gan.rollout_num, discriminator)
                 # only updates parameters without the rollout scope
-                best_samples_without_start = np.array([b[1:] for b in best_samples])
-                sample_padding_mask = pad_sample(best_samples_without_start, hps_gen)
-                best_samples_without_start = np.where(
-                    np.less(best_samples_without_start, hps_gen.gen_vocab_size),
-                    best_samples_without_start, np.array(
+                sample_target = np.array([b[1:] for b in best_samples])
+                sample = np.array([b[:-1] for b in best_samples])
+                sample_target_padding_mask = pad_sample(sample_target, gen_vocab, hps_gen)
+                sample = np.where(
+                    np.less(sample, hps_gen.gen_vocab_size),
+                    sample, np.array(
                         [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
 
                 results = generator.run_gan_step(
-                    sess, batch, rewards, best_samples_without_start, sample_padding_mask)
+                    sess, batch, rewards, sample, sample_target, sample_target_padding_mask)
 
                 g_loss = results["g_loss"]
                 if not math.isnan(g_loss):

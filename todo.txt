@@ -48,3 +48,4 @@
 38. update the validation dataset with the improvement of the quality of the generated sample
 39. while processing the data, I should tokenize the article into sentences first and then segment them into words.
 40. vocabulary should be rebuilt because there were traditional chinese in corpus when building it
+41. add the reinforcement rouge reward

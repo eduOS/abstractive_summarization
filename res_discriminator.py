@@ -157,10 +157,15 @@ class Seq2ClassModel(object):
                                                       pool_layers=self.pool_layers, activation_fn=tf.nn.relu, scope="cnn")
 
     with tf.variable_scope("projection"):
-      logits = tf.matmul(conditional_encoder_outputs, tf.transpose(class_output_weights/(tf.norm(class_output_weights, axis=1, keep_dims=True)+1e-20)))
+      logits = tf.matmul(
+          conditional_encoder_outputs,
+          tf.transpose(class_output_weights/(tf.norm(class_output_weights, axis=1, keep_dims=True)+1e-20))
+      )
       # loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=targets))
       loss = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=targets)
-      accuracy = tf.count_nonzero(tf.equal(tf.argmax(logits, 1), tf.argmax(targets, 1))) / logits.get_shape().as_list()[0]
+      accuracy = tf.count_nonzero(
+          tf.equal(tf.argmax(logits, 1), tf.argmax(targets, 1))
+      ) / logits.get_shape().as_list()[0]
       # tf.nn.in_top_k() is a little better
       return tf.nn.softmax(logits), loss, accuracy
 
