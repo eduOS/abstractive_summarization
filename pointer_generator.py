@@ -78,7 +78,7 @@ class PointerGenerator(object):
             self.prev_coverage = tf.placeholder(tf.float32, [None, None], name='prev_coverage')
             # so this need not to be reloaded and taken gradient hps
 
-    def _make_feed_dict(self, batch, just_enc=False, update=True):
+    def _make_feed_dict(self, batch, just_enc=False):
         """Make a feed dictionary mapping parts of the batch to the appropriate
         placeholders.
 
@@ -97,12 +97,13 @@ class PointerGenerator(object):
         if not just_enc:
             feed_dict[self.target_batch] = batch.target_batch
             feed_dict[self._padding_mask] = batch.padding_mask
-            if self.hps.mode == "train_gan" and not update:
+            if self.hps.mode == "train_gan":
+                # for the gan generator evaluation
                 feed_dict[self.sample_target] = batch.target_batch
                 feed_dict[self.sample] = batch.dec_batch
-                # this is for the evaluation step in gan
-            elif self.hps.mode != "train_gan":
+            else:
                 feed_dict[self._dec_batch] = batch.dec_batch
+                # this is for the evaluation step in gan
         return feed_dict
 
     def _add_encoder(self, encoder_inputs, seq_len):
@@ -362,7 +363,7 @@ class PointerGenerator(object):
             self._topk_log_probs = tf.log(topk_probs)
 
         with tf.variable_scope('gan_loss'):
-            self.g_loss = _mask_and_avg(g_loss_per_step, self.padding_mask)
+            self.g_loss = _mask(g_loss_per_step, self.padding_mask)
             g_opt = self.g_optimizer(self.hps.gen_lr)
             trainable_variables = tf.trainable_variables()
             self.g_grad, _ = tf.clip_by_global_norm(tf.gradients(self.g_loss, trainable_variables), self.hps.gen_max_gradient)
@@ -468,7 +469,7 @@ class PointerGenerator(object):
     def run_one_step(self, sess, batch):
         """Runs one training iteration. Returns a dictionary containing train
         op, summaries, loss, global_step and (optionally) coverage loss."""
-        feed_dict = self._make_feed_dict(batch, update=True)
+        feed_dict = self._make_feed_dict(batch)
 
         to_return = {
             'global_step': self.global_step,
@@ -480,7 +481,7 @@ class PointerGenerator(object):
         return sess.run(to_return, feed_dict)
 
     def run_gan_step(self, sess, batch, rewards, sample, sample_target, padding_mask):
-        feed_dict = self._make_feed_dict(batch, update=True)
+        feed_dict = self._make_feed_dict(batch)
         feed_dict[self.rewards] = rewards
         feed_dict[self.sample_target] = sample_target
         feed_dict[self.sample] = sample
@@ -497,7 +498,7 @@ class PointerGenerator(object):
     def run_eval_step(self, sess, batch):
         """Runs one evaluation iteration. Returns a dictionary containing
         summaries, loss, global_step and (optionally) coverage loss."""
-        feed_dict = self._make_feed_dict(batch, update=False)
+        feed_dict = self._make_feed_dict(batch)
         to_return = {
             'loss': self._loss,
             'global_step': self.global_step,
@@ -666,6 +667,24 @@ def _mask_and_avg(values, padding_mask):
     # shape (batch_size); normalized value for each batch member
     values_per_ex = sum(values_per_step)/dec_lens
     return tf.reduce_mean(values_per_ex)  # overall average
+
+
+def _mask(values, padding_mask):
+    """Applies mask to values then returns overall average (a scalar)
+
+    Args:
+      values: a list length max_dec_steps containing arrays shape (batch_size).
+      padding_mask: tensor shape (batch_size, max_dec_steps) containing 1s and
+      0s.
+
+    Returns:
+      a scalar
+    """
+
+    values_per_step = [v * padding_mask[:, dec_step] for dec_step, v in enumerate(values)]
+    # shape (batch_size); normalized value for each batch member
+    values_per_ex = sum(values_per_step)
+    return tf.reduce_sum(values_per_ex)  # overall loss
 
 
 def _coverage_loss(attn_dists, padding_mask):

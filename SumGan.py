@@ -23,6 +23,7 @@ from utils import pad_sample
 from dis_utils import dump_chpt
 import math
 from data import PAD_TOKEN
+from termcolor import colored
 
 from res_discriminator import Seq2ClassModel
 from data import Vocab
@@ -420,16 +421,21 @@ def main(argv):
         for i_gan in range(hps_gan.gan_iter):
             # Train the generator for one step
             g_losses = []
-            start_time = time.time()
+            current_speed = []
             for it in range(hps_gan.gan_gen_iter):
+                start_time = time.time()
                 batch = gen_batcher_train.next_batch()
 
+                # generate samples
                 enc_states, dec_in_state, best_samples = decoder.generate(
                     batch, gen_vocab, include_start_token=True)
+
+                # get rewards for the samples
                 rewards = rollout.get_reward(
                     sess, gen_vocab, dis_vocab, batch, enc_states,
                     dec_in_state, best_samples, hps_gan.rollout_num, discriminator)
-                # only updates parameters without the rollout scope
+
+                # fine tune the generator
                 sample_target = np.array([b[1:] for b in best_samples])
                 sample = np.array([b[:-1] for b in best_samples])
                 sample_target_padding_mask = pad_sample(sample_target, gen_vocab, hps_gen)
@@ -437,31 +443,44 @@ def main(argv):
                     np.less(sample, hps_gen.gen_vocab_size),
                     sample, np.array(
                         [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
-
                 results = generator.run_gan_step(
                     sess, batch, rewards, sample, sample_target, sample_target_padding_mask)
 
+                # for visualization
                 g_loss = results["g_loss"]
                 if not math.isnan(g_loss):
                     g_losses.append(g_loss)
+                current_speed.append(time.time() - start_time)
 
             # Test
-            if i_gan % 5 == 0 or i_gan == hps_gan.gan_iter - 1:
+            if i_gan % 1 == 0 or i_gan == hps_gan.gan_iter - 1:
                 print('Going to test the generator.')
-                current_speed = (time.time() - start_time) / ((i_gan + 1) * hps_gan.gan_gen_iter * hps_gen.batch_size)
-                eve_g_loss = sum(g_losses) / len(g_losses)
+                current_speed = sum(current_speed) / (len(current_speed) * hps_gen.batch_size)
+                everage_g_loss = sum(g_losses) / len(g_losses)
                 # one more process hould be opened for the evaluation
                 eval_loss = save_best_ckpt(
                     sess, generator, gen_best_loss, gen_batcher_val, gan_val_dir, val_saver, gen_global_step)
 
-                print_dashboard("GAN Generator", gen_global_step, hps_gen.batch_size, hps_gen.gen_vocab_size,
-                                eve_g_loss, eval_loss,
-                                0.0000, current_speed)
+                print(
+                    "\nDashboard for" + colored("GAN Generator", 'green') +
+                    " updated %s, finished steps:\t%s\n"
+                    "\tBatch size:\t%s\n"
+                    "\tVocabulary size:\t%s\n"
+                    "\tCurrent speed:\t%.4f seconds/article\n"
+                    "\tTraining loss:\t%.4f; eval loss \t%.4f" % (
+                        datetime.datetime.now().strftime("on %m-%d at %H:%M"),
+                        gen_global_step,
+                        FLAGS.batch_size,
+                        hps_gen.gen_vocab_size,
+                        current_speed,
+                        everage_g_loss, eval_loss,
+                        )
+                )
 
             # Train the discriminator
             print('Going to train the discriminator.')
             dis_accuracies = []
-            for _ in range(hps_gan.gan_dis_iter):
+            for d_gan in range(hps_gan.gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
                 enc_states, dec_in_state, samples_words = decoder.generate(batch, gen_vocab)
                 articles_oovs = batch.art_oovs
@@ -495,11 +514,11 @@ def main(argv):
                 results = discriminator.run_one_step(sess, inputs[1], conditions[1], targets[1])
                 dis_accuracies.append(results["accuracy"])
 
-                eval_accuracy, eval_loss, _ = dump_chpt(dis_batcher_val, hps_dis, discriminator, sess, dis_saver)
-                print_dashboard("GAN Discriminator", results["global_step"], hps_dis.batch_size, hps_dis.dis_vocab_size,
-                                results["loss"], eval_loss, 0.00, 0.00)
-                print("training accuracy: \t%.4f; evaluation accuracy: \t%.4f" %
-                      (sum(dis_accuracies) / len(dis_accuracies), eval_accuracy))
+                if d_gan == hps_gan.gan_dis_iter - 1:
+                    print_dashboard("GAN Discriminator", results["global_step"], hps_dis.batch_size, hps_dis.dis_vocab_size,
+                                    results["loss"], 0.00, 0.00, 0.00)
+                    print("training accuracy: \t%.4f" %
+                          (sum(dis_accuracies) / len(dis_accuracies)))
 
     # --------------- decoding samples ---------------
     elif FLAGS.mode == "decode":
