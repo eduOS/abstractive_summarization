@@ -83,7 +83,7 @@ class Rollout(object):
 
         self.gen_summ_ar = self.gen_summ_ar.stack()  # seq_length x batch_size
         self.gen_summ_ar = tf.transpose(self.gen_summ_ar, perm=[1, 0])
-        self.gen_summ_ar = tf.stop_gradient(self.gen_summ_ar)
+        # self.gen_summ_ar = tf.stop_gradient(self.gen_summ_ar)
         # batch_size x seq_length
 
     def get_reward(self, sess, gen_vocab, dis_vocab, source_batch,

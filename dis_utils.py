@@ -7,6 +7,7 @@ from os.path import join as join_path
 import data
 import tensorflow as tf
 import numpy as np
+from termcolor import colored
 import sys
 
 
@@ -108,10 +109,9 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
     return tf.concat(values=[inputs_emb, conditions_emb], axis=1)
 
 
-def dump_chpt(eval_batcher, hps, model, sess, saver, early_stop=False):
+def dump_chpt(eval_batcher, hps, model, sess, saver, eval_loss_best, early_stop=False):
     dump_model = False
     # Run evals on development set and print their perplexity.
-    eval_loss_best = sys.float_info.max
     previous_losses = [eval_loss_best]
     eval_losses = []
     eval_accuracies = []
@@ -155,7 +155,7 @@ def dump_chpt(eval_batcher, hps, model, sess, saver, early_stop=False):
         checkpoint_path = ensure_exists(join_path(hps.model_dir, "discriminator")) + "/model.ckpt"
         saver.save(sess, checkpoint_path, global_step=model.global_step)
         print("Saving the checkpoint to %s" % checkpoint_path)
-    return eval_accuracy, eval_loss, stop_flag
+    return eval_accuracy, eval_loss, stop_flag, eval_loss_best
 
 
 def print_dashboard(train_accuracies, eval_loss, eval_accuracy):

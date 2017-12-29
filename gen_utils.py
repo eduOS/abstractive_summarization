@@ -8,6 +8,7 @@ import math
 import datetime
 import utils
 from os.path import join as join_path
+from termcolor import colored
 from tensorflow.python import pywrap_tensorflow
 
 
@@ -75,9 +76,13 @@ def get_best_loss_from_chpt(val_dir):
 
 
 def save_best_ckpt(sess, model, best_loss, val_batcher,
-                   val_dir, val_saver, step, model_name='bestmodel', latest_filename="checkpoint_best"):
+                   val_dir, val_saver, step, model_name='bestmodel', latest_filename="checkpoint_best", gan_dir=None):
     bestmodel_save_path = join_path(val_dir, model_name)
 
+    if gan_dir:
+        gan_save_path = join_path(gan_dir, "GANmodel")
+        val_saver.save(sess, gan_save_path, global_step=step, latest_filename="checkpoint_gan")
+        print("GAN model is saved to" + colored(" %s", 'yellow') % gan_save_path)
     losses = []
     while True:
         val_batch = val_batcher.next_batch()
@@ -88,6 +93,8 @@ def save_best_ckpt(sess, model, best_loss, val_batcher,
         # why there exists nan?
         if not math.isnan(loss_eval):
             losses.append(loss_eval)
+        else:
+            print(colored("Encountered a NAN.", 'red'))
     eval_loss = sum(losses) / len(losses)
     if best_loss is None or eval_loss < best_loss:
         sess.run(model.least_val_loss.assign(eval_loss))
@@ -97,4 +104,4 @@ def save_best_ckpt(sess, model, best_loss, val_batcher,
                 datetime.datetime.now().strftime("on %m-%d at %H:%M")))
         val_saver.save(sess, bestmodel_save_path, global_step=step, latest_filename=latest_filename)
         best_loss = eval_loss
-    return eval_loss
+    return eval_loss, best_loss

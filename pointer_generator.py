@@ -25,7 +25,6 @@ import sys
 import time
 import numpy as np
 import tensorflow as tf
-import data
 from attention_decoder import attention_decoder
 # from share_function import tableLookup
 from tensorflow.contrib.tensorboard.plugins import projector
@@ -64,8 +63,8 @@ class PointerGenerator(object):
         # in gan training all three modes of the generator are used:
         # decoding for the generating process; training for the tuning and
         # evaluation for its evaluation
-        self.sample_target = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='dec_batch')
-        self.sample = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='dec_batch')
+        self.sample_target = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='sample_target')
+        self.sample = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='sample')
         self.padding_mask = tf.placeholder(tf.float32, [batch_size, hps.max_dec_steps], name='padding_mask')
         # this is for the evaluation of the generator in gan training
         self.target_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='target_batch')
@@ -315,7 +314,6 @@ class PointerGenerator(object):
                 decoder_scope.reuse_variables()
                 self.sample_attn_dists, self.sample_p_gens, self.sample_coverage, \
                     sample_final_dists, self.sample_dec_out_state = self._add_decoder(emb_sample, self.dec_in_state)
-                # can I use this directly?
 
             # Calculate the loss
             with tf.variable_scope('generator_loss'):
@@ -363,7 +361,7 @@ class PointerGenerator(object):
             self._topk_log_probs = tf.log(topk_probs)
 
         with tf.variable_scope('gan_loss'):
-            self.g_loss = _mask(g_loss_per_step, self.padding_mask)
+            self.g_loss = _mask_and_avg(g_loss_per_step, self.padding_mask)
             g_opt = self.g_optimizer(self.hps.gen_lr)
             trainable_variables = tf.trainable_variables()
             self.g_grad, _ = tf.clip_by_global_norm(tf.gradients(self.g_loss, trainable_variables), self.hps.gen_max_gradient)
@@ -372,7 +370,7 @@ class PointerGenerator(object):
 
         return decoder_scope
 
-    def _add_decoder(self, emb_dec_inputs, dec_in_state):
+    def _add_decoder(self, emb_dec_inputs, dec_in_state, is_sequence=False):
         """
         input:
             emb_dec_inputs, the input of the cell
@@ -392,10 +390,11 @@ class PointerGenerator(object):
         # a placeholder, why not a variable?
         prev_coverage = self.prev_coverage if self.hps.coverage and self.hps.mode in ["train_gan", "decode"] else None
         # coverage is for decoding in beam_search and gan training
+        is_sequence = self.hps.mode == ["pretrain_gen"] or is_sequence
 
         outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
             emb_dec_inputs, dec_in_state, self.enc_states, self.enc_padding_mask, cell,
-            initial_state_attention=(self.hps.mode in ["decode", 'train_gan']),
+            initial_state_attention=(len(emb_dec_inputs) > 1),
             use_coverage=self.hps.coverage, prev_coverage=prev_coverage)
 
         # Add the output projection to obtain the vocabulary distribution
@@ -551,7 +550,7 @@ class PointerGenerator(object):
             the embedded input
         """
         # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
-        _, _, _, final_dists, new_states = self._add_decoder(emb_dec_inputs, dec_in_state)
+        _, _, _, final_dists, new_states = self._add_decoder(emb_dec_inputs, dec_in_state, is_sequence=True)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         final_dists_sliced = tf.slice(final_dists[0], [0, 0], [-1, self._vocab.size()])
         final_dists_sliced += tf.ones_like(final_dists_sliced) * sys.float_info.epsilon

@@ -7,6 +7,7 @@ import numpy as np
 import datetime
 import utils
 import time
+import sys
 import data
 from batcher import GenBatcher, DisBatcher
 from decode import BeamSearchDecoder
@@ -128,7 +129,8 @@ tf.app.flags.DEFINE_integer('gan_iter', 200, 'how many times to run the gan')
 tf.app.flags.DEFINE_integer('gan_gen_iter', 20, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('gan_dis_iter', 4, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 4, 'how many times to repeat the rollout process.')
-tf.app.flags.DEFINE_string("gan_val_dir", "gan_val", "Training directory.")
+tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
+tf.app.flags.DEFINE_boolean("decode_from_gan", False, "Either decode from gan checkpoint or not")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -184,7 +186,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
                     datetime.datetime.now().strftime("on %m-%d at %H:%M")))
 
             # check if it is the best checkpoint so far
-            eval_loss = save_best_ckpt(
+            eval_loss, best_loss = save_best_ckpt(
                 sess, model, best_loss, val_batcher, val_dir, val_saver, step)
 
             # print the print the dashboard
@@ -199,6 +201,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
 def pretrain_discriminator(sess, model, eval_batcher, dis_vocab, batcher, saver):
     """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
     # TODO: load two pretained model: the generator and the embedding
+    eval_loss_best = sys.float_info.max
     hps = model.hps
     # This is the training loop.
     step_time, loss = 0.0, 0.0
@@ -223,8 +226,8 @@ def pretrain_discriminator(sess, model, eval_batcher, dis_vocab, batcher, saver)
             # Print statistics for the previous epoch.
             print("global step %d learning rate %.4f step-time %.4f loss %.4f"
                   % (results["global_step"], results['learning_rate'], step_time, loss))
-            eval_accuracy, eval_loss, stop_flag = dump_chpt(
-                eval_batcher, hps, model, sess, saver, hps.early_stop)
+            eval_accuracy, eval_loss, stop_flag, eval_loss_best = dump_chpt(
+                eval_batcher, hps, model, sess, saver, eval_loss_best, hps.early_stop)
             if stop_flag:
                 break
             print_dashboard("Discriminator", train_accuracies, eval_loss, eval_accuracy)
@@ -368,8 +371,11 @@ def main(argv):
         dec_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
-        gan_val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_val_dir))
-        utils.load_ckpt(dec_saver, sess, val_dir, (FLAGS.mode in ["train_gan", "decode"]), "checkpoint_best")
+        gan_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir))
+        if FLAGS.decode_from_gan:
+            utils.load_ckpt(dec_saver, sess, gan_dir, (FLAGS.mode in ["train_gan", "decode"]), "checkpoint_gan")
+        else:
+            utils.load_ckpt(dec_saver, sess, val_dir, (FLAGS.mode in ["train_gan", "decode"]), "checkpoint_best")
 
     if FLAGS.mode in ["pretrain_dis", "train_gan"]:
         dis_saver = tf.train.Saver(
@@ -446,6 +452,8 @@ def main(argv):
                 results = generator.run_gan_step(
                     sess, batch, rewards, sample, sample_target, sample_target_padding_mask)
 
+                gen_global_step = results["global_step"]
+
                 # for visualization
                 g_loss = results["g_loss"]
                 if not math.isnan(g_loss):
@@ -458,22 +466,24 @@ def main(argv):
                 current_speed = sum(current_speed) / (len(current_speed) * hps_gen.batch_size)
                 everage_g_loss = sum(g_losses) / len(g_losses)
                 # one more process hould be opened for the evaluation
-                eval_loss = save_best_ckpt(
-                    sess, generator, gen_best_loss, gen_batcher_val, gan_val_dir, val_saver, gen_global_step)
+                eval_loss, gen_best_loss = save_best_ckpt(
+                    sess, generator, gen_best_loss, gen_batcher_val, val_dir, val_saver, gen_global_step, gan_dir)
 
                 print(
-                    "\nDashboard for" + colored("GAN Generator", 'green') +
-                    " updated %s, finished steps:\t%s\n"
+                    "\nDashboard for " + colored("GAN Generator", 'green') + " updated %s, "
+                    "finished steps:\t%s\n"
                     "\tBatch size:\t%s\n"
                     "\tVocabulary size:\t%s\n"
                     "\tCurrent speed:\t%.4f seconds/article\n"
-                    "\tTraining loss:\t%.4f; eval loss \t%.4f" % (
+                    "\tTraining loss:\t%.4f; "
+                    "eval loss:\t%.4f" % (
                         datetime.datetime.now().strftime("on %m-%d at %H:%M"),
                         gen_global_step,
                         FLAGS.batch_size,
                         hps_gen.gen_vocab_size,
                         current_speed,
-                        everage_g_loss, eval_loss,
+                        everage_g_loss.item(),
+                        eval_loss.item(),
                         )
                 )
 
@@ -509,14 +519,14 @@ def main(argv):
                 assert len(inputs) % 2 == 0, "the length should be mean"
 
                 results = discriminator.run_one_step(sess, inputs[0], conditions[0], targets[0])
-                dis_accuracies.append(results["accuracy"])
+                dis_accuracies.append(results["accuracy"].item())
 
                 results = discriminator.run_one_step(sess, inputs[1], conditions[1], targets[1])
-                dis_accuracies.append(results["accuracy"])
+                dis_accuracies.append(results["accuracy"].item())
 
                 if d_gan == hps_gan.gan_dis_iter - 1:
-                    print_dashboard("GAN Discriminator", results["global_step"], hps_dis.batch_size, hps_dis.dis_vocab_size,
-                                    results["loss"], 0.00, 0.00, 0.00)
+                    print_dashboard("GAN Discriminator", results["global_step"].item(), hps_dis.batch_size, hps_dis.dis_vocab_size,
+                                    results["loss"].item(), 0.00, 0.00, 0.00)
                     print("training accuracy: \t%.4f" %
                           (sum(dis_accuracies) / len(dis_accuracies)))
 

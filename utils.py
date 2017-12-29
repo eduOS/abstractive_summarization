@@ -4,6 +4,7 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 import os
+from termcolor import colored
 import datetime
 import tensorflow as tf
 import time
@@ -31,12 +32,12 @@ def load_ckpt(saver, sess, dire, force=False, lastest_filename="checkpoint"):
     while True:
         try:
             ckpt_state = tf.train.get_checkpoint_state(dire, lastest_filename)
-            print('Loading checkpoint %s' % ckpt_state.model_checkpoint_path)
+            print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
             saver.restore(sess, ckpt_state.model_checkpoint_path)
             return ckpt_state.model_checkpoint_path
         except Exception as ex:
             print(ex)
-            print("Failed to load checkpoint from %s" % dire)
+            print(colored("Failed to load checkpoint from %s" % dire, 'red'))
             if not force:
                 return
             else:
