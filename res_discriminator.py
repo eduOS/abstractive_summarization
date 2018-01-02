@@ -47,7 +47,10 @@ class Seq2ClassModel(object):
     self.global_step = tf.Variable(0, trainable=False)
     self.mode = hps.mode
     self.num_models = hps.num_models  # only the negative for the reward
-    self.batch_size = hps.batch_size * self.num_models
+    if hps.mode == "pretrain_dis":
+        self.batch_size = hps.batch_size * self.num_models * 2
+    else:
+        self.batch_size = hps.batch_size * self.num_models
     self.max_enc_steps = hps.max_enc_steps
     self.max_dec_steps = hps.max_dec_steps
     self.layer_size = hps.layer_size

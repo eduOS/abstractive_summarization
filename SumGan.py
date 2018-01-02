@@ -213,7 +213,7 @@ def pretrain_discriminator(sess, model, eval_batcher, dis_vocab, batcher, saver)
         inputs, conditions, targets = data.prepare_dis_pretraining_batch(batch)
         if inputs.shape[0] != hps.batch_size * hps.num_models * 2:
             print("The expected batch_size is %s but given %s, escape.." %
-                  (hps.batch_size * hps.num_models * 2, inputs.shape[0]))
+                  (hps.batch_size * hps.num_models, inputs.shape[0]))
             continue
         results = model.run_one_step(sess, inputs, conditions, targets)
         train_accuracies.append(results["accuracy"])
