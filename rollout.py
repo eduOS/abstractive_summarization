@@ -134,7 +134,7 @@ class Rollout(object):
                 if i == 0:
                     rewards.append(ypred)
                 else:
-                    rewards[given_num - 1] += ypred
+                    rewards[given_num - 2] += ypred
 
             # the last token reward
             samples_without_start = [s[1:] for s in samples]

@@ -32,13 +32,13 @@
 23. evaluation and checkpoint
   add the evaluation to the generator and terminate it when necessary
 24. rollout in the graph with attention and copymechanism? what should the rollout like?
-25. add enc_padding_mask to the attention
+25. add enc_padding_mask to the attention [check]
 26. beam search is too slow, true batch based beam search should be implemented
 27. corpus remove punc
-28. TODO: keep the [unk] and such words in the vocab transform func
+28. TODO: keep the [unk] and such words in the vocab transform func [check]
 29. two inputs but with different scalability
 30. decode the not pointer generator option in the graph
-31. separate the discriminator graph and the generator graph but load them together in order to train then separately
+31. separate the discriminator graph and the generator graph but load them together in order to train then separately [check]
 32. train my own vocabulary for the discriminator
 33. rollout weights decay
 34. the beam search is too slow thus a multithread function should be added
@@ -49,3 +49,5 @@
 39. while processing the data, I should tokenize the article into sentences first and then segment them into words.
 40. vocabulary should be rebuilt because there were traditional chinese in corpus when building it
 41. add the reinforcement rouge reward
+42. collect some keywords from the long content to form a dynamic vocabulary, but how to make use of those keywords remains a problem
+43. the rollout can be move out from the graph to make it less error-prone

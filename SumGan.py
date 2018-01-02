@@ -55,7 +55,7 @@ tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_integer("num_models", 8, "Size of each model layer. The actural size is doubled.")
 
 # Training parameters
-tf.app.flags.DEFINE_float("dis_lr", 0.01, "Learning rate.")
+tf.app.flags.DEFINE_float("dis_lr", 0.005, "Learning rate.")
 tf.app.flags.DEFINE_float("lr_decay_factor", 0.5, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("dis_max_gradient", 5.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_boolean("early_stop", False, "Set to True to turn on early stop.")
@@ -103,7 +103,7 @@ tf.app.flags.DEFINE_integer('min_dec_steps', 8, 'Minimum sequence length of gene
 tf.app.flags.DEFINE_integer('gen_vocab_size', 50000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
-tf.app.flags.DEFINE_float('gen_lr', 0.15, 'learning rate')
+tf.app.flags.DEFINE_float('gen_lr', 0.005, 'learning rate')
 tf.app.flags.DEFINE_float('adagrad_init_acc', 0.1, 'initial accumulator value for Adagrad')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
@@ -431,6 +431,10 @@ def main(argv):
             for it in range(hps_gan.gan_gen_iter):
                 start_time = time.time()
                 batch = gen_batcher_train.next_batch()
+                print('batch enc_batch_extend_vocab')
+                print(batch.enc_batch_extend_vocab)
+                print("batch.target_batch")
+                print(batch.target_batch)
 
                 # generate samples
                 enc_states, dec_in_state, best_samples = decoder.generate(
@@ -451,6 +455,17 @@ def main(argv):
                         [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
                 results = generator.run_gan_step(
                     sess, batch, rewards, sample, sample_target, sample_target_padding_mask)
+                print(colored('sample_target', "red"))
+                print(colored(sample_target, "red"))
+                print('sample_target_padding_mask')
+                print(sample_target_padding_mask)
+                print('loss_per_step')
+                print(results['loss_per_step'])
+                print('rewards')
+                print(rewards)
+                print('g_loss_per_step')
+                print(results['g_loss_per_step'])
+                print('-------------------------------------------------')
 
                 gen_global_step = results["global_step"]
 

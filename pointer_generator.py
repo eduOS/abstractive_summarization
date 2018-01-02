@@ -68,7 +68,6 @@ class PointerGenerator(object):
         self.padding_mask = tf.placeholder(tf.float32, [batch_size, hps.max_dec_steps], name='padding_mask')
         # this is for the evaluation of the generator in gan training
         self.target_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='target_batch')
-        self._padding_mask = tf.placeholder(tf.float32, [batch_size, hps.max_dec_steps], name='padding_mask')
         # padding should be use in calculating the gan loss
         self.rewards = tf.placeholder(tf.float32, shape=[batch_size, hps.max_dec_steps])
         self.g_predictions = tf.placeholder(tf.int32, shape=[batch_size, hps.max_dec_steps])
@@ -95,7 +94,7 @@ class PointerGenerator(object):
         feed_dict[self.max_art_oovs] = batch.max_art_oovs
         if not just_enc:
             feed_dict[self.target_batch] = batch.target_batch
-            feed_dict[self._padding_mask] = batch.padding_mask
+            feed_dict[self.padding_mask] = batch.padding_mask
             if self.hps.mode == "train_gan":
                 # for the gan generator evaluation
                 feed_dict[self.sample_target] = batch.target_batch
@@ -317,8 +316,8 @@ class PointerGenerator(object):
 
             # Calculate the loss
             with tf.variable_scope('generator_loss'):
-                loss_per_step = []
-                g_loss_per_step = []
+                self.loss_per_step = []
+                self.g_loss_per_step = []
                 batch_nums = tf.range(0, tf.shape(
                     emb_dec_inputs[0] if hps.mode != "train_gan" else emb_sample[0]
                 )[0])
@@ -331,19 +330,19 @@ class PointerGenerator(object):
                     targets = self.target_batch[:, dec_step] if hps.mode != "train_gan" else self.sample_target[:, dec_step]
                     indices = tf.stack((batch_nums, targets), axis=1)
                     gold_probs = tf.gather_nd(dist, indices)
-                    losses = -tf.log(gold_probs)
-                    loss_per_step.append(losses)
-                    g_loss_per_step.append(losses * self.rewards[:, dec_step])
+                    losses = -tf.log(gold_probs) * self.padding_mask[:, dec_step]
+                    self.loss_per_step.append(losses)
+                    self.g_loss_per_step.append(losses * self.rewards[:, dec_step])
 
                 # Apply padding_mask mask and get loss
-                self._loss = _mask_and_avg(loss_per_step, self._padding_mask)
+                self._loss = _mask_and_avg(self.loss_per_step, self.padding_mask)
 
                 tf.summary.scalar('loss', self._loss)
                 # Calculate coverage loss from the attention distributions
                 if hps.coverage:
                     with tf.variable_scope('coverage_loss'):
                         self._coverage_loss = _coverage_loss(
-                            self.attn_dists, self._padding_mask)
+                            self.attn_dists, self.padding_mask)
                         tf.summary.scalar(
                             'coverage_loss', self._coverage_loss)
                     self._total_loss = \
@@ -361,10 +360,12 @@ class PointerGenerator(object):
             self._topk_log_probs = tf.log(topk_probs)
 
         with tf.variable_scope('gan_loss'):
-            self.g_loss = _mask_and_avg(g_loss_per_step, self.padding_mask)
+            self.g_loss = _mask_and_avg(self.g_loss_per_step, self.padding_mask)
             g_opt = self.g_optimizer(self.hps.gen_lr)
             trainable_variables = tf.trainable_variables()
-            self.g_grad, _ = tf.clip_by_global_norm(tf.gradients(self.g_loss, trainable_variables), self.hps.gen_max_gradient)
+            gradients = tf.gradients(self.g_loss, trainable_variables,
+                                     aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
+            self.g_grad, _ = tf.clip_by_global_norm(gradients, self.hps.gen_max_gradient)
 
             self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables))
 
@@ -490,6 +491,8 @@ class PointerGenerator(object):
         }
         to_return['g_updates'] = self.g_updates
         to_return['g_loss'] = self.g_loss
+        to_return['g_loss_per_step'] = self.g_loss_per_step
+        to_return['loss_per_step'] = self.loss_per_step
         if self.hps.coverage:
             to_return['coverage_loss'] = self._coverage_loss
         return sess.run(to_return, feed_dict)
