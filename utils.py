@@ -89,6 +89,7 @@ def pad_sample(best_samples, vocab, hps):
     for i, sp in enumerate(best_samples):
         for j, p in enumerate(sp):
             if p == vocab.word2id(data.STOP_DECODING):
+                sample_padding_mask[i][j] = 1
                 break
             else:
                 sample_padding_mask[i][j] = 1
