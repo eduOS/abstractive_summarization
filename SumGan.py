@@ -160,6 +160,10 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
     counter = 0
     while True:  # repeats until interrupted
         batch = batcher.next_batch()
+        print('batch enc_batch_extend_vocab')
+        print(batch.enc_batch_extend_vocab)
+        print("batch.target_batch")
+        print(batch.target_batch)
         if batch is None:
             return None
 
@@ -431,10 +435,10 @@ def main(argv):
             for it in range(hps_gan.gan_gen_iter):
                 start_time = time.time()
                 batch = gen_batcher_train.next_batch()
-                print('batch enc_batch_extend_vocab')
-                print(batch.enc_batch_extend_vocab)
-                print("batch.target_batch")
-                print(batch.target_batch)
+                # print('batch enc_batch_extend_vocab')
+                # print(batch.enc_batch_extend_vocab)
+                # print("batch.target_batch")
+                # print(batch.target_batch)
 
                 # generate samples
                 enc_states, dec_in_state, best_samples = decoder.generate(
@@ -457,15 +461,15 @@ def main(argv):
                     sess, batch, rewards, sample, sample_target, sample_target_padding_mask)
                 print(colored('sample_target', "red"))
                 print(colored(sample_target, "red"))
-                print('sample_target_padding_mask')
-                print(sample_target_padding_mask)
-                print('loss_per_step')
-                print(results['loss_per_step'])
+                # print('sample_target_padding_mask')
+                # print(sample_target_padding_mask)
+                # print('loss_per_step')
+                # print(results['loss_per_step'])
                 print('rewards')
                 print(rewards)
-                print('g_loss_per_step')
-                print(results['g_loss_per_step'])
-                print('-------------------------------------------------')
+                # print('g_loss_per_step')
+                # print(results['g_loss_per_step'])
+                # print('-------------------------------------------------')
 
                 gen_global_step = results["global_step"]
 
