@@ -22,6 +22,7 @@ from __future__ import absolute_import
 from __future__ import division
 
 import csv
+from termcolor import colored
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 from cntk.tokenizer import text2charlist
@@ -362,15 +363,18 @@ def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab,
     samples_ids = []
     assert len(gen_ids) == len(article_oovs)
     samples_words = outputsids2words(gen_ids, gen_vocab, article_oovs, art_ids)
-    for sample_words in samples_words:
-        if print_sample:
-            print(print_sample + ":")
-            print(" ".join(sample_words))
+    for n, sample_words in enumerate(samples_words):
+        # if print_sample:
+        #     print(print_sample + ":")
+        #     print(colored(" ".join(sample_words), "red"))
         try:
             fst_stop_idx = sample_words.index(STOP_MARK)  # index of the (first) [STOP] symbol
             sample_chars = text2charlist(sample_words[:fst_stop_idx], keep_word="[UNK]")
         except ValueError:
             sample_chars = text2charlist(sample_words, keep_word="[UNK]")
+        if print_sample:
+            print(print_sample + ":")
+            print(str(n) + ": " + colored(" ".join(sample_chars), "green"))
         sample_ids = [dis_vocab.word2id(char) for char in sample_chars[:max_len]]
         while len(sample_ids) < max_len:
             sample_ids.append(0)

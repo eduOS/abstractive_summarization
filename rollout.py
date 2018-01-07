@@ -60,7 +60,7 @@ class Rollout(object):
                 gen_summ = gen_summ.write(i-1, summ_ar.read(i))
                 return i+1, next_input, new_state, given_num, gen_summ
 
-            def recurrence_rollout(i, dec_input, dec_in_state, given_num, gen_summ):
+            def recurrence_rollout(i, dec_input, dec_in_state, gen_summ):
                 output_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state)
                 gen_summ = gen_summ.write(i-1, output_id)
                 next_input_id_without_oovs = tf.where(
@@ -68,7 +68,7 @@ class Rollout(object):
                     output_id, tf.constant(
                         [self.generator._vocab.word2id(data.UNKNOWN_TOKEN)] * self._gen_hps.batch_size))
                 next_input_emb = tf.nn.embedding_lookup(self.g_embeddings, next_input_id_without_oovs)
-                return i+1, next_input_emb, new_state, given_num, gen_summ
+                return i+1, next_input_emb, new_state, gen_summ
 
             i, next_input, new_state, given_num, self.gen_summ_ar = control_flow_ops.while_loop(
                 cond=lambda i, _1, _2, given_num, _4: i < given_num,
@@ -76,10 +76,10 @@ class Rollout(object):
                 loop_vars=(tf.constant(1, dtype=tf.int32), emb_summ_ar.read(0),
                            init_dec_in_state, self.given_num, self.gen_summ_ar))
 
-            _, _, _, _, self.gen_summ_ar = control_flow_ops.while_loop(
-                cond=lambda i, _1, _2, _3, _4: i < self._gen_hps.max_dec_steps+1,
+            _, _, _, self.gen_summ_ar = control_flow_ops.while_loop(
+                cond=lambda i, _1, _2, _3: i < self._gen_hps.max_dec_steps+1,
                 body=recurrence_rollout,
-                loop_vars=(i, next_input, new_state, given_num, self.gen_summ_ar))
+                loop_vars=(i, next_input, new_state, self.gen_summ_ar))
 
         self.gen_summ_ar = self.gen_summ_ar.stack()  # seq_length x batch_size
         self.gen_summ_ar = tf.transpose(self.gen_summ_ar, perm=[1, 0])
@@ -140,7 +140,8 @@ class Rollout(object):
             samples_without_start = [s[1:] for s in samples]
             samples_chars = gen_vocab2dis_vocab(
                 samples_without_start, gen_vocab, article_oovs,
-                dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING)
+                dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, print_sample="beam_search in rollout " + str(i))
+            print('\n')
             feed = {
                 discriminator.inputs: samples_chars,
                 discriminator.conditions: art_chars}

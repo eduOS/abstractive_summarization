@@ -22,6 +22,7 @@ from __future__ import division
 import random
 import Queue
 from random import shuffle
+from termcolor import colored
 from threading import Thread
 import time
 import numpy as np
@@ -101,8 +102,8 @@ class Example(object):
             stop_decoding)
 
         # Store the original strings ART:
-        self.original_article = article[5:]
-        self.original_abstract = abstract[5:]
+        self.original_article = article
+        self.original_abstract = abstract
         # self.original_abstract_sents = abstract_sentences
 
     def get_dec_inp_targ_seqs(self, sequence, max_len, start_id, stop_id):
@@ -556,6 +557,7 @@ class DisBatcher:
         self.end_of_data = False
         self.single_pass = single_pass
         self.clip_length = clip_length
+        self._count = 0
 
     def __iter__(self):
         return self
@@ -565,7 +567,7 @@ class DisBatcher:
         self.negative.seek(0)
         self.source.seek(0)
 
-    def next_batch(self):
+    def next_batch(self, print_fqc=0):
         if self.end_of_data:
             self.end_of_data = False
             self.reset()
@@ -589,6 +591,10 @@ class DisBatcher:
                 gen_vocab = art.split() + self.gen_vocab_keys
                 abs_p = abs_p.split()
                 abs_p = ' '.join([p if p in gen_vocab else "[UNK]" for p in abs_p])
+                if (print_fqc and self._count % print_fqc == 0) or (print_fqc and self._count == 0):
+                    print("positive sample in dis_batch: " + colored(abs_p, "green"))
+                    print("negative sample in dis_batch: " + colored(abs_n, "red"))
+                    print('\n')
 
                 abs_p = text2charlist(abs_p, keep_word='[UNK]')
                 abs_n = text2charlist(abs_n, keep_word='[UNK]')
@@ -627,5 +633,7 @@ class DisBatcher:
             self.end_of_data = False
             self.reset()
             raise StopIteration
+
+        self._count += 1
 
         return source, positive, negative

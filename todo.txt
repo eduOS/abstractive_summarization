@@ -51,3 +51,9 @@
 41. add the reinforcement rouge reward
 42. collect some keywords from the long content to form a dynamic vocabulary, but how to make use of those keywords remains a problem
 43. the rollout can be move out from the graph to make it less error-prone
+
+# problems
+1. cannot end
+    mask is wrong, mask should cover the stop token
+2. generate repetative sentences
+3. the discriminator assign high scores to very bad unseen samples

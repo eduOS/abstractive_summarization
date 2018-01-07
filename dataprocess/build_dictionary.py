@@ -14,14 +14,14 @@ standardizor = Standardizer()
 build vocabulary from
 """
 
+# python build_dictionary ['word', 'char'] (./filepathes) output_dir
+
 
 def main():
     mode = sys.argv[1]
     word_freqs = OrderedDict()
     worddict = OrderedDict()
     if mode == "word":
-        worddict['<s>'] = sys.maxint
-        worddict['</s>'] = sys.maxint
         worddict['[PAD]'] = sys.maxint
         worddict['[UNK]'] = sys.maxint
         worddict['[STOP]'] = sys.maxint

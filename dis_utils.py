@@ -6,14 +6,13 @@ from utils import ensure_exists
 from os.path import join as join_path
 import data
 import tensorflow as tf
+from utils import linear3d
 import numpy as np
-from termcolor import colored
 import sys
 
 
 # convolutional layer
 def convolution2d(inputs,
-                  num_outputs,
                   kernel_size,
                   pool_size=None,
                   decay=0.999,
@@ -23,9 +22,10 @@ def convolution2d(inputs,
   """Adds a 2D convolution followed by a maxpool layer.
 
   """
-  with tf.variable_scope(scope, 'Conv', [inputs], reuse=reuse):
+  with tf.variable_scope(scope, 'conv_inputs', [inputs], reuse=reuse):
     dtype = inputs.dtype.base_dtype
     num_filters_in = inputs.get_shape()[-1].value
+    num_outputs = num_filters_in
     weights_shape = [1] + [kernel_size] + [num_filters_in, num_outputs]
     # 1, 3, emb_dim, emb_dim
     weights = tf.get_variable(name='weights',
@@ -41,7 +41,50 @@ def convolution2d(inputs,
                              collections=[tf.GraphKeys.BIASES],
                              trainable=True)
     outputs = tf.nn.conv2d(inputs, weights, [1, 1, 1, 1], padding='SAME')
-    outputs = outputs + biases
+    outputs += biases
+    if pool_size:
+      pool_shape = [1, 1] + [pool_size] + [1]
+      outputs = tf.nn.max_pool(outputs, pool_shape, pool_shape, padding='SAME')
+    if activation_fn:
+      outputs = activation_fn(outputs)
+    return outputs
+
+
+def convolution4con(inputs,
+                    kernel_size,
+                    pool_size=None,
+                    decay=0.999,
+                    activation_fn=None,
+                    inner_conv_layers=2,
+                    reuse=None,
+                    scope=None):
+  """Adds a 2D convolution followed by a maxpool layer.
+
+  """
+  with tf.variable_scope(scope, 'conv_con', [inputs], reuse=reuse):
+    dtype = inputs.dtype.base_dtype
+    num_filters_in = inputs.get_shape()[-1].value
+    num_outputs = num_filters_in
+
+    for conv_i in range(inner_conv_layers):
+      weights_shape = [1] + [kernel_size * (conv_i+1)] + [num_filters_in, num_outputs]
+      # 1, 3, emb_dim, emb_dim
+      weights = tf.get_variable(name='weights%s' % conv_i,
+                                shape=weights_shape,
+                                dtype=dtype,
+                                initializer=tf.contrib.layers.xavier_initializer(),
+                                collections=[tf.GraphKeys.WEIGHTS],
+                                trainable=True)
+      biases = tf.get_variable(name='biases%s' % conv_i,
+                                    shape=[num_outputs, ],
+                                    dtype=dtype,
+                                    initializer=tf.zeros_initializer(),
+                                    collections=[tf.GraphKeys.BIASES],
+                                    trainable=True)
+      outputs = tf.nn.conv2d(inputs, weights, [1, 1, 1, 1], padding='SAME')
+      outputs += biases
+      inputs = outputs
+
     if pool_size:
       pool_shape = [1, 1] + [pool_size] + [1]
       outputs = tf.nn.max_pool(outputs, pool_shape, pool_shape, padding='SAME')
@@ -68,45 +111,37 @@ def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers
 
   """
   with tf.variable_scope(scope, "CResCNN", [inputs, conditions], reuse=reuse):
-    i_layer_size = inputs.get_shape()[-1].value
     if not pool_size:
       pool_layers = 0
-    i_outputs = inputs
     # residual layers
+    with tf.variable_scope("inputs"):
+        inputs = convolution2d(activation_fn(inputs), kernel_size, decay=decay,
+                               activation_fn=activation_fn, reuse=False)
+    with tf.variable_scope("conditions"):
+        conditions = convolution4con(activation_fn(conditions), kernel_size, decay=decay,
+                                     activation_fn=activation_fn,
+                                     inner_conv_layers=2, reuse=False)
+
+    con_inputs = linear3d([inputs] + [conditions], inputs.get_shape()[1].value, True)
+
     for j in range(pool_layers):
-      if j > 0:
-        pool_shape = [1, 1] + [pool_size] + [1]
-        # 1, 1, 2, 1
-        inputs = tf.nn.max_pool(i_outputs, pool_shape, pool_shape, padding='SAME')
-        i_outputs = inputs
+      # if j > 0:
+      #     reuse = True
       with tf.variable_scope("input_layer{0}".format(j)):
         for i in range(conv_layers):
-          i_outputs -= convolution2d(activation_fn(i_outputs), i_layer_size, kernel_size, decay=decay,
-                                     activation_fn=activation_fn)
+          con_inputs -= convolution2d(con_inputs, kernel_size, decay=decay,
+                                      activation_fn=activation_fn)
+      pool_shape = [1, 1] + [pool_size] + [1]
+      # 1, 1, 2, 1
+      con_inputs = tf.nn.max_pool(con_inputs, pool_shape, pool_shape, padding='SAME')
+
     # maybe dropout is useful
     # squeeze the highth dimension
-    i_outputs = tf.squeeze(i_outputs, [1])
+    con_inputs = tf.squeeze(con_inputs, [1])
     # make the embedding sequence to be only one embedding
-    inputs_emb = tf.reduce_max(i_outputs, axis=1)
+    con_outputs = tf.reduce_max(con_inputs, axis=1)
 
-    c_layer_size = inputs.get_shape()[-1].value
-    c_outputs = conditions
-    for j in range(pool_layers*2):
-      if j > 0:
-        pool_shape = [1, 1] + [pool_size*2] + [1]
-        # 1, 1, 2, 1
-        conditions = tf.nn.max_pool(c_outputs, pool_shape, pool_shape, padding='SAME')
-        c_outputs = conditions
-      with tf.variable_scope("condition_layer{0}".format(j)):
-        for i in range(conv_layers*2):
-          c_outputs -= convolution2d(activation_fn(c_outputs), c_layer_size, kernel_size, decay=decay,
-                                     activation_fn=activation_fn)
-
-    c_outputs = tf.squeeze(c_outputs, [1])
-    conditions_emb = tf.reduce_max(c_outputs, axis=1)
-
-    # concatenate the two embeding and make the embedding to be twice long
-    return tf.concat(values=[inputs_emb, conditions_emb], axis=1)
+    return con_outputs
 
 
 def dump_chpt(eval_batcher, hps, model, sess, saver, eval_loss_best, early_stop=False):

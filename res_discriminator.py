@@ -83,7 +83,10 @@ class Seq2ClassModel(object):
     # return tf.nn.softmax(logits), loss, accuracy
     for m in xrange(self.num_models):
       with tf.variable_scope("model"+str(m)):
-        prob, _, _ = self._seq2class_model(self.inputs, self.conditions, self.targets)
+        prob, _, _ = self._seq2class_model(
+            self.inputs_splitted[m],
+            self.conditions_splitted[m],
+            self.targets_splitted[m])
         probs.append(prob)
         # print(prob.get_shape())
     self.dis_ypred_for_auc = tf.reduce_mean(tf.cast(tf.stack(probs, 2), tf.float32), 2)
@@ -134,7 +137,7 @@ class Seq2ClassModel(object):
                                                            collections=[tf.GraphKeys.WEIGHTS],
                                                            trainable=True)
       class_output_weights = tf.contrib.framework.model_variable("class_output_weights",
-                                                                 shape=[self.num_class, self.layer_size*2],
+                                                                 shape=[self.num_class, self.layer_size],
                                                                  dtype=tf.float32,
                                                                  initializer=tf.truncated_normal_initializer(0.0, 0.01),
                                                                  collections=[tf.GraphKeys.WEIGHTS],

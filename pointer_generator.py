@@ -20,14 +20,12 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 
-import os
 import sys
 import time
 import numpy as np
 import tensorflow as tf
 from attention_decoder import attention_decoder
 # from share_function import tableLookup
-from tensorflow.contrib.tensorboard.plugins import projector
 from six.moves import xrange
 
 FLAGS = tf.app.flags.FLAGS
@@ -268,22 +266,6 @@ class PointerGenerator(object):
 
             return final_dists
 
-    def _add_emb_vis(self, embedding_var):
-        """Do setup so that we can view word embeddings visualization in
-        Tensorboard, as described here:
-        https://www.tensorflow.org/get_started/embedding_viz
-        Make the vocab metadata file, then make the projector config file
-        pointing to it."""
-        train_dir = os.path.join(FLAGS.log_root, "train")
-        vocab_metadata_path = os.path.join(train_dir, "vocab_metadata.tsv")
-        self._vocab.write_metadata(vocab_metadata_path)  # write metadata file
-        summary_writer = tf.summary.FileWriter(train_dir)
-        config = projector.ProjectorConfig()
-        embeddings = config.embeddings.add()
-        embeddings.tensor_name = embedding_var.name
-        embeddings.metadata_path = vocab_metadata_path
-        projector.visualize_embeddings(summary_writer, config)
-
     def _add_seq2seq(self):
         """Add the whole sequence-to-sequence model to the graph."""
         hps = self.hps
@@ -335,7 +317,7 @@ class PointerGenerator(object):
                     self.g_loss_per_step.append(losses * self.rewards[:, dec_step])
 
                 # Apply padding_mask mask and get loss
-                self._loss = _mask_and_avg(self.loss_per_step, self.padding_mask)
+                self._loss = _avg(self.loss_per_step, self.padding_mask)
 
                 tf.summary.scalar('loss', self._loss)
                 # Calculate coverage loss from the attention distributions
@@ -360,7 +342,7 @@ class PointerGenerator(object):
             self._topk_log_probs = tf.log(topk_probs)
 
         with tf.variable_scope('gan_loss'):
-            self.g_loss = _mask_and_avg(self.g_loss_per_step, self.padding_mask)
+            self.g_loss = _avg(self.g_loss_per_step, self.padding_mask)
             g_opt = self.g_optimizer(self.hps.gen_lr)
             trainable_variables = tf.trainable_variables()
             gradients = tf.gradients(self.g_loss, trainable_variables,
@@ -555,9 +537,10 @@ class PointerGenerator(object):
         # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
         _, _, _, final_dists, new_states = self._add_decoder(emb_dec_inputs, dec_in_state, is_sequence=True)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
-        final_dists_sliced = tf.slice(final_dists[0], [0, 0], [-1, self._vocab.size()])
-        final_dists_sliced += tf.ones_like(final_dists_sliced) * sys.float_info.epsilon
-        output_id = tf.squeeze(tf.cast(tf.reshape(tf.multinomial(tf.log(final_dists_sliced), 1), [self.hps.batch_size]), tf.int32))
+        # final_dists_sliced = tf.slice(final_dists[0], [0, 0], [-1, self._vocab.size()])
+        final_dists = final_dists[0]
+        final_dists += tf.ones_like(final_dists) * sys.float_info.epsilon
+        output_id = tf.squeeze(tf.cast(tf.reshape(tf.multinomial(tf.log(final_dists), 1), [self.hps.batch_size]), tf.int32))
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
         return output_id, new_states
 
@@ -667,7 +650,26 @@ def _mask_and_avg(values, padding_mask):
     dec_lens = tf.reduce_sum(padding_mask, axis=1)  # shape batch_size. float32
     values_per_step = [v * padding_mask[:, dec_step] for dec_step, v in enumerate(values)]
     # shape (batch_size); normalized value for each batch member
-    values_per_ex = sum(values_per_step)/dec_lens
+    values_per_ex = tf.reduce_sum(tf.stack(values_per_step, 1), 1)/dec_lens
+    return tf.reduce_mean(values_per_ex)  # overall average
+
+
+def _avg(values, padding_mask):
+    """Applies mask to values then returns overall average (a scalar)
+
+    Args:
+      values: a list length max_dec_steps containing arrays shape (batch_size).
+      padding_mask: tensor shape (batch_size, max_dec_steps) containing 1s and
+      0s.
+
+    Returns:
+      a scalar
+    """
+
+    dec_lens = tf.reduce_sum(padding_mask, axis=1)  # shape batch_size. float32
+    # values_per_step = [v * padding_mask[:, dec_step] for dec_step, v in enumerate(values)]
+    # shape (batch_size); normalized value for each batch member
+    values_per_ex = tf.reduce_sum(tf.stack(values, 1), 1)/dec_lens
     return tf.reduce_mean(values_per_ex)  # overall average
 
 
