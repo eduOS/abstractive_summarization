@@ -126,8 +126,8 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 # ------------------------------------- gan
 
 tf.app.flags.DEFINE_integer('gan_iter', 2000, 'how many times to run the gan')
-tf.app.flags.DEFINE_integer('gan_gen_iter', 2, 'in each gan step run how many times the generator')
-tf.app.flags.DEFINE_integer('gan_dis_iter', 1, 'in each gan step run how many times the generator')
+tf.app.flags.DEFINE_integer('gan_gen_iter', 1, 'in each gan step run how many times the generator')
+tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 3, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
 tf.app.flags.DEFINE_boolean("decode_from_gan", False, "Either decode from gan checkpoint or not")
@@ -461,7 +461,7 @@ def main(argv):
                     sample, np.array(
                         [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
                 results = generator.run_gan_step(
-                    sess, batch, rewards, sample, sample_target, sample_target_padding_mask)
+                    sess, batch, rewards, sample, sample_target, sample_target_padding_mask, update=False)
                 # stl = sample_target.tolist()
                 # for st in stl:
                 #     st = [str(s) for s in st]
@@ -494,37 +494,38 @@ def main(argv):
                 everage_g_loss = sum(g_losses) / len(g_losses)
                 # one more process hould be opened for the evaluation
                 eval_loss, gen_best_loss = save_best_ckpt(
-                    sess, generator, gen_best_loss, gen_batcher_val, val_dir, val_saver, gen_global_step, gan_dir)
+                    sess, generator, gen_best_loss, None, val_dir, val_saver, gen_global_step, gan_dir=gan_dir)
 
-                print(
-                    "\nDashboard for " + colored("GAN Generator", 'green') + " updated %s, "
-                    "finished steps:\t%s\n"
-                    "\tBatch size:\t%s\n"
-                    "\tVocabulary size:\t%s\n"
-                    "\tCurrent speed:\t%.4f seconds/article\n"
-                    "\tTraining loss:\t%.4f; "
-                    "eval loss:\t%.4f" % (
-                        datetime.datetime.now().strftime("on %m-%d at %H:%M"),
-                        gen_global_step,
-                        FLAGS.batch_size,
-                        hps_gen.gen_vocab_size,
-                        current_speed,
-                        everage_g_loss.item(),
-                        eval_loss.item(),
-                        )
-                )
+                if eval_loss:
+                    print(
+                        "\nDashboard for " + colored("GAN Generator", 'green') + " updated %s, "
+                        "finished steps:\t%s\n"
+                        "\tBatch size:\t%s\n"
+                        "\tVocabulary size:\t%s\n"
+                        "\tCurrent speed:\t%.4f seconds/article\n"
+                        "\tTraining loss:\t%.4f; "
+                        "eval loss:\t%.4f" % (
+                            datetime.datetime.now().strftime("on %m-%d at %H:%M"),
+                            gen_global_step,
+                            FLAGS.batch_size,
+                            hps_gen.gen_vocab_size,
+                            current_speed,
+                            everage_g_loss.item(),
+                            eval_loss.item(),
+                            )
+                    )
 
             # Train the discriminator
             print('Going to train the discriminator.')
             dis_accuracies = []
             for d_gan in range(hps_gan.gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
-                enc_states, dec_in_state, samples_words = decoder.generate(batch, gen_vocab)
+                enc_states, dec_in_state, samples_words = decoder.generate(batch)
                 # shuould first tanslate to words to avoid unk
                 articles_oovs = batch.art_oovs
                 samples_chars = gen_vocab2dis_vocab(
                     samples_words, gen_vocab, articles_oovs,
-                    dis_vocab, hps_dis.max_dec_steps, STOP_DECODING, print_sample="sample for discriminator")
+                    dis_vocab, hps_dis.max_dec_steps, STOP_DECODING)
                 dec_batch_words = [b[1:] for b in batch.target_batch]
                 dec_batch_chars = gen_vocab2dis_vocab(
                     dec_batch_words, gen_vocab, articles_oovs, dis_vocab, hps_dis.max_dec_steps,  STOP_DECODING)
@@ -547,27 +548,17 @@ def main(argv):
                 targets = np.split(targets[indices], 2)
                 assert len(inputs) % 2 == 0, "the length should be mean"
 
-                for n, inp in enumerate(inputs[0]):
-                    if targets[0][n][1]:
-                        print(colored("\t".join([str(i) for i in inp]), "green"))
-                        # to check if threre are a lot of unks in the positive
-                        # abstract
-                    else:
-                        print(colored("\t".join([str(i) for i in inp]), "red"))
                 results = discriminator.run_one_step(sess, inputs[0], conditions[0], targets[0])
                 dis_accuracies.append(results["accuracy"].item())
 
                 results = discriminator.run_one_step(sess, inputs[1], conditions[1], targets[1])
                 dis_accuracies.append(results["accuracy"].item())
-                if results["accuracy"].item() > 0.7:
-                    print("training accuracy: \t%.4f" %
-                          (sum(dis_accuracies) / len(dis_accuracies)))
-                    break
 
-                elif d_gan == hps_gan.gan_dis_iter - 1:
+                if d_gan == hps_gan.gan_dis_iter - 1:
                     print_dashboard("GAN Discriminator", results["global_step"].item(), hps_dis.batch_size, hps_dis.dis_vocab_size,
                                     results["loss"].item(), 0.00, 0.00, 0.00)
-                    print("training accuracy: \t%.4f" %
+                    dump_chpt()
+                    print("Average training accuracy: \t%.4f" %
                           (sum(dis_accuracies) / len(dis_accuracies)))
 
     # --------------- decoding samples ---------------

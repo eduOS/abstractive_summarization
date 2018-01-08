@@ -77,12 +77,19 @@ def get_best_loss_from_chpt(val_dir):
 
 def save_best_ckpt(sess, model, best_loss, val_batcher,
                    val_dir, val_saver, step, model_name='bestmodel', latest_filename="checkpoint_best", gan_dir=None):
+    """
+    val_batcher: if not provided don't return scores
+    gan_dir: if provided save the checkpoint whether the performance of the validation
+    """
     bestmodel_save_path = join_path(val_dir, model_name)
 
     if gan_dir:
         gan_save_path = join_path(gan_dir, "GANmodel")
         val_saver.save(sess, gan_save_path, global_step=step, latest_filename="checkpoint_gan")
         print("GAN model is saved to" + colored(" %s", 'yellow') % gan_save_path)
+    if not val_batcher:
+        return None, None
+
     losses = []
     while True:
         val_batch = val_batcher.next_batch()

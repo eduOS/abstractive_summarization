@@ -462,7 +462,7 @@ class PointerGenerator(object):
             to_return['coverage_loss'] = self._coverage_loss
         return sess.run(to_return, feed_dict)
 
-    def run_gan_step(self, sess, batch, rewards, sample, sample_target, padding_mask):
+    def run_gan_step(self, sess, batch, rewards, sample, sample_target, padding_mask, update=True):
         feed_dict = self._make_feed_dict(batch)
         feed_dict[self.rewards] = rewards
         feed_dict[self.sample_target] = sample_target
@@ -471,7 +471,8 @@ class PointerGenerator(object):
         to_return = {
             'global_step': self.global_step,
         }
-        to_return['g_updates'] = self.g_updates
+        if update:
+            to_return['g_updates'] = self.g_updates
         to_return['g_loss'] = self.g_loss
         to_return['g_loss_per_step'] = self.g_loss_per_step
         to_return['loss_per_step'] = self.loss_per_step

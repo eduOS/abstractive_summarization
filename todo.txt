@@ -57,3 +57,9 @@
     mask is wrong, mask should cover the stop token
 2. generate repetative sentences
 3. the discriminator assign high scores to very bad unseen samples
+4. trash samples
+  1) only update one side
+  2) multiple D and G
+  3) matchmaking ranking
+  4) add noise
+
