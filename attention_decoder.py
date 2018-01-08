@@ -263,5 +263,3 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
             coverage = array_ops.reshape(coverage, [batch_size, -1])
 
         return outputs, state, attn_dists, p_gens, coverage
-
-
