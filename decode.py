@@ -29,7 +29,9 @@ import data
 import json
 from codecs import open
 # import pyrouge
-import gen_utils
+# import gen_utils
+import numpy as np
+import random
 import logging
 from six.moves import xrange
 from data import PAD_TOKEN
@@ -86,28 +88,33 @@ class BeamSearchDecoder(object):
             if not os.path.exists(self._rouge_dec_dir):
                 os.mkdir(self._rouge_dec_dir)
 
-    def generate(self, batch, include_start_token=False):
-        # the abstract should also be generated
+    def generate(self, batch, include_start_token=False, top_k=4, shuffle=True):
         # Run beam search to get best Hypothesis
-        enc_states, dec_in_state, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+        enc_states, dec_in_state, best_k_hyps = beam_search.run_beam_search(
+            self._sess, self._model, self._vocab, batch, top_k)
 
-        # Extract the output ids from the hypothesis and convert back to
-        # words
+        padded_k_hyps = []
         pad_id = self._vocab.word2id(PAD_TOKEN)
-        if include_start_token:
-            outputs_ids = [[int(t) for t in best_hyp.tokens[:]] for best_hyp in best_hyps]
-            max_len = self._hps.max_dec_steps + 1
-        else:
-            outputs_ids = [[int(t) for t in best_hyp.tokens[1:]] for best_hyp in best_hyps]
-            # this is for the rollout and the effective length should be adding
-            # the same then the total length should add one
-            max_len = self._hps.max_dec_steps
-        outputs_ids = [i + (max_len - len(i)) * [pad_id]
-                       if len(i) < max_len else i[:max_len] for i in outputs_ids]
-        # for o in outputs_ids:
-        #     while len(o) < self._hps.max_dec_steps:
-        #         o.append(vocab.word2id(PAD_TOKEN))
-        return enc_states, dec_in_state, outputs_ids
+        max_len = self._hps.max_dec_steps + 1
+        padding_mask = np.zeros((len(best_k_hyps), top_k, max_len), dtype=np.int32)
+        for b, k_hyps in enumerate(best_k_hyps):
+            padded_hyps = []
+            if shuffle:
+                # randomize the hypothesis
+                random.shuffle(k_hyps)
+            for k, hyp in enumerate(k_hyps):
+                padding_mask[b, k, :len(hyp)] = 1
+                padded_hyps.append(
+                    hyp + (max_len - len(hyp)) * [pad_id] if len(hyp) < max_len else hyp[:max_len])
+            padded_k_hyps.append(padded_hyps)
+
+        outputs_ids = np.array(padded_k_hyps).astype(int)
+
+        if not include_start_token:
+            outputs_ids = outputs_ids[:, :, 1:]
+            padding_mask = padding_mask[:, :, 1:]
+
+        return enc_states, dec_in_state, outputs_ids, padding_mask
 
     def decode(self, batcher):
         """Decode examples until data is exhausted (if self._hps.single_pass) and
@@ -149,7 +156,7 @@ class BeamSearchDecoder(object):
 
                 _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
                 # is the beam_size here 1?
-                outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps]
+                outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps[0]]
 
                 original_articles = batch.original_articles
                 original_abstracts = batch.original_abstracts

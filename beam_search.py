@@ -99,7 +99,7 @@ class Hypothesis(object):
         return self.log_prob / len(self.tokens)
 
 
-def run_beam_search(sess, model, vocab, batch):
+def run_beam_search(sess, model, vocab, batch, top_k=1):
     """ For the GAN
     Performs beam search decoding on the given example.
 
@@ -115,10 +115,12 @@ def run_beam_search(sess, model, vocab, batch):
     Returns:
         enc_states: one of the outputs of the encoder which is of shape [batch_size, length],
         dec_in_state: one of the outputs of the encoder which is of shape [batch_size, 2*hidden_dim],
-        best_hyp: Hypothesis object; the best hypothesis found by beam search.
+        best_k_hyp: Hypothesis object; the best k hypothesis found by beam search.
     """
     batch_size = model.hps.batch_size
     beam_size = FLAGS.beam_size
+    if top_k > beam_size:
+        top_k = beam_size
     # Run the encoder to get the encoder hidden states and decoder initial state
     # dec_in_state is a LSTMStateTuple
     # enc_states has shape [batch_size, <=max_enc_steps, 2*hidden_dim].
@@ -126,7 +128,7 @@ def run_beam_search(sess, model, vocab, batch):
     # enc_states and dec_in_state should be scaled to match the latter setting
     attn_dists = None
 
-    best_hyps = []
+    best_k_hyps = []
     batch_hyps = []
     # seperated hyps for each beam
     for i in xrange(batch_size):
@@ -239,11 +241,11 @@ def run_beam_search(sess, model, vocab, batch):
 
         # Sort hypotheses by average log probability
         hyps_sorted = sort_hyps(results)
-        best_hyp = hyps_sorted[0]
-        best_hyps.append(best_hyp)
+        best_k_hyp = hyps_sorted[:top_k]
+        best_k_hyps.append(best_k_hyp)
 
     # Return the hypothesis with highest average log prob
-    return enc_states, dec_in_state, best_hyps
+    return enc_states, dec_in_state, best_k_hyps
 
 
 def sort_hyps(hyps):

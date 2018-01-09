@@ -374,10 +374,12 @@ def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab,
             sample_chars = text2charlist(sample_words, keep_word="[UNK]")
         if print_sample:
             print(print_sample + ":")
-            print(str(n) + ": " + colored(" ".join(sample_chars), "green"))
+            print(str(n) + ": " + colored("\t".join(sample_words), "green"))
         sample_ids = [dis_vocab.word2id(char) for char in sample_chars[:max_len]]
         while len(sample_ids) < max_len:
             sample_ids.append(0)
         samples_ids.append(sample_ids)
+    if print_sample:
+        print('\n')
     assert len(samples_words) == len(samples_ids)
     return np.array(samples_ids)

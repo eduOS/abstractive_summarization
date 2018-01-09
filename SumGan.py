@@ -55,7 +55,7 @@ tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_integer("num_models", 3, "Size of each model layer. The actural size is doubled.")
 
 # Training parameters
-tf.app.flags.DEFINE_float("dis_lr", 0.005, "Learning rate.")
+tf.app.flags.DEFINE_float("dis_lr", 0.0005, "Learning rate.")
 tf.app.flags.DEFINE_float("lr_decay_factor", 0.5, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("dis_max_gradient", 5.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_boolean("early_stop", False, "Set to True to turn on early stop.")
@@ -90,20 +90,21 @@ tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True
 tf.app.flags.DEFINE_string('log_root', './log/', 'Root directory for all logging.')
 tf.app.flags.DEFINE_string('dec_dir', '', 'Where to generate the decode results. If false the time stamp is toke.')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in adirectory with this name, under log_root.')
+tf.app.flags.DEFINE_boolean('update_gen', True, 'to decide if to train generator.')
 
 # Hyperparameters
 tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 128, 'dimension of word embeddings')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
-tf.app.flags.DEFINE_integer('max_enc_steps', 80, 'max timesteps of encoder (max source text tokens)')  # 400
-tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 100
+tf.app.flags.DEFINE_integer('max_enc_steps', 75, 'max timesteps of encoder (max source text tokens)')  # 400
+tf.app.flags.DEFINE_integer('max_dec_steps', 12, 'max timesteps of decoder (max summary tokens)')  # 100
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 8, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('gen_vocab_size', 50000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
-tf.app.flags.DEFINE_float('gen_lr', 0.005, 'learning rate')
+tf.app.flags.DEFINE_float('gen_lr', 0.0005, 'learning rate')
 tf.app.flags.DEFINE_float('adagrad_init_acc', 0.1, 'initial accumulator value for Adagrad')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
@@ -125,8 +126,8 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 
 # ------------------------------------- gan
 
-tf.app.flags.DEFINE_integer('gan_iter', 2000, 'how many times to run the gan')
-tf.app.flags.DEFINE_integer('gan_gen_iter', 1, 'in each gan step run how many times the generator')
+tf.app.flags.DEFINE_integer('gan_iter', 200000, 'how many times to run the gan')
+tf.app.flags.DEFINE_integer('gan_gen_iter', 0, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 3, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
@@ -160,10 +161,6 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
     counter = 0
     while True:  # repeats until interrupted
         batch = batcher.next_batch()
-        print('batch enc_batch_extend_vocab')
-        print(batch.enc_batch_extend_vocab)
-        print("batch.target_batch")
-        print(batch.target_batch)
         if batch is None:
             return None
 
@@ -444,24 +441,30 @@ def main(argv):
                 # print(batch.target_batch)
 
                 # generate samples
-                enc_states, dec_in_state, best_samples = decoder.generate(
-                    batch, include_start_token=True)
+                enc_states, dec_in_state, k_best_samples, k_targets_padding_mask = decoder.generate(
+                    batch, include_start_token=True, top_k=FLAGS.beam_size)
 
+                k_best_samples = [np.squeeze(i, 1) for i in np.split(k_best_samples, k_best_samples.shape[1], 1)]
+                k_targets_padding_mask = [
+                    np.squeeze(i, 1)
+                    for i in np.split(k_targets_padding_mask, k_targets_padding_mask.shape[1], 1)]
                 # get rewards for the samples
-                rewards = rollout.get_reward(
+                k_rewards = rollout.get_reward(
                     sess, gen_vocab, dis_vocab, batch, enc_states,
-                    dec_in_state, best_samples, hps_gan.rollout_num, discriminator)
+                    dec_in_state, k_best_samples, hps_gan.rollout_num, discriminator)
 
                 # fine tune the generator
-                sample_target = np.array([b[1:] for b in best_samples])
-                sample = np.array([b[:-1] for b in best_samples])
-                sample_target_padding_mask = pad_sample(sample_target, gen_vocab, hps_gen)
-                sample = np.where(
-                    np.less(sample, hps_gen.gen_vocab_size),
-                    sample, np.array(
+                k_sample_targets = [best_samples[:, 1:] for best_samples in k_best_samples]
+                k_targets_padding_mask = [padding_mask[:, 1:] for padding_mask in k_targets_padding_mask]
+                k_samples = [best_samples[:, :-1] for best_samples in k_best_samples]
+                # sample_target_padding_mask = pad_sample(sample_target, gen_vocab, hps_gen)
+                k_samples = [np.where(
+                    np.less(samples, hps_gen.gen_vocab_size),
+                    samples, np.array(
                         [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
+                    for samples in k_samples]
                 results = generator.run_gan_step(
-                    sess, batch, rewards, sample, sample_target, sample_target_padding_mask, update=False)
+                    sess, batch, k_rewards, k_samples, k_sample_targets, k_targets_padding_mask)
                 # stl = sample_target.tolist()
                 # for st in stl:
                 #     st = [str(s) for s in st]
@@ -470,8 +473,8 @@ def main(argv):
                 # print(sample_target_padding_mask)
                 # print('loss_per_step')
                 # print(results['loss_per_step'])
-                print('rewards')
-                rwl = rewards.tolist()
+                print('sample rewards')
+                rwl = k_rewards[0].tolist()
                 for n, rw in enumerate(rwl):
                     rw = [str(r)[:7] for r in rw]
                     print(str(n) + ": " + colored('\t'.join(rw), "blue"))
@@ -488,7 +491,7 @@ def main(argv):
                 current_speed.append(time.time() - start_time)
 
             # Test
-            if i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1:
+            if FLAGS.gan_gen_iter and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
                 print('Going to test the generator.')
                 current_speed = sum(current_speed) / (len(current_speed) * hps_gen.batch_size)
                 everage_g_loss = sum(g_losses) / len(g_losses)
@@ -517,10 +520,12 @@ def main(argv):
 
             # Train the discriminator
             print('Going to train the discriminator.')
+            dis_best_loss = 1000
+            dis_losses = []
             dis_accuracies = []
             for d_gan in range(hps_gan.gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
-                enc_states, dec_in_state, samples_words = decoder.generate(batch)
+                enc_states, dec_in_state, samples_words, _ = decoder.generate(batch)
                 # shuould first tanslate to words to avoid unk
                 articles_oovs = batch.art_oovs
                 samples_chars = gen_vocab2dis_vocab(
@@ -550,14 +555,18 @@ def main(argv):
 
                 results = discriminator.run_one_step(sess, inputs[0], conditions[0], targets[0])
                 dis_accuracies.append(results["accuracy"].item())
+                dis_losses.append(results["loss"].item())
 
                 results = discriminator.run_one_step(sess, inputs[1], conditions[1], targets[1])
                 dis_accuracies.append(results["accuracy"].item())
 
                 if d_gan == hps_gan.gan_dis_iter - 1:
+                    if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:
+                        dis_best_loss = sum(dis_losses) / len(dis_losses)
+                        checkpoint_path = ensure_exists(join_path(hps_dis.model_dir, "discriminator")) + "/model.ckpt"
+                        dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
                     print_dashboard("GAN Discriminator", results["global_step"].item(), hps_dis.batch_size, hps_dis.dis_vocab_size,
                                     results["loss"].item(), 0.00, 0.00, 0.00)
-                    dump_chpt()
                     print("Average training accuracy: \t%.4f" %
                           (sum(dis_accuracies) / len(dis_accuracies)))
 
