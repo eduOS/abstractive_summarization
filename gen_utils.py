@@ -76,14 +76,15 @@ def get_best_loss_from_chpt(val_dir):
 
 
 def save_best_ckpt(sess, model, best_loss, val_batcher,
-                   val_dir, val_saver, step, model_name='bestmodel', latest_filename="checkpoint_best", gan_dir=None):
+                   val_dir, val_saver, step, model_name='bestmodel',
+                   latest_filename="checkpoint_best", gan_dir=None, force_save=False):
     """
     val_batcher: if not provided don't return scores
     gan_dir: if provided save the checkpoint whether the performance of the validation
     """
     bestmodel_save_path = join_path(val_dir, model_name)
 
-    if gan_dir:
+    if gan_dir and force_save:
         gan_save_path = join_path(gan_dir, "GANmodel")
         val_saver.save(sess, gan_save_path, global_step=step, latest_filename="checkpoint_gan")
         print("GAN model is saved to" + colored(" %s", 'yellow') % gan_save_path)
@@ -95,7 +96,10 @@ def save_best_ckpt(sess, model, best_loss, val_batcher,
         val_batch = val_batcher.next_batch()
         if not val_batch:
             break
-        results_val = model.run_eval_step(sess, val_batch)
+        if gan_dir:
+            results_val = model.run_gan_eval(sess, val_batch)
+        else:
+            results_val = model.run_one_batch(sess, val_batch, update=False)
         loss_eval = results_val["loss"]
         # why there exists nan?
         if not math.isnan(loss_eval):

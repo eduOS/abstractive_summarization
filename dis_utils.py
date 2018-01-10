@@ -161,7 +161,7 @@ def dump_chpt(eval_batcher, hps, model, sess, saver, eval_loss_best, early_stop=
         eval_inputs = np.split(eval_inputs, 2)[0]
         eval_conditions = np.split(eval_conditions, 2)[0]
         eval_targets = np.split(eval_targets, 2)[0]
-        eval_results = model.run_one_step(
+        eval_results = model.run_one_batch(
             sess, eval_inputs, eval_conditions, eval_targets, update=False)
         eval_losses.append(eval_results["loss"])
         eval_accuracies.append(eval_results["accuracy"])

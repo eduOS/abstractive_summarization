@@ -173,7 +173,7 @@ class Seq2ClassModel(object):
       # tf.nn.in_top_k() is a little better
       return tf.nn.softmax(logits), loss, accuracy
 
-  def run_one_step(self, sess, inputs, conditions, targets, update=True, do_profiling=False):
+  def run_one_batch(self, sess, inputs, conditions, targets, update=True, do_profiling=False):
     """Run a step of the model feeding the given inputs.
 
     Args:

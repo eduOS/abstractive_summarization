@@ -77,7 +77,7 @@ class Example(object):
         self.abs_ids = [vocab.word2id(w) for w in abstract_words]
 
         # Get the decoder input sequence and target sequence
-        self.dec_input, self.target = self.get_dec_inp_targ_seqs(
+        self.dec_input, _ = self.get_dec_inp_targ_seqs(
             self.abs_ids, hps.max_dec_steps, start_decoding, stop_decoding)
         self.dec_len = len(self.dec_input)
 
@@ -148,13 +148,6 @@ class Example(object):
         while len(self.enc_input_extend_vocab) < max_len:
             self.enc_input_extend_vocab.append(pad_id)
 
-    def pad_abs(self, max_len, pad_id):
-        """Pad the encoder input sequence with pad_id up to max_len."""
-        while len(self.abs_ids) < max_len:
-            self.abs_ids.append(pad_id)
-        while len(self.abs_ids_extend_vocab) < max_len:
-            self.abs_ids_extend_vocab.append(pad_id)
-
 
 class Batch(object):
     """Class representing a minibatch of train/val/test examples for text
@@ -208,9 +201,6 @@ class Batch(object):
         for ex in example_list:
             ex.pad_encoder_input(max_enc_seq_len, self.pad_id)
 
-        for ex in example_list:
-            ex.pad_abs(hps.max_enc_steps, self.pad_id)
-
         # Initialize the numpy arrays
         # Note: our enc_batch can have different length (second dimension) for
         # each batch because we use dynamic_rnn for the encoder.
@@ -262,14 +252,14 @@ class Batch(object):
         # upgrade to that.
         self.dec_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
         self.target_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
-        self.padding_mask = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.float32)
+        self.dec_padding_mask = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.float32)
 
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):
             self.dec_batch[i, :] = ex.dec_input[:]
             self.target_batch[i, :] = ex.target[:]
             for j in range(ex.dec_len):
-                self.padding_mask[i][j] = 1
+                self.dec_padding_mask[i][j] = 1
 
     def store_orig_strings(self, example_list):
         """Store the original article and abstract strings in the Batch

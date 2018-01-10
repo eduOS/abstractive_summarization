@@ -165,7 +165,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
             return None
 
         # print('running training step...')
-        results = model.run_one_step(sess, batch)
+        results = model.run_one_batch(sess, batch)
         counter += 1
         step = results['global_step']
         # print('seconds for training step: %.3f', t1-t0)
@@ -216,7 +216,7 @@ def pretrain_discriminator(sess, model, eval_batcher, dis_vocab, batcher, saver)
             print("The expected batch_size is %s but given %s, escape.." %
                   (hps.batch_size * hps.num_models, inputs.shape[0]))
             continue
-        results = model.run_one_step(sess, inputs, conditions, targets)
+        results = model.run_one_batch(sess, inputs, conditions, targets)
         train_accuracies.append(results["accuracy"])
         step_time += (time.time() - start_time) / hps.steps_per_checkpoint
         loss += results["loss"] / hps.steps_per_checkpoint
@@ -463,30 +463,16 @@ def main(argv):
                     samples, np.array(
                         [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
                     for samples in k_samples]
-                results = generator.run_gan_step(
-                    sess, batch, k_rewards, k_samples, k_sample_targets, k_targets_padding_mask)
-                # stl = sample_target.tolist()
-                # for st in stl:
-                #     st = [str(s) for s in st]
-                #     print(colored('\t'.join(st), "red"))
-                # print('sample_target_padding_mask')
-                # print(sample_target_padding_mask)
-                # print('loss_per_step')
-                # print(results['loss_per_step'])
-                print('sample rewards')
-                rwl = k_rewards[0].tolist()
-                for n, rw in enumerate(rwl):
-                    rw = [str(r)[:7] for r in rw]
-                    print(str(n) + ": " + colored('\t'.join(rw), "blue"))
-                # print('g_loss_per_step')
-                # print(results['g_loss_per_step'])
-                print('-------------------------------------------------')
+                results = generator.run_gan(
+                    sess, batch, enc_states, dec_in_state,
+                    k_samples, k_sample_targets, k_targets_padding_mask, k_rewards)
 
                 gen_global_step = results["global_step"]
 
                 # for visualization
                 g_loss = results["g_loss"]
                 if not math.isnan(g_loss):
+                    print(colored('a nan in gan loss', 'red'))
                     g_losses.append(g_loss)
                 current_speed.append(time.time() - start_time)
 
@@ -497,7 +483,8 @@ def main(argv):
                 everage_g_loss = sum(g_losses) / len(g_losses)
                 # one more process hould be opened for the evaluation
                 eval_loss, gen_best_loss = save_best_ckpt(
-                    sess, generator, gen_best_loss, None, val_dir, val_saver, gen_global_step, gan_dir=gan_dir)
+                    sess, generator, gen_best_loss, None, val_dir, val_saver,
+                    gen_global_step, gan_dir=gan_dir, force_save=True)
 
                 if eval_loss:
                     print(
@@ -506,7 +493,7 @@ def main(argv):
                         "\tBatch size:\t%s\n"
                         "\tVocabulary size:\t%s\n"
                         "\tCurrent speed:\t%.4f seconds/article\n"
-                        "\tTraining loss:\t%.4f; "
+                        "\tAverage training loss:\t%.4f; "
                         "eval loss:\t%.4f" % (
                             datetime.datetime.now().strftime("on %m-%d at %H:%M"),
                             gen_global_step,
@@ -553,11 +540,11 @@ def main(argv):
                 targets = np.split(targets[indices], 2)
                 assert len(inputs) % 2 == 0, "the length should be mean"
 
-                results = discriminator.run_one_step(sess, inputs[0], conditions[0], targets[0])
+                results = discriminator.run_one_batch(sess, inputs[0], conditions[0], targets[0])
                 dis_accuracies.append(results["accuracy"].item())
                 dis_losses.append(results["loss"].item())
 
-                results = discriminator.run_one_step(sess, inputs[1], conditions[1], targets[1])
+                results = discriminator.run_one_batch(sess, inputs[1], conditions[1], targets[1])
                 dis_accuracies.append(results["accuracy"].item())
 
                 if d_gan == hps_gan.gan_dis_iter - 1:
