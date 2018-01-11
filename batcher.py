@@ -292,7 +292,7 @@ class GenBatcher(object):
         self._hps = hps
         self._mode = mode
         self._single_pass = single_pass
-        self._data_path = os.path.join(hps.data_path, mode) + "*"
+        self._data_path = os.path.join(hps.data_path, mode) + ".txt_*"
         if self._mode == "val":
             self._single_pass = True
 

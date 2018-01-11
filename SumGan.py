@@ -18,7 +18,7 @@ from os.path import join as join_path
 from utils import ensure_exists
 from gen_utils import calc_running_avg_loss
 from gen_utils import get_best_loss_from_chpt
-from gen_utils import save_best_ckpt
+from gen_utils import save_ckpt
 from utils import print_dashboard
 from utils import pad_sample
 from dis_utils import dump_chpt
@@ -105,7 +105,6 @@ tf.app.flags.DEFINE_integer('gen_vocab_size', 50000, 'Size of vocabulary. These 
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
 tf.app.flags.DEFINE_float('gen_lr', 0.0005, 'learning rate')
-tf.app.flags.DEFINE_float('adagrad_init_acc', 0.1, 'initial accumulator value for Adagrad')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
 tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
@@ -143,7 +142,7 @@ if FLAGS.mode == "train_gan":
 ensure_exists(FLAGS.model_dir)
 
 
-def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
+def pretrain_generator(model, batcher, sess, val_batcher, model_saver, val_saver):
     """Repeatedly runs training iterations, logging loss to screen and writing
     summaries"""
     print("starting run_training")
@@ -164,10 +163,9 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
         if batch is None:
             return None
 
-        # print('running training step...')
         results = model.run_one_batch(sess, batch)
         counter += 1
-        step = results['global_step']
+        global_step = results['global_step']
         # print('seconds for training step: %.3f', t1-t0)
 
         loss = results['loss']
@@ -176,24 +174,18 @@ def pretrain_generator(model, batcher, sess, val_batcher, saver, val_saver):
             coverage_loss = results['coverage_loss']
 
         running_avg_loss = calc_running_avg_loss(
-            np.asscalar(loss), running_avg_loss, step)
+            np.asscalar(loss), running_avg_loss, global_step)
 
-        if step % FLAGS.steps_per_checkpoint == 0:
-            model_path = join_path(hps.model_dir, "generator", "model")
-            saver.save(sess, model_path, global_step=step)
-            print(
-                'Saving model with %.3f running_avg_loss. Saving to %s %s' %
-                (running_avg_loss, model_path,
-                    datetime.datetime.now().strftime("on %m-%d at %H:%M")))
-
+        if global_step % FLAGS.steps_per_checkpoint == 0:
             # check if it is the best checkpoint so far
-            eval_loss, best_loss = save_best_ckpt(
-                sess, model, best_loss, val_batcher, val_dir, val_saver, step)
+            eval_loss, best_loss = save_ckpt(
+                sess, model, best_loss, hps.model_dir, model_saver,
+                val_batcher, val_dir, val_saver, global_step)
 
             # print the print the dashboard
             current_speed = (time.time() - start_time) / (counter * hps.batch_size)
-            total_training_time = (time.time() - start_time) * step / (counter * 3600)
-            print_dashboard("Generator", step, hps.batch_size, hps.gen_vocab_size,
+            total_training_time = (time.time() - start_time) * global_step / (counter * 3600)
+            print_dashboard("Generator", global_step, hps.batch_size, hps.gen_vocab_size,
                             running_avg_loss, eval_loss,
                             total_training_time, current_speed,
                             coverage_loss if coverage_loss else "not set")
@@ -374,6 +366,8 @@ def main(argv):
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
         gan_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir))
+        gan_saver = tf.train.Saver(
+            max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         if FLAGS.decode_from_gan:
             utils.load_ckpt(dec_saver, sess, gan_dir, (FLAGS.mode in ["train_gan", "decode"]), "checkpoint_gan")
         else:
@@ -463,14 +457,14 @@ def main(argv):
                     samples, np.array(
                         [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
                     for samples in k_samples]
-                results = generator.run_gan(
+                results = generator.run_gan_batch(
                     sess, batch, enc_states, dec_in_state,
                     k_samples, k_sample_targets, k_targets_padding_mask, k_rewards)
 
                 gen_global_step = results["global_step"]
 
                 # for visualization
-                g_loss = results["g_loss"]
+                g_loss = results["loss"]
                 if not math.isnan(g_loss):
                     print(colored('a nan in gan loss', 'red'))
                     g_losses.append(g_loss)
@@ -482,9 +476,9 @@ def main(argv):
                 current_speed = sum(current_speed) / (len(current_speed) * hps_gen.batch_size)
                 everage_g_loss = sum(g_losses) / len(g_losses)
                 # one more process hould be opened for the evaluation
-                eval_loss, gen_best_loss = save_best_ckpt(
-                    sess, generator, gen_best_loss, None, val_dir, val_saver,
-                    gen_global_step, gan_dir=gan_dir, force_save=True)
+                eval_loss, gen_best_loss = save_ckpt(
+                    sess, generator, gen_best_loss, gan_dir, gan_saver,
+                    gen_batcher_val, val_dir, val_saver, gen_global_step, gan_eval=True)
 
                 if eval_loss:
                     print(

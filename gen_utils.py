@@ -75,31 +75,24 @@ def get_best_loss_from_chpt(val_dir):
     return best_loss
 
 
-def save_best_ckpt(sess, model, best_loss, val_batcher,
-                   val_dir, val_saver, step, model_name='bestmodel',
-                   latest_filename="checkpoint_best", gan_dir=None, force_save=False):
+def save_ckpt(sess, model, best_loss, model_dir, model_saver,
+              val_batcher, val_dir, val_saver, global_step, gan_eval=False):
     """
-    val_batcher: if not provided don't return scores
-    gan_dir: if provided save the checkpoint whether the performance of the validation
+    save model to model dir or evaluation directory
     """
-    bestmodel_save_path = join_path(val_dir, model_name)
-
-    if gan_dir and force_save:
-        gan_save_path = join_path(gan_dir, "GANmodel")
-        val_saver.save(sess, gan_save_path, global_step=step, latest_filename="checkpoint_gan")
-        print("GAN model is saved to" + colored(" %s", 'yellow') % gan_save_path)
     if not val_batcher:
-        return None, None
+        return None, best_loss
+
+    saved = False
+    val_save_path = join_path(val_dir, "best_model")
+    model_save_path = join_path(model_dir, "model")
 
     losses = []
     while True:
         val_batch = val_batcher.next_batch()
         if not val_batch:
             break
-        if gan_dir:
-            results_val = model.run_gan_eval(sess, val_batch)
-        else:
-            results_val = model.run_one_batch(sess, val_batch, update=False)
+        results_val = model.run_one_batch(sess, val_batch, update=False, gan_eval=gan_eval)
         loss_eval = results_val["loss"]
         # why there exists nan?
         if not math.isnan(loss_eval):
@@ -111,8 +104,15 @@ def save_best_ckpt(sess, model, best_loss, val_batcher,
         sess.run(model.least_val_loss.assign(eval_loss))
         print(
             'Found new best model with %.3f evaluation loss. Saving to %s %s' %
-            (eval_loss, bestmodel_save_path,
+            (eval_loss, val_save_path,
                 datetime.datetime.now().strftime("on %m-%d at %H:%M")))
-        val_saver.save(sess, bestmodel_save_path, global_step=step, latest_filename=latest_filename)
+        val_saver.save(sess, val_save_path, global_step=global_step)
+        print("Model is saved to" + colored(" %s", 'green') % val_save_path)
+        saved = True
         best_loss = eval_loss
+
+    if not saved:
+        model_saver.save(sess, model_save_path, global_step=global_step)
+        print("Model is saved to" + colored(" %s", 'yellow') % model_save_path)
+
     return eval_loss, best_loss

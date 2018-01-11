@@ -37,8 +37,8 @@ def load_ckpt(saver, sess, dire, force=False, lastest_filename="checkpoint"):
             return ckpt_state.model_checkpoint_path
         except Exception as ex:
             print(ex)
-            print(colored("Failed to load checkpoint from %s" % dire, 'red'))
             if not force:
+                print(colored("Failed to load checkpoint from %s. Training from scratch.." % dire, 'red'))
                 return
             else:
                 print("Failed to load checkpoint from %s Sleeping %s munites to waite." % (dire, 10))
