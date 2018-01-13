@@ -86,7 +86,7 @@ class Vocab(object):
                 self._word_to_id[w], self._id_to_word[len(self._id_to_word)] = len(self._word_to_id), w
                 self._count += 1
                 if max_size != 0 and len(self._word_to_id) >= max_size:
-                    print("max_size of vocab was specified as %i; we now have %i words. Stopping reading." % (max_size, len(self._word_to_id)))
+                    print("max_size of vocab was specified as %i; we now have %i words. Stop reading." % (max_size, len(self._word_to_id)))
                     break
 
         # print("Finished constructing vocabulary of %i total words. Last word added: %s" % (max_size, self._id_to_word[max_size-1]))
@@ -202,13 +202,13 @@ def abstract2ids(abstract_words, vocab, article_oovs):
     return ids
 
 
-def outputsids2words(id_lists, vocab, articles_oovs, art_ids=None):
+def outputsids2words(id_ar, vocab, articles_oovs, art_ids=None):
     """Maps output ids to words, including mapping in-article OOVs from their
     temporary ids to the original OOV string (applicable in pointer-generator
     mode).
 
     Args:
-      id_lists: a list of list of ids (integers)
+      id_ar: a 2-D array of ids
       vocab: Vocabulary object
       articles_oovs: a list of list of OOV words (strings) in the order corresponding to
       their temporary article OOV ids (that have been assigned in
@@ -218,7 +218,7 @@ def outputsids2words(id_lists, vocab, articles_oovs, art_ids=None):
       words: list of words (strings)
     """
     words_lists = []
-    for j, id_list in enumerate(id_lists):
+    for j, id_list in enumerate(id_ar):
         words = []
         for i in id_list:
             try:
@@ -361,7 +361,8 @@ def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab,
     """
     # TODO: keep the [unk] and such words
     samples_ids = []
-    assert len(gen_ids) == len(article_oovs)
+    assert len(gen_ids) == len(article_oovs), \
+        "length of gen_ids(%s) and article_oovs(%s) are not the same" % (len(gen_ids), len(article_oovs))
     samples_words = outputsids2words(gen_ids, gen_vocab, article_oovs, art_ids)
     for n, sample_words in enumerate(samples_words):
         # if print_sample:

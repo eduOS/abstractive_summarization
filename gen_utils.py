@@ -11,7 +11,6 @@ from os.path import join as join_path
 from termcolor import colored
 from tensorflow.python import pywrap_tensorflow
 
-
 def convert_to_coverage_model():
     """Load non-coverage checkpoint, add initialized extra variables for
     coverage, and save as new checkpoint"""

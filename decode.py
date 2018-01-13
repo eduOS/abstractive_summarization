@@ -103,9 +103,10 @@ class BeamSearchDecoder(object):
                 # randomize the hypothesis
                 random.shuffle(k_hyps)
             for k, hyp in enumerate(k_hyps):
+                tokens = hyp.tokens
                 padding_mask[b, k, :len(hyp)] = 1
                 padded_hyps.append(
-                    hyp + (max_len - len(hyp)) * [pad_id] if len(hyp) < max_len else hyp[:max_len])
+                    tokens + (max_len - len(hyp)) * [pad_id] if len(hyp) < max_len else tokens[:max_len])
             padded_k_hyps.append(padded_hyps)
 
         outputs_ids = np.array(padded_k_hyps).astype(int)
@@ -113,6 +114,12 @@ class BeamSearchDecoder(object):
         if not include_start_token:
             outputs_ids = outputs_ids[:, :, 1:]
             padding_mask = padding_mask[:, :, 1:]
+
+        # transfer to (beam size, batch_size, max_dec_steps)
+        outputs_ids = [np.squeeze(i, 1) for i in np.split(outputs_ids, outputs_ids.shape[1], 1)]
+        padding_mask = [
+            np.squeeze(i, 1)
+            for i in np.split(padding_mask, padding_mask.shape[1], 1)]
 
         return enc_states, dec_in_state, outputs_ids, padding_mask
 

@@ -48,12 +48,15 @@ class Hypothesis(object):
           coverage: Numpy array of shape (attn_length), or None if not using
           coverage. The current coverage vector.
         """
-        self.tokens = tokens
+        self._tokens = tokens
         self.log_probs = log_probs
         self.state = state
         self.attn_dists = attn_dists
         self.p_gens = p_gens
         self.coverage = coverage
+
+    def __len__(self):
+        return len(self._tokens)
 
     def extend(self, token, log_prob, state, attn_dist, p_gen, coverage):
         """Return a NEW hypothesis, extended with the information from the
@@ -73,7 +76,7 @@ class Hypothesis(object):
         """
         # can I use the class method here?
         return Hypothesis(
-            tokens=self.tokens + [token],
+            tokens=self._tokens + [token],
             log_probs=self.log_probs + [log_prob],
             state=state,
             attn_dists=self.attn_dists + [attn_dist],
@@ -83,7 +86,7 @@ class Hypothesis(object):
 
     @property
     def latest_token(self):
-        return self.tokens[-1]
+        return self._tokens[-1]
 
     @property
     def log_prob(self):
@@ -92,11 +95,15 @@ class Hypothesis(object):
         return sum(self.log_probs)
 
     @property
+    def tokens(self):
+        return self._tokens
+
+    @property
     def avg_log_prob(self):
         # normalize log probability by number of tokens (otherwise longer
         # sequences always have lower probability)
         # why?
-        return self.log_prob / len(self.tokens)
+        return self.log_prob / len(self._tokens)
 
 
 def run_beam_search(sess, model, vocab, batch, top_k=1):
@@ -234,10 +241,10 @@ def run_beam_search(sess, model, vocab, batch, top_k=1):
         # At this point, either we've got beam_size results, or we've reached
         # maximum decoder steps
 
-        if len(results) == 0:
+        if len(results) < top_k:
             # if we don't have any complete results, add all current hypotheses
             # (incomplete summaries) to results
-            results = hyps
+            results += hyps[:top_k - len(results)]
 
         # Sort hypotheses by average log probability
         hyps_sorted = sort_hyps(results)

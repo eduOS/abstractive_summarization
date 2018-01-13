@@ -314,26 +314,26 @@ class PointerGenerator(object):
             enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
             self.enc_states = enc_outputs
             self.dec_in_state = self._reduce_states(fw_st, bw_st)
-
             samples_dec_in_state = tf.contrib.rnn.LSTMStateTuple(self.cell_c, self.cell_h)
+
             with tf.variable_scope('decoder') as decoder_scope:
-                if hps.mode in ["pretrain_gen", 'decode']:
-                    self.attn_dists, self.p_gens, self.coverage, \
-                        final_dists, self._dec_out_state = self._add_decoder(emb_dec_inputs, self.dec_in_state)
+                self.attn_dists, self.p_gens, self.coverage, \
+                    final_dists, self._dec_out_state = self._add_decoder(emb_dec_inputs, self.dec_in_state)
+                decoder_scope.reuse_variables()
 
                 if hps.mode == "train_gan":
                     # for evaluation in GAN
-                    self.attn_dists, self.p_gens, self.coverage, \
-                        final_dists, self._dec_out_state = self._add_decoder(emb_eval_dec_inputs, self.dec_in_state)
+                    eval_attn_dists, _, eval_coverage, eval_final_dists, _ \
+                        = self._add_decoder(emb_eval_dec_inputs, self.dec_in_state)
 
-                decoder_scope.reuse_variables()
                 k_sample_final_dists_ls = []
                 for emb_samples in k_emb_samples_ls:
                     _, _, _, sample_final_dists, _ = self._add_decoder(emb_samples, samples_dec_in_state)
                     k_sample_final_dists_ls.append(sample_final_dists)
 
             def get_loss(final_dists, target_batch, padding_mask, rewards=None):
-                batch_nums = tf.range(0, tf.shape(target_batch)[0])
+                batch_nums = tf.range(0, limit=tf.shape(target_batch)[0])
+
                 loss_per_step = []
                 for dec_step, dist in enumerate(final_dists):
                     targets = target_batch[:, dec_step]
@@ -348,23 +348,25 @@ class PointerGenerator(object):
                 gan_loss = []
 
                 # for training of generator
-                loss_per_step = get_loss(final_dists, self.target_batch, self.dec_padding_mask)
+                _final_dists = eval_final_dists if hps.mode == "train_gan" else final_dists
+                loss_per_step = get_loss(_final_dists, self.target_batch, self.dec_padding_mask)
                 # Apply padding_mask mask and get loss
                 self._loss = _avg(loss_per_step, self.dec_padding_mask)
 
                 # for training of GAN
                 # Calculate coverage loss from the attention distributions
                 if hps.coverage:
+                    attn_dists = eval_attn_dists if hps.mode == "train_gan" else self.attn_dists
                     with tf.variable_scope('coverage_loss'):
                         self._coverage_loss = _coverage_loss(
-                            self.attn_dists, self.dec_padding_mask)
+                            attn_dists, self.dec_padding_mask)
                         tf.summary.scalar(
                             'coverage_loss', self._coverage_loss)
                     self._total_loss = \
                         self._loss + hps.cov_loss_wt * self._coverage_loss
 
             with tf.variable_scope('gan_loss'):
-                for k, sample_targets in enumerate(k_sample_targets_ls):
+                for k in range(len(k_sample_targets_ls)):
                     gan_loss_per_step = get_loss(
                         k_sample_final_dists_ls[k], k_sample_targets_ls[k],
                         k_sample_targets_mask_ls[k], k_rewards_ls[k])
@@ -382,12 +384,33 @@ class PointerGenerator(object):
                 self.final_dists, hps.beam_size * 2)
             self._topk_log_probs = tf.log(topk_probs)
 
+        # for the loss
+        loss_to_minimize = self._total_loss if self.hps.coverage else self._loss
+        trainable_variables = tf.trainable_variables()
+        gradients = tf.gradients(
+            loss_to_minimize, trainable_variables,
+            aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
+
+        # Clip the gradients
+        with tf.device("/gpu:0"):
+            grads, global_norm = tf.clip_by_global_norm(
+                gradients, self.hps.gen_max_gradient)
+
+        # Apply adagrad optimizer
+        optimizer = tf.train.AdamOptimizer(self.hps.gen_lr)
+        with tf.device("/gpu:0"):
+            self._train_op = optimizer.apply_gradients(
+                zip(grads, trainable_variables),
+                global_step=self.global_step)
+
+        # for the loss
         g_opt = self.g_optimizer(self.hps.gen_lr)
         trainable_variables = tf.trainable_variables()
         gradients = tf.gradients(self.gan_loss, trainable_variables,
                                  aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
         self.g_grad, _ = tf.clip_by_global_norm(gradients, self.hps.gen_max_gradient)
-        self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables))
+        with tf.device("/gpu:0"):
+            self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables), global_step=self.global_step)
 
         return decoder_scope
 
@@ -446,43 +469,17 @@ class PointerGenerator(object):
         final_dists = self._calc_final_dist(p_gens, vocab_dists, attn_dists)
         return attn_dists, p_gens, coverage, final_dists, out_state
 
-    def _add_train_op(self):
-        """Sets self._train_op, the op to run for training."""
-        # Take gradients of the trainable variables w.r.t. the loss function to
-        # minimize
-        loss_to_minimize = \
-            self._total_loss if self.hps.coverage else self._loss
-        tvars = tf.trainable_variables()
-        gradients = tf.gradients(
-            loss_to_minimize, tvars,
-            aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
-
-        # Clip the gradients
-        with tf.device("/gpu:0"):
-            grads, global_norm = tf.clip_by_global_norm(
-                gradients, self.hps.gen_max_gradient)
-
-        # Apply adagrad optimizer
-        optimizer = tf.train.AdamOptimizer(self.hps.gen_lr)
-        with tf.device("/gpu:0"):
-            self._train_op = optimizer.apply_gradients(
-                zip(grads, tvars),
-                global_step=self.global_step)
-
     def build_graph(self):
         """Add the placeholders, model, global step, train_op and summaries to
         the graph"""
-        tf.logging.info('Building graph...')
         t0 = time.time()
         self._add_placeholders()
         with tf.device("/gpu:0"):
             decoder_scope = self._add_seq2seq()
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
         self.least_val_loss = tf.Variable(1000.0, name='least_val_loss', trainable=False)
-        self._add_train_op()
-        self._summaries = tf.summary.merge_all()
         t1 = time.time()
-        tf.logging.info('Time to build graph: %i seconds', t1 - t0)
+        print('Time to build graph: %i seconds', t1 - t0)
         return decoder_scope
 
     def run_one_batch(self, sess, batch, update=True, gan_eval=False):

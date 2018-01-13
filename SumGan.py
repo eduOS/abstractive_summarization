@@ -20,7 +20,6 @@ from gen_utils import calc_running_avg_loss
 from gen_utils import get_best_loss_from_chpt
 from gen_utils import save_ckpt
 from utils import print_dashboard
-from utils import pad_sample
 from dis_utils import dump_chpt
 import math
 from data import PAD_TOKEN
@@ -37,7 +36,7 @@ tf.app.flags.DEFINE_string(
 # ------------------------------------- common
 tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training.")
 tf.app.flags.DEFINE_boolean('restore_best_model', False, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
-tf.app.flags.DEFINE_integer('steps_per_checkpoint', 1000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
+tf.app.flags.DEFINE_integer('steps_per_checkpoint', 10000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decay by this rate')
 
 # ------------------------------------- discriminator
@@ -57,7 +56,8 @@ tf.app.flags.DEFINE_integer("num_models", 3, "Size of each model layer. The actu
 # Training parameters
 tf.app.flags.DEFINE_float("dis_lr", 0.0005, "Learning rate.")
 tf.app.flags.DEFINE_float("lr_decay_factor", 0.5, "Learning rate decays by this much.")
-tf.app.flags.DEFINE_float("dis_max_gradient", 5.0, "Clip gradients to this norm.")
+tf.app.flags.DEFINE_float("dis_max_gradient", 2.0, "Clip gradients to this norm.")
+# TODO: how much thould this be?
 tf.app.flags.DEFINE_boolean("early_stop", False, "Set to True to turn on early stop.")
 tf.app.flags.DEFINE_integer("max_steps", -1, "max number of steps to train")
 
@@ -100,7 +100,7 @@ tf.app.flags.DEFINE_integer('emb_dim', 128, 'dimension of word embeddings')
 tf.app.flags.DEFINE_integer('max_enc_steps', 75, 'max timesteps of encoder (max source text tokens)')  # 400
 tf.app.flags.DEFINE_integer('max_dec_steps', 12, 'max timesteps of decoder (max summary tokens)')  # 100
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
-tf.app.flags.DEFINE_integer('min_dec_steps', 8, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
+tf.app.flags.DEFINE_integer('min_dec_steps', 3, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('gen_vocab_size', 50000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
@@ -126,11 +126,10 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 # ------------------------------------- gan
 
 tf.app.flags.DEFINE_integer('gan_iter', 200000, 'how many times to run the gan')
-tf.app.flags.DEFINE_integer('gan_gen_iter', 0, 'in each gan step run how many times the generator')
+tf.app.flags.DEFINE_integer('gan_gen_iter', 2, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 3, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
-tf.app.flags.DEFINE_boolean("decode_from_gan", False, "Either decode from gan checkpoint or not")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -138,6 +137,9 @@ assert FLAGS.mode in ["pretrain_gen", "pretrain_dis", "train_gan", "decode", "te
 
 if FLAGS.mode == "train_gan":
     FLAGS.single_pass = False
+
+if FLAGS.min_dec_steps > FLAGS.max_dec_steps / 2:
+    FLAGS.min_dec_steps = int(FLAGS.max_dec_steps / 2)
 
 ensure_exists(FLAGS.model_dir)
 
@@ -368,10 +370,7 @@ def main(argv):
         gan_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir))
         gan_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
-        if FLAGS.decode_from_gan:
-            utils.load_ckpt(dec_saver, sess, gan_dir, (FLAGS.mode in ["train_gan", "decode"]), "checkpoint_gan")
-        else:
-            utils.load_ckpt(dec_saver, sess, val_dir, (FLAGS.mode in ["train_gan", "decode"]), "checkpoint_best")
+        utils.load_ckpt(dec_saver, sess, val_dir, (FLAGS.mode in ["train_gan", "decode"]))
 
     if FLAGS.mode in ["pretrain_dis", "train_gan"]:
         dis_saver = tf.train.Saver(
@@ -429,19 +428,10 @@ def main(argv):
             for it in range(hps_gan.gan_gen_iter):
                 start_time = time.time()
                 batch = gen_batcher_train.next_batch()
-                # print('batch enc_batch_extend_vocab')
-                # print(batch.enc_batch_extend_vocab)
-                # print("batch.target_batch")
-                # print(batch.target_batch)
 
                 # generate samples
                 enc_states, dec_in_state, k_best_samples, k_targets_padding_mask = decoder.generate(
                     batch, include_start_token=True, top_k=FLAGS.beam_size)
-
-                k_best_samples = [np.squeeze(i, 1) for i in np.split(k_best_samples, k_best_samples.shape[1], 1)]
-                k_targets_padding_mask = [
-                    np.squeeze(i, 1)
-                    for i in np.split(k_targets_padding_mask, k_targets_padding_mask.shape[1], 1)]
                 # get rewards for the samples
                 k_rewards = rollout.get_reward(
                     sess, gen_vocab, dis_vocab, batch, enc_states,
@@ -506,40 +496,42 @@ def main(argv):
             dis_accuracies = []
             for d_gan in range(hps_gan.gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
-                enc_states, dec_in_state, samples_words, _ = decoder.generate(batch)
+                enc_states, dec_in_state, k_samples_words, _ = decoder.generate(
+                    batch, top_k=FLAGS.beam_size)
                 # shuould first tanslate to words to avoid unk
                 articles_oovs = batch.art_oovs
-                samples_chars = gen_vocab2dis_vocab(
-                    samples_words, gen_vocab, articles_oovs,
-                    dis_vocab, hps_dis.max_dec_steps, STOP_DECODING)
-                dec_batch_words = [b[1:] for b in batch.target_batch]
-                dec_batch_chars = gen_vocab2dis_vocab(
-                    dec_batch_words, gen_vocab, articles_oovs, dis_vocab, hps_dis.max_dec_steps,  STOP_DECODING)
-                conditions_words = batch.enc_batch_extend_vocab
-                conditions_chars = gen_vocab2dis_vocab(
-                    conditions_words, gen_vocab, articles_oovs,
-                    dis_vocab, hps_dis.max_enc_steps, PAD_TOKEN)
-                # the unknown in target
+                for samples_words in k_samples_words:
+                    samples_chars = gen_vocab2dis_vocab(
+                        samples_words, gen_vocab, articles_oovs,
+                        dis_vocab, hps_dis.max_dec_steps, STOP_DECODING)
+                    dec_batch_words = batch.target_batch
+                    dec_batch_chars = gen_vocab2dis_vocab(
+                        dec_batch_words, gen_vocab, articles_oovs, dis_vocab, hps_dis.max_dec_steps, STOP_DECODING)
+                    conditions_words = batch.enc_batch_extend_vocab
+                    conditions_chars = gen_vocab2dis_vocab(
+                        conditions_words, gen_vocab, articles_oovs,
+                        dis_vocab, hps_dis.max_enc_steps, PAD_TOKEN)
+                    # the unknown in target
 
-                inputs = np.concatenate([samples_chars, dec_batch_chars], 0)
-                conditions = np.concatenate([conditions_chars, conditions_chars], 0)
+                    inputs = np.concatenate([samples_chars, dec_batch_chars], 0)
+                    conditions = np.concatenate([conditions_chars, conditions_chars], 0)
 
-                targets = [[1, 0] for _ in samples_chars] + [[0, 1] for _ in dec_batch_chars]
-                targets = np.array(targets)
-                # randomize the samples
-                assert len(inputs) == len(conditions) == len(targets), "lengthes of the inputs, conditions and targests should be the same."
-                indices = np.random.permutation(len(inputs))
-                inputs = np.split(inputs[indices], 2)
-                conditions = np.split(conditions[indices], 2)
-                targets = np.split(targets[indices], 2)
-                assert len(inputs) % 2 == 0, "the length should be mean"
+                    targets = [[1, 0] for _ in samples_chars] + [[0, 1] for _ in dec_batch_chars]
+                    targets = np.array(targets)
+                    # randomize the samples
+                    assert len(inputs) == len(conditions) == len(targets), "lengthes of the inputs, conditions and targests should be the same."
+                    indices = np.random.permutation(len(inputs))
+                    inputs = np.split(inputs[indices], 2)
+                    conditions = np.split(conditions[indices], 2)
+                    targets = np.split(targets[indices], 2)
+                    assert len(inputs) % 2 == 0, "the length should be mean"
 
-                results = discriminator.run_one_batch(sess, inputs[0], conditions[0], targets[0])
-                dis_accuracies.append(results["accuracy"].item())
-                dis_losses.append(results["loss"].item())
+                    results = discriminator.run_one_batch(sess, inputs[0], conditions[0], targets[0])
+                    dis_accuracies.append(results["accuracy"].item())
+                    dis_losses.append(results["loss"].item())
 
-                results = discriminator.run_one_batch(sess, inputs[1], conditions[1], targets[1])
-                dis_accuracies.append(results["accuracy"].item())
+                    results = discriminator.run_one_batch(sess, inputs[1], conditions[1], targets[1])
+                    dis_accuracies.append(results["accuracy"].item())
 
                 if d_gan == hps_gan.gan_dis_iter - 1:
                     if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:

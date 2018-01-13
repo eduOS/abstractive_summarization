@@ -436,6 +436,8 @@ class GenBatcher(object):
             if not self._single_pass:
                 shuffle(batches)
             for b in batches:  # each b is a list of Example objects
+                if len(b) != self._hps.batch_size:
+                    continue
                 self._batch_queue.put(Batch(b, self._hps, self._vocab))
 
     def watch_threads(self):
