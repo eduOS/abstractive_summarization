@@ -36,13 +36,20 @@ def load_ckpt(saver, sess, dire, force=False, lastest_filename="checkpoint"):
             saver.restore(sess, ckpt_state.model_checkpoint_path)
             return ckpt_state.model_checkpoint_path
         except Exception as ex:
-            print(ex)
-            if not force:
-                print(colored("Failed to load checkpoint from %s. Training from scratch.." % dire, 'red'))
-                return
-            else:
-                print("Failed to load checkpoint from %s Sleeping %s munites to waite." % (dire, 10))
-                time.sleep(10)
+            print(colored("Failed to load checkpoint from %s. Training from scratch.." % dire, 'red'))
+            try:
+                ckpt_state = tf.train.get_checkpoint_state(dire+'/val', lastest_filename)
+                print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
+                saver.restore(sess, ckpt_state.model_checkpoint_path)
+                return ckpt_state.model_checkpoint_path
+            except Exception as ex:
+                print(ex)
+                if not force:
+                    print(colored("Failed to load checkpoint from %s. Training from scratch.." % dire+'/val', 'red'))
+                    return
+                else:
+                    print("Failed to load checkpoint from %s Sleeping %s munites to waite." % (dire, 10))
+                    time.sleep(10)
 
 
 def initialize_uninitialized(sess):

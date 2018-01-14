@@ -314,7 +314,6 @@ class PointerGenerator(object):
             enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
             self.enc_states = enc_outputs
             self.dec_in_state = self._reduce_states(fw_st, bw_st)
-            samples_dec_in_state = tf.contrib.rnn.LSTMStateTuple(self.cell_c, self.cell_h)
 
             with tf.variable_scope('decoder') as decoder_scope:
                 self.attn_dists, self.p_gens, self.coverage, \
@@ -326,7 +325,7 @@ class PointerGenerator(object):
 
                 k_sample_final_dists_ls = []
                 for emb_samples in k_emb_samples_ls:
-                    _, _, _, sample_final_dists, _ = self._add_decoder(emb_samples, samples_dec_in_state)
+                    _, _, _, sample_final_dists, _ = self._add_decoder(emb_samples, self.dec_in_state)
                     k_sample_final_dists_ls.append(sample_final_dists)
 
             def get_loss(final_dists, target_batch, padding_mask, rewards=None):
@@ -493,9 +492,9 @@ class PointerGenerator(object):
             'global_step': self.global_step,
         }
         if gan_eval:
-            to_return['loss'] = self._eval_loss,
+            to_return['loss'] = self._eval_loss
         else:
-            to_return['loss'] = self._loss,
+            to_return['loss'] = self._loss
         if update:
             # if update is False it is for the generator evaluation
             to_return['train_op'] = self._train_op
@@ -504,19 +503,13 @@ class PointerGenerator(object):
         return sess.run(to_return, feed_dict)
 
     def run_gan_batch(
-        self, sess, batch, enc_states, dec_in_state,
-        samples, sample_targets, sample_padding_mask, rewards, update=True
+        self, sess, batch, samples, sample_targets,
+        sample_padding_mask, rewards, update=True, gan_eval=False
     ):
+        feed_dict = self._make_feed_dict(batch, gan_eval=gan_eval)
+
         # this can be combined with evaluation method
         feed_dict = {
-            # for the encoder
-            self.enc_batch_extend_vocab: batch.enc_batch_extend_vocab,
-            self.max_art_oovs: batch.max_art_oovs,
-            self.enc_states: enc_states,
-            self.enc_padding_mask: batch.enc_padding_mask,
-            self.cell_c: dec_in_state.c,
-            self.cell_h: dec_in_state.h,
-
             # for the decoder
             self.k_samples: samples,
             self.k_sample_targets: sample_targets,
