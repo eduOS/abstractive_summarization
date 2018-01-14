@@ -25,11 +25,13 @@ import os
 import time
 import tensorflow as tf
 import beam_search
+import monte_carlo_search
 import data
 import json
 from codecs import open
 # import pyrouge
 # import gen_utils
+import data
 import numpy as np
 import random
 import logging
@@ -41,7 +43,7 @@ FLAGS = tf.app.flags.FLAGS
 SECS_UNTIL_NEW_CKPT = 60  # max number of seconds before loading new checkpoint
 
 
-class BeamSearchDecoder(object):
+class Decoder(object):
     """Beam search decoder."""
 
     def __init__(self, sess, model, vocab):
@@ -88,28 +90,25 @@ class BeamSearchDecoder(object):
             if not os.path.exists(self._rouge_dec_dir):
                 os.mkdir(self._rouge_dec_dir)
 
-    def generate(self, batch, include_start_token=False, top_k=4, shuffle=True):
+    def mc_generate(self, batch, include_start_token=False, s_num=4):
         # Run beam search to get best Hypothesis
-        enc_states, dec_in_state, best_k_hyps = beam_search.run_beam_search(
-            self._sess, self._model, self._vocab, batch, top_k)
+        enc_states, dec_in_state, n_hyps_batch = monte_carlo_search.run_monte_carlo_search(
+            self._sess, self._model, self._vocab, batch, s_num=s_num)
 
-        padded_k_hyps = []
+        padded_n_hyps = []
         pad_id = self._vocab.word2id(PAD_TOKEN)
         max_len = self._hps.max_dec_steps + 1
-        padding_mask = np.zeros((len(best_k_hyps), top_k, max_len), dtype=np.int32)
-        for b, k_hyps in enumerate(best_k_hyps):
+        padding_mask = np.zeros((len(n_hyps_batch), s_num, max_len), dtype=np.int32)
+        for b, n_hyps in enumerate(n_hyps_batch):
             padded_hyps = []
-            if shuffle:
-                # randomize the hypothesis
-                random.shuffle(k_hyps)
-            for k, hyp in enumerate(k_hyps):
+            for n, hyp in enumerate(n_hyps):
                 tokens = hyp.tokens
-                padding_mask[b, k, :len(hyp)] = 1
+                padding_mask[b, n, :len(hyp)] = 1
                 padded_hyps.append(
                     tokens + (max_len - len(hyp)) * [pad_id] if len(hyp) < max_len else tokens[:max_len])
-            padded_k_hyps.append(padded_hyps)
+            padded_n_hyps.append(padded_hyps)
 
-        outputs_ids = np.array(padded_k_hyps).astype(int)
+        outputs_ids = np.array(padded_n_hyps).astype(int)
 
         if not include_start_token:
             outputs_ids = outputs_ids[:, :, 1:]
@@ -123,7 +122,44 @@ class BeamSearchDecoder(object):
 
         return enc_states, dec_in_state, outputs_ids, padding_mask
 
-    def decode(self, batcher):
+    def multinomial_decode(self, sess, model, batch, vocab):
+        batch_size = len(batch.enc_batch_extend_vocab)
+        ran_ids = []
+        id_mappings = []
+        enc_states, dec_in_state = model.run_encoder(sess, batch)
+        latest_tokens = batch_size * [vocab.word2id(data.START_DECODING)]
+        prev_coverage = np.zeros([batch.enc_batch.shape[1]])
+        dec_state = dec_in_state
+
+        steps = 0
+        while steps < FLAGS.max_dec_steps:
+            ran_ids.append(latest_tokens)
+            latest_tokens = [
+                t if t in xrange(
+                    vocab.size()) else vocab.word2id(data.UNKNOWN_TOKEN)
+                for t in latest_tokens]
+            latest_tokens = np.transpose(np.array([latest_tokens]))
+            ran_id, _, dec_state, _, _, prev_coverage = model.run_decode_onestep(
+                sess=sess, enc_batch_extend_vocab=batch.enc_batch_extend_vocab,
+                max_art_oovs=batch.max_art_oovs, latest_tokens=latest_tokens,
+                enc_states=enc_states, enc_padding_mask=batch.enc_padding_mask,
+                dec_init_states=dec_state, prev_coverage=prev_coverage,
+                method="mc"
+            )
+            latest_tokens = ran_id.tolist()
+
+        stop_id = vocab.word2id(data.STOP_DECODING)
+        for ran_id in ran_ids:
+            m = ran_id.index(stop_id)
+            if m:
+                id_mapping = [1] * (m+1) + (len(ran_id) - m - 1) * [0]
+            else:
+                id_mapping = [1] * len(ran_id)
+            id_mappings.append(id_mapping)
+
+        return enc_states, dec_in_state, np.array(ran_ids), np.array(id_mappings)
+
+    def bs_decode(self, batcher):
         """Decode examples until data is exhausted (if self._hps.single_pass) and
         return, or decode indefinitely, loading latest checkpoint at regular
         intervals"""

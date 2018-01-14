@@ -133,7 +133,6 @@ def run_beam_search(sess, model, vocab, batch, top_k=1):
     # enc_states has shape [batch_size, <=max_enc_steps, 2*hidden_dim].
     enc_states, dec_in_state = model.run_encoder(sess, batch)
     # enc_states and dec_in_state should be scaled to match the latter setting
-    attn_dists = None
 
     best_k_hyps = []
     batch_hyps = []

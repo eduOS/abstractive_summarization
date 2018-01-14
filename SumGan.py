@@ -10,7 +10,7 @@ import time
 import sys
 import data
 from batcher import GenBatcher, DisBatcher
-from decode import BeamSearchDecoder
+from decode import Decoder
 from pointer_generator import PointerGenerator
 from rollout import Rollout
 from data import gen_vocab2dis_vocab
@@ -130,6 +130,7 @@ tf.app.flags.DEFINE_integer('gan_gen_iter', 2, 'in each gan step run how many ti
 tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 3, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
+tf.app.flags.DEFINE_integer('sample_num', 4, 'beam size for beam search decoding.')
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -333,6 +334,7 @@ def main(argv):
         'gan_gen_iter',
         'gan_dis_iter',
         'rollout_num',
+        'sample_num',
     ]
     hps_dict = {}
     for key, val in FLAGS.__flags.iteritems():  # for each flag
@@ -383,7 +385,7 @@ def main(argv):
     # --------------- train models ---------------
     if FLAGS.mode != "pretrain_dis":
         gen_batcher_train = GenBatcher("train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
-        decoder = BeamSearchDecoder(sess, generator, gen_vocab)
+        decoder = Decoder(sess, generator, gen_vocab)
         gen_batcher_val = GenBatcher("val", gen_vocab, hps_gen, single_pass=True)
         val_saver = tf.train.Saver(max_to_keep=10,
                                    var_list=[v for v in all_variables if "generator" in v.name])
@@ -430,26 +432,26 @@ def main(argv):
                 batch = gen_batcher_train.next_batch()
 
                 # generate samples
-                enc_states, dec_in_state, k_best_samples, k_targets_padding_mask = decoder.generate(
-                    batch, include_start_token=True, top_k=FLAGS.beam_size)
+                enc_states, dec_in_state, n_samples, n_targets_padding_mask = decoder.mc_generate(
+                    batch, include_start_token=True, s_num=hps_gan.sample_num)
                 # get rewards for the samples
-                k_rewards = rollout.get_reward(
+                n_rewards = rollout.get_reward(
                     sess, gen_vocab, dis_vocab, batch, enc_states,
-                    dec_in_state, k_best_samples, hps_gan.rollout_num, discriminator)
+                    dec_in_state, n_samples, hps_gan.rollout_num, discriminator)
 
                 # fine tune the generator
-                k_sample_targets = [best_samples[:, 1:] for best_samples in k_best_samples]
-                k_targets_padding_mask = [padding_mask[:, 1:] for padding_mask in k_targets_padding_mask]
-                k_samples = [best_samples[:, :-1] for best_samples in k_best_samples]
+                n_sample_targets = [samples[:, 1:] for samples in n_samples]
+                n_targets_padding_mask = [padding_mask[:, 1:] for padding_mask in n_targets_padding_mask]
+                n_samples = [samples[:, :-1] for samples in n_samples]
                 # sample_target_padding_mask = pad_sample(sample_target, gen_vocab, hps_gen)
-                k_samples = [np.where(
+                n_samples = [np.where(
                     np.less(samples, hps_gen.gen_vocab_size),
                     samples, np.array(
                         [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
-                    for samples in k_samples]
+                    for samples in n_samples]
                 results = generator.run_gan_batch(
                     sess, batch, enc_states, dec_in_state,
-                    k_samples, k_sample_targets, k_targets_padding_mask, k_rewards)
+                    n_samples, n_sample_targets, n_targets_padding_mask, n_rewards)
 
                 gen_global_step = results["global_step"]
 
@@ -461,7 +463,8 @@ def main(argv):
                 current_speed.append(time.time() - start_time)
 
             # Test
-            if FLAGS.gan_gen_iter and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
+            # if FLAGS.gan_gen_iter and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
+            if 0 and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
                 print('Going to test the generator.')
                 current_speed = sum(current_speed) / (len(current_speed) * hps_gen.batch_size)
                 everage_g_loss = sum(g_losses) / len(g_losses)
@@ -496,7 +499,8 @@ def main(argv):
             dis_accuracies = []
             for d_gan in range(hps_gan.gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
-                enc_states, dec_in_state, k_samples_words, _ = decoder.generate(
+                print()
+                enc_states, dec_in_state, k_samples_words, _ = decoder.mc_generate(
                     batch, top_k=FLAGS.beam_size)
                 # shuould first tanslate to words to avoid unk
                 articles_oovs = batch.art_oovs
@@ -546,7 +550,7 @@ def main(argv):
     # --------------- decoding samples ---------------
     elif FLAGS.mode == "decode":
         print('Going to decode from the generator.')
-        decoder.decode(gen_batcher_train)
+        decoder.bs_decode(gen_batcher_train)
         print("Finished decoding..")
         # decode for generating corpus for discriminator
 

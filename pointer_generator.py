@@ -321,10 +321,8 @@ class PointerGenerator(object):
                     final_dists, self._dec_out_state = self._add_decoder(emb_dec_inputs, self.dec_in_state)
                 decoder_scope.reuse_variables()
 
-                if hps.mode == "train_gan":
-                    # for evaluation in GAN
-                    eval_attn_dists, _, eval_coverage, eval_final_dists, _ \
-                        = self._add_decoder(emb_eval_dec_inputs, self.dec_in_state)
+                eval_attn_dists, _, eval_coverage, eval_final_dists, _ \
+                    = self._add_decoder(emb_eval_dec_inputs, self.dec_in_state)
 
                 k_sample_final_dists_ls = []
                 for emb_samples in k_emb_samples_ls:
@@ -345,27 +343,25 @@ class PointerGenerator(object):
 
             # Calculate the loss
             with tf.variable_scope('generator_loss'):
-                gan_loss = []
 
                 # for training of generator
-                _final_dists = eval_final_dists if hps.mode == "train_gan" else final_dists
-                loss_per_step = get_loss(_final_dists, self.target_batch, self.dec_padding_mask)
+                loss_per_step = get_loss(final_dists, self.target_batch, self.dec_padding_mask)
+                eval_loss_per_step = get_loss(eval_final_dists, self.target_batch, self.dec_padding_mask)
                 # Apply padding_mask mask and get loss
                 self._loss = _avg(loss_per_step, self.dec_padding_mask)
+                self._eval_loss = _avg(eval_loss_per_step, self.dec_padding_mask)
 
                 # for training of GAN
                 # Calculate coverage loss from the attention distributions
                 if hps.coverage:
-                    attn_dists = eval_attn_dists if hps.mode == "train_gan" else self.attn_dists
                     with tf.variable_scope('coverage_loss'):
                         self._coverage_loss = _coverage_loss(
-                            attn_dists, self.dec_padding_mask)
-                        tf.summary.scalar(
-                            'coverage_loss', self._coverage_loss)
+                            self.attn_dists, self.dec_padding_mask)
                     self._total_loss = \
                         self._loss + hps.cov_loss_wt * self._coverage_loss
 
             with tf.variable_scope('gan_loss'):
+                gan_loss = []
                 for k in range(len(k_sample_targets_ls)):
                     gan_loss_per_step = get_loss(
                         k_sample_final_dists_ls[k], k_sample_targets_ls[k],
@@ -383,6 +379,9 @@ class PointerGenerator(object):
             topk_probs, self._topk_ids = tf.nn.top_k(
                 self.final_dists, hps.beam_size * 2)
             self._topk_log_probs = tf.log(topk_probs)
+
+            # for the monte carlo searching
+            self._ran_id = tf.multinomial(tf.log(self.final_dists), 1)
 
         # for the loss
         loss_to_minimize = self._total_loss if self.hps.coverage else self._loss
@@ -474,9 +473,9 @@ class PointerGenerator(object):
         the graph"""
         t0 = time.time()
         self._add_placeholders()
+        self.global_step = tf.Variable(0, name='global_step', trainable=False)
         with tf.device("/gpu:0"):
             decoder_scope = self._add_seq2seq()
-        self.global_step = tf.Variable(0, name='global_step', trainable=False)
         self.least_val_loss = tf.Variable(1000.0, name='least_val_loss', trainable=False)
         t1 = time.time()
         print('Time to build graph: %i seconds', t1 - t0)
@@ -492,8 +491,11 @@ class PointerGenerator(object):
 
         to_return = {
             'global_step': self.global_step,
-            'loss': self._loss,
         }
+        if gan_eval:
+            to_return['loss'] = self._eval_loss,
+        else:
+            to_return['loss'] = self._loss,
         if update:
             # if update is False it is for the generator evaluation
             to_return['train_op'] = self._train_op
@@ -505,6 +507,7 @@ class PointerGenerator(object):
         self, sess, batch, enc_states, dec_in_state,
         samples, sample_targets, sample_padding_mask, rewards, update=True
     ):
+        # this can be combined with evaluation method
         feed_dict = {
             # for the encoder
             self.enc_batch_extend_vocab: batch.enc_batch_extend_vocab,
@@ -546,11 +549,10 @@ class PointerGenerator(object):
         """
         feed_dict = self._make_feed_dict(batch, just_enc=True)
         # feed the batch into the placeholders
-        (enc_states, dec_in_state, global_step) = sess.run(
+        (enc_states, dec_in_state) = sess.run(
             [
                 self.enc_states,
                 self.dec_in_state,
-                self.global_step
             ],
             feed_dict
         )  # run the encoder
@@ -584,7 +586,7 @@ class PointerGenerator(object):
 
     def run_decode_onestep(self, sess, enc_batch_extend_vocab, max_art_oovs,
                            latest_tokens, enc_states, enc_padding_mask,
-                           dec_init_states, prev_coverage):
+                           dec_init_states, prev_coverage, method="bs"):
         """For beam search decoding. Run the decoder for one step.
 
         Args:
@@ -598,6 +600,7 @@ class PointerGenerator(object):
           from the previous timestep
           prev_coverage: List of np arrays. The coverage vectors from the
           previous timestep. List of None if not using coverage.
+          method: can be bs standing for beam search and mc representing monte carlo
 
         Returns:
           ids: top 2k ids. shape [beam_size, 2*beam_size]
@@ -620,6 +623,8 @@ class PointerGenerator(object):
         new_h = np.concatenate(hiddens, axis=0)  # shape [batch_size,hidden_dim]
         new_dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
 
+        batch_size = enc_states.shape[0]
+
         feed = {
             self.enc_states: enc_states,
             self.enc_padding_mask: enc_padding_mask,
@@ -630,13 +635,17 @@ class PointerGenerator(object):
         }
 
         to_return = {
-          "ids": self._topk_ids,
-          "probs": self._topk_log_probs,
           "states": self._dec_out_state,
           "attn_dists": self.attn_dists,
           "final_dists": self.final_dists,
           "p_gens": self.p_gens,
         }
+
+        if method == "bs":
+            to_return["ids"] = self._topk_id
+            to_return["probs"] = self._topk_log_probs
+        elif method == "mc":
+            to_return["ran_id"] = self._ran_id
 
         if self.hps.coverage:
             feed[self.prev_coverage] = prev_coverage
@@ -649,25 +658,35 @@ class PointerGenerator(object):
         new_states = [
             tf.contrib.rnn.LSTMStateTuple(
                 results['states'].c[i, :], results['states'].h[i, :])
-            for i in xrange(FLAGS.beam_size)]
+            for i in xrange(batch_size)]
 
-        # Convert singleton list containing a tensor to a list of k arrays
-        assert len(results['attn_dists']) == 1
-        attn_dists = results['attn_dists'][0].tolist()
+        if method == "bs":
+            sample_ids = results["ids"]
+            probs = results["probs"]
 
-        # Convert singleton list containing a tensor to a list of k arrays
-        assert len(results['p_gens']) == 1
-        p_gens = results['p_gens'][0].tolist()
+            # Convert singleton list containing a tensor to a list of k arrays
+            assert len(results['attn_dists']) == 1
+            attn_dists = results['attn_dists'][0].tolist()
+
+            # Convert singleton list containing a tensor to a list of k arrays
+            assert len(results['p_gens']) == 1
+            p_gens = results['p_gens'][0].tolist()
+        else:
+            sample_ids = results["ran_id"]
+            probs = None
+
+            attn_dists = None
+            p_gens = None
 
         # Convert the coverage tensor to a list length k containing the coverage
         # vector for each hypothesis
         if FLAGS.coverage:
             new_coverage = results['coverage'].tolist()
-            assert len(new_coverage) == FLAGS.beam_size
+            assert len(new_coverage) == batch_size
         else:
-            new_coverage = [None for _ in xrange(FLAGS.beam_size)]
+            new_coverage = [None for _ in xrange(enc_states.shape[1])]
 
-        return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
+        return sample_ids, probs, new_states, attn_dists, p_gens, new_coverage
 
     def g_optimizer(self, *args, **kwargs):
         return tf.train.AdamOptimizer(*args, **kwargs)

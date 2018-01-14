@@ -145,7 +145,7 @@ class Rollout(object):
                     ps = False
                 samples_chars = gen_vocab2dis_vocab(
                     samples_without_start, gen_vocab, article_oovs,
-                    dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, print_sample=ps)
+                    dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING)
                 feed = {
                     discriminator.inputs: samples_chars,
                     discriminator.conditions: art_chars}
