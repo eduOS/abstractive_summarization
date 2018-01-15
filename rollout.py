@@ -140,12 +140,12 @@ class Rollout(object):
                 # the last token reward
                 samples_without_start = [s[1:].tolist() for s in samples]
                 if i == 0:
-                    ps = "beam_search in rollout"
+                    ps = "multinomial in rollout"
                 else:
                     ps = False
                 samples_chars = gen_vocab2dis_vocab(
                     samples_without_start, gen_vocab, article_oovs,
-                    dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING)
+                    dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, print_sample=ps)
                 feed = {
                     discriminator.inputs: samples_chars,
                     discriminator.conditions: art_chars}

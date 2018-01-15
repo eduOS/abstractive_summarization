@@ -127,7 +127,7 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 
 tf.app.flags.DEFINE_integer('gan_iter', 200000, 'how many times to run the gan')
 tf.app.flags.DEFINE_integer('gan_gen_iter', 2, 'in each gan step run how many times the generator')
-tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many times the generator')
+tf.app.flags.DEFINE_integer('gan_dis_iter', 4, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 3, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
 tf.app.flags.DEFINE_integer('sample_num', 4, 'beam size for beam search decoding.')
@@ -428,6 +428,7 @@ def main(argv):
             g_losses = []
             current_speed = []
             for it in range(hps_gan.gan_gen_iter):
+                print(colored("gan %s" % it, 'yellow'))
                 start_time = time.time()
                 batch = gen_batcher_train.next_batch()
 
@@ -450,16 +451,16 @@ def main(argv):
                         [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
                     for samples in n_samples]
                 results = generator.run_gan_batch(
-                    sess, batch, enc_states, dec_in_state,
-                    n_samples, n_sample_targets, n_targets_padding_mask, n_rewards)
+                    sess, batch, n_samples, n_sample_targets, n_targets_padding_mask, n_rewards)
 
                 gen_global_step = results["global_step"]
 
                 # for visualization
                 g_loss = results["loss"]
                 if not math.isnan(g_loss):
-                    print(colored('a nan in gan loss', 'red'))
                     g_losses.append(g_loss)
+                else:
+                    print(colored('a nan in gan loss', 'red'))
                 current_speed.append(time.time() - start_time)
 
             # Test

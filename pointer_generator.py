@@ -24,6 +24,7 @@ import sys
 import time
 import numpy as np
 import tensorflow as tf
+from termcolor import colored
 from attention_decoder import attention_decoder
 # from share_function import tableLookup
 from six.moves import xrange
@@ -75,10 +76,10 @@ class PointerGenerator(object):
         # in gan training all three modes of the generator are used:
         # decoding for the generating process; training for the tuning and
         # evaluation for its evaluation
-        self.k_sample_targets = tf.placeholder(tf.int32, [hps.beam_size, batch_size, hps.max_dec_steps], name='sample_targets')
-        self.k_sample_targets_mask = tf.placeholder(tf.float32, [hps.beam_size, batch_size, hps.max_dec_steps], name='the_padding_mask_of_the_sample_targets')
-        self.k_samples = tf.placeholder(tf.int32, [hps.beam_size, batch_size, hps.max_dec_steps], name='samples')
-        self.k_rewards = tf.placeholder(tf.float32, shape=[hps.beam_size, batch_size, hps.max_dec_steps])
+        self.k_sample_targets = tf.placeholder(tf.int32, [FLAGS.sample_num, batch_size, hps.max_dec_steps], name='k_sample_targets')
+        self.k_sample_targets_mask = tf.placeholder(tf.float32, [FLAGS.sample_num, batch_size, hps.max_dec_steps], name='k_padding_mask_of_the_sample_targets')
+        self.k_samples = tf.placeholder(tf.int32, [FLAGS.sample_num, batch_size, hps.max_dec_steps], name='k_samples')
+        self.k_rewards = tf.placeholder(tf.float32, shape=[FLAGS.sample_num, batch_size, hps.max_dec_steps], name="k_rewards")
 
         # ------------------------ placeholders for evaluation
         # decoder part
@@ -88,7 +89,7 @@ class PointerGenerator(object):
             self.prev_coverage = tf.placeholder(tf.float32, [None, None], name='prev_coverage')
             # so this need not to be reloaded and taken gradient hps
 
-    def _make_feed_dict(self, batch, just_enc=False, gan_eval=False):
+    def _make_feed_dict(self, batch, just_enc=False, gan_eval=False, gan=False):
         """Make a feed dictionary mapping parts of the batch to the appropriate
         placeholders.
 
@@ -109,7 +110,7 @@ class PointerGenerator(object):
             feed_dict[self.dec_padding_mask] = batch.dec_padding_mask
             if gan_eval:
                 feed_dict[self._eval_dec_batch] = batch.dec_batch
-            else:
+            elif not gan:
                 feed_dict[self._dec_batch] = batch.dec_batch
         return feed_dict
 
@@ -360,14 +361,14 @@ class PointerGenerator(object):
                         self._loss + hps.cov_loss_wt * self._coverage_loss
 
             with tf.variable_scope('gan_loss'):
-                gan_loss = []
+                k_gan_losses = []
                 for k in range(len(k_sample_targets_ls)):
                     gan_loss_per_step = get_loss(
                         k_sample_final_dists_ls[k], k_sample_targets_ls[k],
                         k_sample_targets_mask_ls[k], k_rewards_ls[k])
-                    gan_loss.append(_avg(gan_loss_per_step, k_sample_targets_mask_ls[k]))
+                    k_gan_losses.append(_avg(gan_loss_per_step, k_sample_targets_mask_ls[k]))
 
-                self.gan_loss = sum(gan_loss) / len(gan_loss)
+                self.gan_loss = tf.reduce_mean(tf.stack(k_gan_losses))
 
         # We run decode beam search mode one decoder step at a time
         # log_dists is a singleton list containing shape (batch_size,
@@ -477,7 +478,7 @@ class PointerGenerator(object):
             decoder_scope = self._add_seq2seq()
         self.least_val_loss = tf.Variable(1000.0, name='least_val_loss', trainable=False)
         t1 = time.time()
-        print('Time to build graph: %i seconds', t1 - t0)
+        print(colored('Time to build graph: %s seconds' % (t1 - t0), "yellow"))
         return decoder_scope
 
     def run_one_batch(self, sess, batch, update=True, gan_eval=False):
@@ -506,16 +507,16 @@ class PointerGenerator(object):
         self, sess, batch, samples, sample_targets,
         sample_padding_mask, rewards, update=True, gan_eval=False
     ):
-        feed_dict = self._make_feed_dict(batch, gan_eval=gan_eval)
+        feed_dict = self._make_feed_dict(batch, gan_eval=gan_eval, gan=True)
 
         # this can be combined with evaluation method
-        feed_dict = {
+        feed_dict.update({
             # for the decoder
             self.k_samples: samples,
             self.k_sample_targets: sample_targets,
             self.k_sample_targets_mask: sample_padding_mask,
             self.k_rewards: rewards,
-        }
+        })
 
         to_return = {
             'global_step': self.global_step,
