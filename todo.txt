@@ -1,0 +1,65 @@
+1. finish the gan: the generator and discriminator updating [check]
+2. change all lstm to gru, I have known the ins and outs of lstm, especially the lstmstatetuple then this expires. [check]
+3. stop when decoding in gan training [check]
+4. the loss of the gan training [check]
+5. seperate rollout parameters from those of generator add a gan mode, delete any mode in the graph but keep those which are outside of it [check]
+6. review the code from the beginning to the end carefully
+7. coverage
+8. the machenism to decide when to stop decoding while rolling out
+9. add modes outside the graph and delete them inside it [check]
+10. add the eval to the training to early stop the training according to two rules by chengyu
+11. the dictionaries are different, batches of words should be transfered into characters and the dictionary is hence different(should be reencoded) [check]
+  1. keep in mind that due to the oovs ids should be transfered to words and then back to ids
+12. beam search in pointer decoder is outputting only one sample, then either the beam search should be changed or new batches should be created before calculating the rewards [check]
+  rewriting the beam search needs lots of work, I should first take the workaround to just create a new batch 
+13. make ending and stop decoding and others all 0 if possible
+  for this repo in the decoder:
+    the input: start_decode_id + sequence
+    the target: sequence + end_decode_id
+  while decoding in the decode process, the words after the stop sign is cutted
+15. batch_size and oovs may cause issues while decoding [check]
+16. compatibility between decode and gan in beam_search, or just support batch sized beam search and delete the decode mode in batcher [check]
+14. shuffle the generated sample before putting into the discriminator [check]
+17. positive and negative samples, the strategy to train GAN
+18. graph compatibility among different modes in chenyu's code
+19. process traditional chinese and nonprintable characters in the material and then the corpus and the vocabulary should be updated
+20. make a build vocabulary module to cntk
+21. what should the input be in each attention decoding process? the same as the previous word in the input or the previous output; while training it is the former and decoding it is the latter, but how about rollout?
+22. choose a conference from the following:
+  https://mp.weixin.qq.com/s?__biz=MzIxMjAzNDY5Mg==&mid=2650791318&idx=1&sn=d26c946de53ebad482d1e0fbe5dc3b02&chksm=8f47487db830c16b438967f001247553084448f7ee00d1bf8cbfac5a8a0468a1c890d6c95e0a#rd
+  1. https://2017.icml.cc/
+  2. https://www.cicling.org/
+23. evaluation and checkpoint
+  add the evaluation to the generator and terminate it when necessary
+24. rollout in the graph with attention and copymechanism? what should the rollout like?
+25. add enc_padding_mask to the attention [check]
+26. beam search is too slow, true batch based beam search should be implemented
+27. corpus remove punc
+28. TODO: keep the [unk] and such words in the vocab transform func [check]
+29. two inputs but with different scalability
+30. decode the not pointer generator option in the graph
+31. separate the discriminator graph and the generator graph but load them together in order to train then separately [check]
+32. train my own vocabulary for the discriminator
+33. rollout weights decay
+34. the beam search is too slow thus a multithread function should be added
+35. it seems that using two dictionaries is less efficient in using the reward
+36. what should the validation of the generator be in processing the gan, cross entropy or rouge etc.?
+37. initialize the variables in the graph but cannot be loaded from the checkpoint
+38. update the validation dataset with the improvement of the quality of the generated sample
+39. while processing the data, I should tokenize the article into sentences first and then segment them into words.
+40. vocabulary should be rebuilt because there were traditional chinese in corpus when building it
+41. add the reinforcement rouge reward
+42. collect some keywords from the long content to form a dynamic vocabulary, but how to make use of those keywords remains a problem
+43. the rollout can be move out from the graph to make it less error-prone
+
+# problems
+1. cannot end
+    mask is wrong, mask should cover the stop token
+2. generate repetative sentences
+3. the discriminator assign high scores to very bad unseen samples
+4. trash samples
+  1) only update one side
+  2) multiple D and G
+  3) matchmaking ranking
+  4) add noise
+
