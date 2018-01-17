@@ -75,7 +75,7 @@ def get_best_loss_from_chpt(val_dir):
 
 
 def save_ckpt(sess, model, best_loss, model_dir, model_saver,
-              val_batcher, val_dir, val_saver, global_step, gan_eval=False):
+              val_batcher, val_dir, val_saver, global_step):
     """
     save model to model dir or evaluation directory
     """
@@ -91,7 +91,7 @@ def save_ckpt(sess, model, best_loss, model_dir, model_saver,
         val_batch = val_batcher.next_batch()
         if not val_batch:
             break
-        results_val = model.run_one_batch(sess, val_batch, update=False, gan_eval=gan_eval)
+        results_val = model.run_one_batch(sess, val_batch, update=False, gan_eval=True)
         loss_eval = results_val["loss"]
         # why there exists nan?
         if not math.isnan(loss_eval):

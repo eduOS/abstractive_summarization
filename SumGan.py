@@ -42,7 +42,7 @@ tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate deca
 # ------------------------------------- discriminator
 
 # Model parameters
-tf.app.flags.DEFINE_integer("layer_size", 512, "Size of each model layer.")
+tf.app.flags.DEFINE_integer("layer_size", 300, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("conv_layers", 2, "Number of convolution layers in the model.")
 tf.app.flags.DEFINE_integer("pool_layers", 2, "Number of pooling layers in the model.")
 tf.app.flags.DEFINE_integer("kernel_size", 3, "The kernel size of the filters along the sentence length dimension.")
@@ -94,14 +94,14 @@ tf.app.flags.DEFINE_boolean('update_gen', True, 'to decide if to train generator
 
 # Hyperparameters
 tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
-tf.app.flags.DEFINE_integer('emb_dim', 128, 'dimension of word embeddings')
+tf.app.flags.DEFINE_integer('emb_dim', 300, 'dimension of word embeddings')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
 tf.app.flags.DEFINE_integer('max_enc_steps', 75, 'max timesteps of encoder (max source text tokens)')  # 400
 tf.app.flags.DEFINE_integer('max_dec_steps', 12, 'max timesteps of decoder (max summary tokens)')  # 100
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 3, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
-tf.app.flags.DEFINE_integer('gen_vocab_size', 50000, 'Size of vocabulary. These will be read from the vocabulary file in'
+tf.app.flags.DEFINE_integer('gen_vocab_size', 100000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
 tf.app.flags.DEFINE_float('gen_lr', 0.0005, 'learning rate')
@@ -127,7 +127,7 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 
 tf.app.flags.DEFINE_integer('gan_iter', 200000, 'how many times to run the gan')
 tf.app.flags.DEFINE_integer('gan_gen_iter', 2, 'in each gan step run how many times the generator')
-tf.app.flags.DEFINE_integer('gan_dis_iter', 4, 'in each gan step run how many times the generator')
+tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 3, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
 tf.app.flags.DEFINE_integer('sample_num', 4, 'beam size for beam search decoding.')
@@ -362,7 +362,18 @@ def main(argv):
         # gen_dir = ensure_exists(FLAGS.model_dir)
         # temp_saver = tf.train.Saver(
         #     var_list=[v for v in all_variables if "generator" in v.name and "Adagrad" not in v.name])
-        utils.load_ckpt(gen_saver, sess, gen_dir)
+        ckpt_path = utils.load_ckpt(gen_saver, sess, gen_dir)
+        print('going to restore embeddings from checkpoint')
+        if not ckpt_path:
+            emb_path = join_path(FLAGS.model_dir, "generator", "init_embed")
+            if emb_path:
+                generator.saver.restore(
+                    sess,
+                    tf.train.get_checkpoint_state(emb_path).model_checkpoint_path
+                )
+                print(colored("successfully restored embeddings form %s" % emb_path, 'green'))
+            else:
+                print(colored("failed to restore embeddings form %s" % emb_path, 'red'))
 
     elif FLAGS.mode in ["decode", "train_gan"]:
         print("Restoring the generator model from the best checkpoint...")
@@ -380,7 +391,7 @@ def main(argv):
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
         ckpt = utils.load_ckpt(dis_saver, sess, dis_dir)
         if not ckpt:
-            discriminator.init_emb(sess, join_path(FLAGS.model_dir, "init_embed"))
+            discriminator.init_emb(sess, join_path(FLAGS.model_dir, "discriminator", "init_embed"))
 
     # --------------- train models ---------------
     if FLAGS.mode != "pretrain_dis":
@@ -428,7 +439,6 @@ def main(argv):
             g_losses = []
             current_speed = []
             for it in range(hps_gan.gan_gen_iter):
-                print(colored("gan %s" % it, 'yellow'))
                 start_time = time.time()
                 batch = gen_batcher_train.next_batch()
 
@@ -465,14 +475,14 @@ def main(argv):
 
             # Test
             # if FLAGS.gan_gen_iter and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
-            if 0 and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
+            if i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1:
                 print('Going to test the generator.')
                 current_speed = sum(current_speed) / (len(current_speed) * hps_gen.batch_size)
                 everage_g_loss = sum(g_losses) / len(g_losses)
                 # one more process hould be opened for the evaluation
                 eval_loss, gen_best_loss = save_ckpt(
                     sess, generator, gen_best_loss, gan_dir, gan_saver,
-                    gen_batcher_val, val_dir, val_saver, gen_global_step, gan_eval=True)
+                    gen_batcher_val, val_dir, val_saver, gen_global_step)
 
                 if eval_loss:
                     print(
@@ -500,9 +510,8 @@ def main(argv):
             dis_accuracies = []
             for d_gan in range(hps_gan.gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
-                print()
                 enc_states, dec_in_state, k_samples_words, _ = decoder.mc_generate(
-                    batch, top_k=FLAGS.beam_size)
+                    batch, s_num=hps_gan.sample_num)
                 # shuould first tanslate to words to avoid unk
                 articles_oovs = batch.art_oovs
                 for samples_words in k_samples_words:
@@ -538,6 +547,7 @@ def main(argv):
                     results = discriminator.run_one_batch(sess, inputs[1], conditions[1], targets[1])
                     dis_accuracies.append(results["accuracy"].item())
 
+                ave_dis_acc = sum(dis_accuracies) / len(dis_accuracies)
                 if d_gan == hps_gan.gan_dis_iter - 1:
                     if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:
                         dis_best_loss = sum(dis_losses) / len(dis_losses)
@@ -545,8 +555,10 @@ def main(argv):
                         dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
                     print_dashboard("GAN Discriminator", results["global_step"].item(), hps_dis.batch_size, hps_dis.dis_vocab_size,
                                     results["loss"].item(), 0.00, 0.00, 0.00)
-                    print("Average training accuracy: \t%.4f" %
-                          (sum(dis_accuracies) / len(dis_accuracies)))
+                    print("Average training accuracy: \t%.4f" % ave_dis_acc)
+
+                if ave_dis_acc > 0.9:
+                    break
 
     # --------------- decoding samples ---------------
     elif FLAGS.mode == "decode":

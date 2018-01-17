@@ -12,6 +12,7 @@ import collections
 import os.path
 from codecs import open
 from cntk.tokenizer import JiebaTokenizer
+from utils import sourceline2words
 from cntk.constants.punctuation import Punctuation
 from cntk.standardizer import Standardizer
 import re
@@ -53,9 +54,7 @@ def read_text_file(text_file):
 
 
 def process_line(line):
-    line = standardizor.set_sentence(line).standardize('all').digits().sentence
-    lst = tokenizer.sentence2words(line, punc=False)
-    return lst
+    return sourceline2words(line)
 
 
 def get_pairs_from_lcsts(filePath, segment=True):

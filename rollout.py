@@ -102,7 +102,7 @@ class Rollout(object):
         #     dis_vocab, self._gen_hps.max_dec_steps, STOP_DECODING))
         k_rewards = []
 
-        for samples in k_samples:
+        for k, samples in enumerate(k_samples):
             rewards = []
             for i in range(rollout_num):
                 for given_num in range(2, self._gen_hps.max_dec_steps+1):
@@ -139,7 +139,7 @@ class Rollout(object):
 
                 # the last token reward
                 samples_without_start = [s[1:].tolist() for s in samples]
-                if i == 0:
+                if i == 0 and k == 0:
                     ps = "multinomial in rollout"
                 else:
                     ps = False

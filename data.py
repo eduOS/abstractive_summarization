@@ -81,6 +81,7 @@ class Vocab(object):
                 #   # raise Exception(
                 #   #     '<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t be in the vocab file, but %s is' % w)
                 if w in self._word_to_id:
+                    print(colored("%s already in the vocab, escape.." % w, "red"))
                     continue
                     # raise Exception('Duplicated word in vocabulary file: %s' % w)
                 self._word_to_id[w], self._id_to_word[len(self._id_to_word)] = len(self._word_to_id), w

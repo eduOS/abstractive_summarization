@@ -6,6 +6,7 @@ from __future__ import division
 
 import tensorflow as tf
 import numpy as np
+from termcolor import colored
 import data
 from six.moves import xrange
 
@@ -103,13 +104,13 @@ def run_monte_carlo_search(sess, model, vocab, batch, s_num=10):
     # this can be optimized into multithread
     for k in xrange(batch_size):
         hyps = batch_hyps[k]
+        assert len(hyps) == s_num
         enc_batch_extend_vocab = np.tile(batch.enc_batch_extend_vocab[k], (s_num, 1))
         enc_padding_mask = np.tile(batch.enc_padding_mask[k], (s_num, 1))
         enc_states_ = np.tile(enc_states[k], (s_num, 1, 1))
-        samples = []
         steps = 0
 
-        while steps < FLAGS.max_dec_steps and len(samples) < s_num:
+        while steps < FLAGS.max_dec_steps:
             # latest token produced by each hypothesis
             latest_tokens = [h.latest_token for h in hyps]
             if latest_tokens == [stop_id for h in hyps]:
@@ -138,6 +139,7 @@ def run_monte_carlo_search(sess, model, vocab, batch, s_num=10):
                 dec_init_states=states, prev_coverage=prev_coverage,
                 method="mc"
             )
+            steps += 1
 
             num_orig_hyps = len(hyps)
             _hyps = []
@@ -154,6 +156,7 @@ def run_monte_carlo_search(sess, model, vocab, batch, s_num=10):
 
             hyps = _hyps
 
+        assert len(hyps) == s_num, colored("Hypothesis should be %s but given %s" % (s_num, len(hyps)), "red")
         k_hyps.append(hyps)
 
     # Return the hypothesis with highest average log prob

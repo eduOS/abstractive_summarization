@@ -31,9 +31,7 @@ import json
 from codecs import open
 # import pyrouge
 # import gen_utils
-import data
 import numpy as np
-import random
 import logging
 from six.moves import xrange
 from data import PAD_TOKEN
@@ -114,11 +112,12 @@ class Decoder(object):
             outputs_ids = outputs_ids[:, :, 1:]
             padding_mask = padding_mask[:, :, 1:]
 
-        # transfer to (beam size, batch_size, max_dec_steps)
+        # transfer to (s_num, batch_size, max_dec_steps)
         outputs_ids = [np.squeeze(i, 1) for i in np.split(outputs_ids, outputs_ids.shape[1], 1)]
         padding_mask = [
             np.squeeze(i, 1)
             for i in np.split(padding_mask, padding_mask.shape[1], 1)]
+        assert len(outputs_ids) == s_num
 
         return enc_states, dec_in_state, outputs_ids, padding_mask
 

@@ -83,7 +83,7 @@ class PointerGenerator(object):
 
         # ------------------------ placeholders for evaluation
         # decoder part
-        self._eval_dec_batch = tf.placeholder(tf.int32, [batch_size, max_dec_steps], name='dec_batch')
+        self._eval_dec_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='eval_dec_batch')
 
         if hps.mode in ["decode", 'train_gan'] and hps.coverage:
             self.prev_coverage = tf.placeholder(tf.float32, [None, None], name='prev_coverage')
@@ -99,6 +99,8 @@ class PointerGenerator(object):
           encoder.
           update: only for the evaluation and training of the generator in gan training
         """
+        if gan_eval:
+            gan = True
         feed_dict = {}
         feed_dict[self.enc_batch] = batch.enc_batch
         feed_dict[self.enc_lens] = batch.enc_lens
@@ -296,6 +298,7 @@ class PointerGenerator(object):
             with tf.variable_scope('embeddings'):
                 self.embeddings = tf.get_variable(
                     'embeddings', [self._vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+                self.saver = tf.train.Saver({"embeddings": self.embeddings})
                 emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
                 # for gen training(mode is pretrain_gen) and
                 # beam searching(mode is decode or train_gan)

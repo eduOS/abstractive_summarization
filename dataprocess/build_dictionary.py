@@ -3,12 +3,15 @@ import numpy
 import sys
 from cntk.tokenizer import text2charlist
 from cntk.tokenizer import JiebaTokenizer
+from cntk.cleanser import Cleanser
+from utils import sourceline2words
 from cntk.standardizer import Standardizer
 from codecs import open
 
 from collections import OrderedDict
 tokenizer = JiebaTokenizer()
 standardizor = Standardizer()
+cleanser = Cleanser()
 
 """
 build vocabulary from
@@ -20,23 +23,20 @@ build vocabulary from
 def main():
     mode = sys.argv[1]
     word_freqs = OrderedDict()
-    worddict = OrderedDict()
-    if mode == "word":
-        worddict['[PAD]'] = sys.maxint
-        worddict['[UNK]'] = sys.maxint
-        worddict['[STOP]'] = sys.maxint
-        worddict['[START]'] = sys.maxint
+    # worddict['[PAD]'] = sys.maxint
+    # worddict['[UNK]'] = sys.maxint
+    # worddict['[STOP]'] = sys.maxint
+    # worddict['[START]'] = sys.maxint
 
     assert len(sys.argv) > 3, "numbers of args must be more then 4"
     for filename in sys.argv[2:-1]:
         print('Processing', filename)
         with open(filename, 'r', 'utf-8') as f:
             for line in f:
-                if line.strip().startswith("<"):
+                if not line or line.strip().startswith("<"):
                     continue
-                line = standardizor.set_sentence(line).standardize('all').digits().sentence
                 if mode == "word":
-                    words_in = tokenizer.sentence2words(line, punc=False)
+                    words_in = sourceline2words(line)
                 elif mode == "char":
                     words_in = text2charlist(line)
                 for w in words_in:
@@ -50,11 +50,12 @@ def main():
     # ipdb.set_trace()
     sorted_idx = numpy.argsort(freqs)
     # print sorted_idx
-    sorted_words = [words[ii] for ii in sorted_idx[::-1]]
+    must_include = ['PAD', 'UNK', 'STOP', 'START'] if mode == 'word' else ['PAD', 'UNK']
+    sorted_words = must_include + [words[ii] for ii in sorted_idx[::-1]]
+    sorted_freq = len(must_include) * [1] + [freqs[ii] for ii in sorted_idx[::-1]]
 
     with open('%s' % sys.argv[-1], 'w', 'utf-8') as f:
-        for ii, ww in enumerate(sorted_words):
-            worddict[ww] = ii
+        for ii, ww in zip(sorted_freq, sorted_words):
             f.write(ww + " " + str(ii) + "\n")
 
     print('Done')
