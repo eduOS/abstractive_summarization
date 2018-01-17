@@ -50,7 +50,7 @@ def main():
     # ipdb.set_trace()
     sorted_idx = numpy.argsort(freqs)
     # print sorted_idx
-    must_include = ['PAD', 'UNK', 'STOP', 'START'] if mode == 'word' else ['PAD', 'UNK']
+    must_include = ['[PAD]', '[UNK]', '[STOP]', '[START]'] if mode == 'word' else ['[PAD]', '[UNK]']
     sorted_words = must_include + [words[ii] for ii in sorted_idx[::-1]]
     sorted_freq = len(must_include) * [1] + [freqs[ii] for ii in sorted_idx[::-1]]
 

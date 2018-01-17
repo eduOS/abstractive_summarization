@@ -49,7 +49,8 @@ tf.app.flags.DEFINE_integer("kernel_size", 3, "The kernel size of the filters al
 tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
 tf.app.flags.DEFINE_integer("dis_vocab_size", 10000, "vocabulary size.")
-tf.app.flags.DEFINE_string("dis_vocab", "dis_vocab", "vocabulary size.")
+tf.app.flags.DEFINE_string("dis_vocab_file", "dis_vocab", "the path of the discriminator vocabulary.")
+tf.app.flags.DEFINE_string("vocab_type", "char", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_integer("num_models", 3, "Size of each model layer. The actural size is doubled.")
 
@@ -71,6 +72,7 @@ tf.app.flags.DEFINE_string("val_dir", "val", "Training directory.")
 tf.app.flags.DEFINE_string(
     'data_path', './data/', 'Path expression to tf.Example datafiles and vocabulary \
     Can include wildcards to access multiple datafiles.')
+tf.app.flags.DEFINE_string("gen_vocab_file", "vocab", "the path of the generator vocabulary.")
 
 #  data_path/gen_vocab: vocabulary for the generator
 #  data_path/dis_vocab: vocabulary for the generator
@@ -251,6 +253,7 @@ def main(argv):
         'coverage',
         'emb_dim',
         'rand_unif_init_mag',
+        'gen_vocab_file',
         'gen_vocab_size',
         'hidden_dim',
         'gen_lr',
@@ -272,15 +275,16 @@ def main(argv):
     hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
 
     print("Building vocabulary for generator ...")
-    gen_vocab = Vocab(join_path(hps_gen.data_path, 'gen_vocab'), hps_gen.gen_vocab_size)
+    gen_vocab = Vocab(join_path(hps_gen.data_path, hps_gen.gen_vocab_file), hps_gen.gen_vocab_size)
 
     hparam_dis = [
         'mode',
+        'vocab_type',
         'model_dir',
         'dis_vocab_size',
         'steps_per_checkpoint',
         'learning_rate_decay_factor',
-        'dis_vocab',
+        'dis_vocab_file',
         'num_class',
         'layer_size',
         'conv_layers',
@@ -308,6 +312,10 @@ def main(argv):
     hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
     hps_dis = hps_dis._replace(max_enc_steps=hps_dis.max_enc_steps * 2)
     hps_dis = hps_dis._replace(max_dec_steps=hps_dis.max_dec_steps * 2)
+    if hps_gen.gen_vocab_file == hps_dis.dis_vocab_file:
+        hps_dis = hps_dis._replace(vocab_type="word")
+        hps_dis = hps_dis._replace(layer_size=hps_gen.emb_dim)
+        hps_dis = hps_dis._replace(dis_vocab_size=hps_gen.gen_vocab_size)
     if FLAGS.mode == "train_gan":
         hps_gen = hps_gen._replace(batch_size=hps_gen.batch_size * hps_dis.num_models)
 
@@ -319,8 +327,7 @@ def main(argv):
 
     if FLAGS.mode != "pretrain_gen":
         print("Building vocabulary for discriminator ...")
-        dis_vocab = Vocab(join_path(hps_dis.data_path, hps_dis.dis_vocab), hps_dis.dis_vocab_size)
-    # the decode mode is refering to the decoding process of the generator
+        dis_vocab = Vocab(join_path(hps_dis.data_path, hps_dis.dis_vocab_file), hps_dis.dis_vocab_size)
     if FLAGS.mode in ['train_gan', 'pretrain_dis']:
         with tf.variable_scope("discriminator"), tf.device("/gpu:0"):
             discriminator = Seq2ClassModel(hps_dis)
@@ -391,7 +398,10 @@ def main(argv):
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
         ckpt = utils.load_ckpt(dis_saver, sess, dis_dir)
         if not ckpt:
-            discriminator.init_emb(sess, join_path(FLAGS.model_dir, "discriminator", "init_embed"))
+            if hps_dis.vocab_type == "word":
+                discriminator.init_emb(sess, join_path(FLAGS.model_dir, "generator", "init_embed"))
+            else:
+                discriminator.init_emb(sess, join_path(FLAGS.model_dir, "discriminator", "init_embed"))
 
     # --------------- train models ---------------
     if FLAGS.mode != "pretrain_dis":
@@ -515,22 +525,27 @@ def main(argv):
                 # shuould first tanslate to words to avoid unk
                 articles_oovs = batch.art_oovs
                 for samples_words in k_samples_words:
-                    samples_chars = gen_vocab2dis_vocab(
-                        samples_words, gen_vocab, articles_oovs,
-                        dis_vocab, hps_dis.max_dec_steps, STOP_DECODING)
                     dec_batch_words = batch.target_batch
-                    dec_batch_chars = gen_vocab2dis_vocab(
-                        dec_batch_words, gen_vocab, articles_oovs, dis_vocab, hps_dis.max_dec_steps, STOP_DECODING)
                     conditions_words = batch.enc_batch_extend_vocab
-                    conditions_chars = gen_vocab2dis_vocab(
-                        conditions_words, gen_vocab, articles_oovs,
-                        dis_vocab, hps_dis.max_enc_steps, PAD_TOKEN)
-                    # the unknown in target
+                    if hps_dis.vocab_type == "char":
+                        samples = gen_vocab2dis_vocab(
+                            samples_words, gen_vocab, articles_oovs,
+                            dis_vocab, hps_dis.max_dec_steps, STOP_DECODING)
+                        dec_batch = gen_vocab2dis_vocab(
+                            dec_batch_words, gen_vocab, articles_oovs, dis_vocab, hps_dis.max_dec_steps, STOP_DECODING)
+                        conditions = gen_vocab2dis_vocab(
+                            conditions_words, gen_vocab, articles_oovs,
+                            dis_vocab, hps_dis.max_enc_steps, PAD_TOKEN)
+                    else:
+                        samples = samples_words
+                        dec_batch = dec_batch_words
+                        conditions = conditions_words
+                        # the unknown in target
 
-                    inputs = np.concatenate([samples_chars, dec_batch_chars], 0)
-                    conditions = np.concatenate([conditions_chars, conditions_chars], 0)
+                    inputs = np.concatenate([samples, dec_batch], 0)
+                    conditions = np.concatenate([conditions, conditions], 0)
 
-                    targets = [[1, 0] for _ in samples_chars] + [[0, 1] for _ in dec_batch_chars]
+                    targets = [[1, 0] for _ in samples] + [[0, 1] for _ in dec_batch]
                     targets = np.array(targets)
                     # randomize the samples
                     assert len(inputs) == len(conditions) == len(targets), "lengthes of the inputs, conditions and targests should be the same."

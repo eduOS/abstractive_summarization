@@ -106,7 +106,10 @@ class Seq2ClassModel(object):
         accuracy.append(acy)
         loss_cv.append(tf.expand_dims(loss, 0))
         var_dict = {}
-        var_dict["embed/char_embedding"] = tf.get_variable("embed/char_embedding")
+        if self.hps.vocab_type == "word":
+            var_dict["embeddings"] = tf.get_variable("embed/embeddings")
+        else:
+            var_dict["embed/char_embedding"] = tf.get_variable("embed/embeddings")
         self.loaders.append(tf.train.Saver(var_dict))
     loss_train = tf.reduce_mean(tf.concat(loss_train, 0))
     loss_cv = tf.reduce_mean(tf.concat(loss_cv, 0))
@@ -128,12 +131,12 @@ class Seq2ClassModel(object):
     condition_length = conditions.get_shape()[1].value
     # embedding params
     with tf.variable_scope("embed"):
-      char_embedding = tf.contrib.framework.model_variable("char_embedding",
-                                                           shape=[self.vocab_size, self.layer_size],
-                                                           dtype=tf.float32,
-                                                           initializer=tf.truncated_normal_initializer(0.0, 0.01),
-                                                           collections=[tf.GraphKeys.WEIGHTS],
-                                                           trainable=True)
+      embeddings = tf.contrib.framework.model_variable("embeddings",
+                                                       shape=[self.vocab_size, self.layer_size],
+                                                       dtype=tf.float32,
+                                                       initializer=tf.truncated_normal_initializer(0.0, 0.01),
+                                                       collections=[tf.GraphKeys.WEIGHTS],
+                                                       trainable=True)
       class_output_weights = tf.contrib.framework.model_variable("class_output_weights",
                                                                  shape=[self.num_class, self.layer_size],
                                                                  dtype=tf.float32,
@@ -144,8 +147,8 @@ class Seq2ClassModel(object):
     with tf.variable_scope("encoder"):
       input_masks = tf.greater(inputs, 0)
       condition_masks = tf.greater(conditions, 0)
-      emb_inputs = tf.nn.embedding_lookup(char_embedding, inputs)
-      emb_conditions = tf.nn.embedding_lookup(char_embedding, conditions)
+      emb_inputs = tf.nn.embedding_lookup(embeddings, inputs)
+      emb_conditions = tf.nn.embedding_lookup(embeddings, conditions)
       # substitute pads with zeros
       emb_inputs = tf.reshape(tf.where(tf.reshape(input_masks, [-1]),
                                        tf.reshape(emb_inputs, [-1, self.layer_size]),

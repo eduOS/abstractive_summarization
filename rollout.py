@@ -94,9 +94,12 @@ class Rollout(object):
 
         article_oovs = source_batch.art_oovs
         art_words = source_batch.enc_batch_extend_vocab
-        art_chars = gen_vocab2dis_vocab(
-            art_words, gen_vocab, article_oovs,
-            dis_vocab, discriminator.hps.max_enc_steps, PAD_TOKEN)
+        if discriminator.hps.vocab_type == "char":
+            articles = gen_vocab2dis_vocab(
+                art_words, gen_vocab, article_oovs,
+                dis_vocab, discriminator.hps.max_enc_steps, PAD_TOKEN)
+        else:
+            articles = art_words
         # abs_chars = np.array(gen_vocab2dis_vocab(
         #     source_batch.target_batch, gen_vocab, article_oovs,
         #     dis_vocab, self._gen_hps.max_dec_steps, STOP_DECODING))
@@ -123,13 +126,16 @@ class Rollout(object):
                     # enc_batch_extend_vocab and the max_art_oovs
                     rollout_samples_words = sess.run(self.gen_summ_ar, feed_dict)
                     # how about multiple generators for one discriminator?
-                    rollout_samples_chars = gen_vocab2dis_vocab(
-                        rollout_samples_words, gen_vocab, article_oovs,
-                        dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, art_words, print_sample=False)
+                    if discriminator.hps.vocab_type == "char":
+                        rollout_samples = gen_vocab2dis_vocab(
+                            rollout_samples_words, gen_vocab, article_oovs,
+                            dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, art_words, print_sample=False)
+                    else:
+                        rollout_samples = rollout_samples_words
 
                     feed = {
-                        discriminator.inputs: rollout_samples_chars,
-                        discriminator.conditions: art_chars}
+                        discriminator.inputs: rollout_samples,
+                        discriminator.conditions: articles}
                     ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
                     ypred = np.array([item[1] for item in ypred_for_auc])
                     if i == 0:
@@ -143,12 +149,15 @@ class Rollout(object):
                     ps = "multinomial in rollout"
                 else:
                     ps = False
-                samples_chars = gen_vocab2dis_vocab(
-                    samples_without_start, gen_vocab, article_oovs,
-                    dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, print_sample=ps)
+                if discriminator.hps.vocab_type == "char":
+                    samples = gen_vocab2dis_vocab(
+                        samples_without_start, gen_vocab, article_oovs,
+                        dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, print_sample=ps)
+                else:
+                    samples = samples_without_start
                 feed = {
-                    discriminator.inputs: samples_chars,
-                    discriminator.conditions: art_chars}
+                    discriminator.inputs: samples,
+                    discriminator.conditions: articles}
                 ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
                 ypred = np.array([item[1] for item in ypred_for_auc])
                 if i == 0:
