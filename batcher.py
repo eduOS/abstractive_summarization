@@ -463,9 +463,12 @@ class GenBatcher(object):
         """read abstract and article pairs directly from file
 
         Args:
-            data_dir: where to find the text files
+            data_path: the data path regex
             single_pass: if the single pass
         """
+        filelist = glob.glob(self._data_path)
+        self.file_count_dict = dict((file, 1) for file in filelist)
+
         while True:
             filelist = glob.glob(self._data_path)  # get the list of datafiles
             if self._mode == "val":
@@ -491,11 +494,12 @@ class GenBatcher(object):
                             continue
                         else:
                             f.close()
+                            self.file_count_dict[f.name] += 1
                             print("closing file %s" % ff)
                             break
                     article_text, abstract_text = art_abs
                     if article_text and abstract_text:
-                        yield (article_text, abstract_text)
+                        yield (article_text, abstract_text, ff)
                     else:
                         print('Found an example with empty article text. Skipping it.')
 

@@ -93,6 +93,7 @@ tf.app.flags.DEFINE_string('log_root', './log/', 'Root directory for all logging
 tf.app.flags.DEFINE_string('dec_dir', '', 'Where to generate the decode results. If false the time stamp is toke.')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in adirectory with this name, under log_root.')
 tf.app.flags.DEFINE_boolean('update_gen', True, 'to decide if to train generator.')
+tf.app.flags.DEFINE_boolean('spaced_repetition', False, 'using the spaced repetition method')
 
 # Hyperparameters
 tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
