@@ -134,21 +134,20 @@ class PointerGenerator(object):
             Each are LSTMStateTuples of shape
             ([batch_size,hidden_dim],[batch_size,hidden_dim])
         """
-        with tf.variable_scope('encoder'):
-            cell_fw = tf.contrib.rnn.LSTMCell(
-                self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
-            cell_bw = tf.contrib.rnn.LSTMCell(
-                self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
-            (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
-                cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
-            # the sequence length of the encoder_inputs varies depending on the
-            # batch, which will make the second dimension of the
-            # encoder_outputs different in different batches
+        cell_fw = tf.contrib.rnn.LSTMCell(
+            self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
+        cell_bw = tf.contrib.rnn.LSTMCell(
+            self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
+        (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
+        # the sequence length of the encoder_inputs varies depending on the
+        # batch, which will make the second dimension of the
+        # encoder_outputs different in different batches
 
-            # concatenate the forwards and backwards states
-            encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
-            # encoder_outputs: [batch_size * beam_size, max_time, output_size*2]
-            # fw_st & bw_st: [batch_size * beam_size, num_hidden]
+        # concatenate the forwards and backwards states
+        encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
+        # encoder_outputs: [batch_size * beam_size, max_time, output_size*2]
+        # fw_st & bw_st: [batch_size * beam_size, num_hidden]
         return encoder_outputs, fw_st, bw_st
 
     def _reduce_states(self, fw_st, bw_st):
@@ -315,7 +314,8 @@ class PointerGenerator(object):
                 ]
 
             # Add the encoder.
-            enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
+            with tf.variable_scope('encoder'):
+                enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
             self.enc_states = enc_outputs
             self.dec_in_state = self._reduce_states(fw_st, bw_st)
 
@@ -363,7 +363,7 @@ class PointerGenerator(object):
                     self._total_loss = \
                         self._loss + hps.cov_loss_wt * self._coverage_loss
 
-            with tf.variable_scope('gan_loss'):
+            with tf.variable_scope('GAN_loss'):
                 k_gan_losses = []
                 for k in range(len(k_sample_targets_ls)):
                     gan_loss_per_step = get_loss(
@@ -387,32 +387,34 @@ class PointerGenerator(object):
             self._ran_id = tf.multinomial(tf.log(self.final_dists), 1)
 
         # for the loss
-        loss_to_minimize = self._total_loss if self.hps.coverage else self._loss
-        trainable_variables = tf.trainable_variables()
-        gradients = tf.gradients(
-            loss_to_minimize, trainable_variables,
-            aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
+        with tf.variable_scope('generator_update'):
+            loss_to_minimize = self._total_loss if self.hps.coverage else self._loss
+            trainable_variables = tf.trainable_variables()
+            gradients = tf.gradients(
+                loss_to_minimize, trainable_variables,
+                aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
 
-        # Clip the gradients
-        with tf.device("/gpu:0"):
-            grads, global_norm = tf.clip_by_global_norm(
-                gradients, self.hps.gen_max_gradient)
+            # Clip the gradients
+            with tf.device("/gpu:0"):
+                grads, global_norm = tf.clip_by_global_norm(
+                    gradients, self.hps.gen_max_gradient)
 
-        # Apply adagrad optimizer
-        optimizer = tf.train.AdamOptimizer(self.hps.gen_lr)
-        with tf.device("/gpu:0"):
-            self._train_op = optimizer.apply_gradients(
-                zip(grads, trainable_variables),
-                global_step=self.global_step)
+            # Apply adagrad optimizer
+            optimizer = tf.train.AdamOptimizer(self.hps.gen_lr)
+            with tf.device("/gpu:0"):
+                self._train_op = optimizer.apply_gradients(
+                    zip(grads, trainable_variables),
+                    global_step=self.global_step)
 
-        # for the loss
-        g_opt = self.g_optimizer(self.hps.gen_lr)
-        trainable_variables = tf.trainable_variables()
-        gradients = tf.gradients(self.gan_loss, trainable_variables,
-                                 aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
-        self.g_grad, _ = tf.clip_by_global_norm(gradients, self.hps.gen_max_gradient)
-        with tf.device("/gpu:0"):
-            self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables), global_step=self.global_step)
+        # for the gan loss
+        with tf.variable_scope('GAN_update'):
+            g_opt = self.g_optimizer(FLAGS.gan_lr)
+            trainable_variables = tf.trainable_variables()
+            gradients = tf.gradients(self.gan_loss, trainable_variables,
+                                     aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
+            self.g_grad, _ = tf.clip_by_global_norm(gradients, self.hps.gen_max_gradient)
+            with tf.device("/gpu:0"):
+                self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables), global_step=self.global_step)
 
         return decoder_scope
 
@@ -506,10 +508,8 @@ class PointerGenerator(object):
             to_return['coverage_loss'] = self._coverage_loss
         return sess.run(to_return, feed_dict)
 
-    def run_gan_batch(
-        self, sess, batch, samples, sample_targets,
-        sample_padding_mask, rewards, update=True, gan_eval=False
-    ):
+    def run_gan_batch(self, sess, batch, samples, sample_targets,
+                      sample_padding_mask, rewards, update=True, gan_eval=False):
         feed_dict = self._make_feed_dict(batch, gan_eval=gan_eval, gan=True)
 
         # this can be combined with evaluation method

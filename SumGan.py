@@ -42,7 +42,7 @@ tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate deca
 # ------------------------------------- discriminator
 
 # Model parameters
-tf.app.flags.DEFINE_integer("layer_size", 300, "Size of each model layer.")
+tf.app.flags.DEFINE_integer("layer_size", 512, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("conv_layers", 2, "Number of convolution layers in the model.")
 tf.app.flags.DEFINE_integer("pool_layers", 2, "Number of pooling layers in the model.")
 tf.app.flags.DEFINE_integer("kernel_size", 3, "The kernel size of the filters along the sentence length dimension.")
@@ -99,7 +99,7 @@ tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 300, 'dimension of word embeddings')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
-tf.app.flags.DEFINE_integer('max_enc_steps', 75, 'max timesteps of encoder (max source text tokens)')  # 400
+tf.app.flags.DEFINE_integer('max_enc_steps', 80, 'max timesteps of encoder (max source text tokens)')  # 400
 tf.app.flags.DEFINE_integer('max_dec_steps', 12, 'max timesteps of decoder (max summary tokens)')  # 100
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 3, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
@@ -133,6 +133,7 @@ tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many t
 tf.app.flags.DEFINE_integer('rollout_num', 3, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
 tf.app.flags.DEFINE_integer('sample_num', 4, 'beam size for beam search decoding.')
+tf.app.flags.DEFINE_float('gan_lr', 0.0005, 'learning rate for the gen in GAN training')
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -147,12 +148,11 @@ if FLAGS.min_dec_steps > FLAGS.max_dec_steps / 2:
 ensure_exists(FLAGS.model_dir)
 
 
-def pretrain_generator(model, batcher, sess, val_batcher, model_saver, val_saver):
+def pretrain_generator(model, batcher, sess, val_batcher, model_saver, model_dir, val_saver, val_dir):
     """Repeatedly runs training iterations, logging loss to screen and writing
     summaries"""
     print("starting run_training")
     best_loss = None  # will hold the best loss achieved so far
-    val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
     best_loss = get_best_loss_from_chpt(val_dir)
     # get the val loss score
     coverage_loss = None
@@ -184,7 +184,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, model_saver, val_saver
         if global_step % FLAGS.steps_per_checkpoint == 0:
             # check if it is the best checkpoint so far
             eval_loss, best_loss = save_ckpt(
-                sess, model, best_loss, hps.model_dir, model_saver,
+                sess, model, best_loss, model_dir, model_saver,
                 val_batcher, val_dir, val_saver, global_step)
 
             # print the print the dashboard
@@ -310,12 +310,13 @@ def main(argv):
             hps_dict[key] = val  # add it to the dict
 
     hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
-    hps_dis = hps_dis._replace(max_enc_steps=hps_dis.max_enc_steps * 2)
-    hps_dis = hps_dis._replace(max_dec_steps=hps_dis.max_dec_steps * 2)
     if hps_gen.gen_vocab_file == hps_dis.dis_vocab_file:
         hps_dis = hps_dis._replace(vocab_type="word")
         hps_dis = hps_dis._replace(layer_size=hps_gen.emb_dim)
         hps_dis = hps_dis._replace(dis_vocab_size=hps_gen.gen_vocab_size)
+    else:
+        hps_dis = hps_dis._replace(max_enc_steps=hps_dis.max_enc_steps * 2)
+        hps_dis = hps_dis._replace(max_dec_steps=hps_dis.max_dec_steps * 2)
     if FLAGS.mode == "train_gan":
         hps_gen = hps_gen._replace(batch_size=hps_gen.batch_size * hps_dis.num_models)
 
@@ -340,6 +341,7 @@ def main(argv):
         'gan_iter',
         'gan_gen_iter',
         'gan_dis_iter',
+        'gan_lr',
         'rollout_num',
         'sample_num',
     ]
@@ -362,9 +364,11 @@ def main(argv):
     sess = tf.Session(config=utils.get_config())
     sess.run(tf.variables_initializer(all_variables))
     if FLAGS.mode == "pretrain_gen":
+        val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
+        model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator'))
         print("Restoring the generator model from the latest checkpoint...")
         gen_saver = tf.train.Saver(
-            max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
+            max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name and "GAN" not in v.name])
         gen_dir = ensure_exists(join_path(FLAGS.model_dir, "generator"))
         # gen_dir = ensure_exists(FLAGS.model_dir)
         # temp_saver = tf.train.Saver(
@@ -386,9 +390,11 @@ def main(argv):
         print("Restoring the generator model from the best checkpoint...")
         dec_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
-        val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
         gan_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir))
+        gan_val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir, FLAGS.val_dir))
         gan_saver = tf.train.Saver(
+            max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
+        gan_val_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         utils.load_ckpt(dec_saver, sess, val_dir, (FLAGS.mode in ["train_gan", "decode"]))
 
@@ -409,7 +415,7 @@ def main(argv):
         decoder = Decoder(sess, generator, gen_vocab)
         gen_batcher_val = GenBatcher("val", gen_vocab, hps_gen, single_pass=True)
         val_saver = tf.train.Saver(max_to_keep=10,
-                                   var_list=[v for v in all_variables if "generator" in v.name])
+                                   var_list=[v for v in all_variables if "generator" in v.name and "GAN" not in v.name])
 
     if FLAGS.mode != "pretrain_gen":
         dis_val_batch_size = hps_dis.batch_size * hps_dis.num_models \
@@ -424,7 +430,7 @@ def main(argv):
         # get reload the
         print('Going to pretrain the generator')
         try:
-            pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, gen_saver, val_saver)
+            pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, gen_saver, model_dir, val_saver, val_dir)
         except KeyboardInterrupt:
             tf.logging.info("Caught keyboard interrupt on worker....")
 
@@ -492,7 +498,7 @@ def main(argv):
                 # one more process hould be opened for the evaluation
                 eval_loss, gen_best_loss = save_ckpt(
                     sess, generator, gen_best_loss, gan_dir, gan_saver,
-                    gen_batcher_val, val_dir, val_saver, gen_global_step)
+                    gen_batcher_val, gan_val_dir, gan_val_saver, gen_global_step)
 
                 if eval_loss:
                     print(

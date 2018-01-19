@@ -51,6 +51,8 @@
 41. add the reinforcement rouge reward
 42. collect some keywords from the long content to form a dynamic vocabulary, but how to make use of those keywords remains a problem
 43. the rollout can be move out from the graph to make it less error-prone
+44. add Q-learning in choosing the copy word and maybe in helping the copy mechenism
+45. repeat those samples with high loss, https://www.supermemo.com/english/ol/nn_train.htm
 
 # problems
 1. cannot end
@@ -62,4 +64,5 @@
   2) multiple D and G
   3) matchmaking ranking
   4) add noise
+
 

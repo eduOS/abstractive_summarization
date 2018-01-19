@@ -35,15 +35,14 @@ def load_ckpt(saver, sess, dire, force=False, lastest_filename="checkpoint"):
             print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
             saver.restore(sess, ckpt_state.model_checkpoint_path)
             return ckpt_state.model_checkpoint_path
-        except Exception as ex:
+        except Exception:
             print(colored("Failed to load checkpoint from %s. " % dire, 'red'))
             try:
                 ckpt_state = tf.train.get_checkpoint_state(dire+'/val', lastest_filename)
                 print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
                 saver.restore(sess, ckpt_state.model_checkpoint_path)
                 return ckpt_state.model_checkpoint_path
-            except Exception as ex:
-                print(ex)
+            except Exception:
                 if not force:
                     print(colored("Failed to load checkpoint from %s also. Training from scratch.." % (dire+'/val'), 'red'))
                     return None

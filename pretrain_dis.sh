@@ -5,5 +5,4 @@ python  SumGan.py \
   --max_steps 20000000 \
   --num_models 3 \
   --early_stop True \
-  --dis_vocab_file dis_vocab \
-  # --dis_vocab vocab \
+  --dis_vocab_file vocab \
