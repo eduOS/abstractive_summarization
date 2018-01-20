@@ -63,14 +63,16 @@ def calc_running_avg_loss(loss, running_avg_loss, step, decay=0.9):
 
 
 def get_best_loss_from_chpt(val_dir):
-    ckpt = tf.train.get_checkpoint_state(val_dir, "checkpoint_best")
+    ckpt = tf.train.get_checkpoint_state(val_dir)
     best_loss = None
     if ckpt:
         reader = pywrap_tensorflow.NewCheckpointReader(ckpt.model_checkpoint_path)
         var_to_shape_map = reader.get_variable_to_shape_map()
         best_loss = reader.get_tensor(
             [key for key in var_to_shape_map if "least_val_loss" in key][0]).item()
-        print("the stored best loss is %s" % best_loss)
+        print(colored("the stored best loss is %s" % best_loss, "green"))
+    else:
+        print(colored("check point not found in %s" % val_dir, "red"))
     return best_loss
 
 

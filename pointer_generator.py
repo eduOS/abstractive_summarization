@@ -352,7 +352,9 @@ class PointerGenerator(object):
                 eval_loss_per_step = get_loss(eval_final_dists, self.target_batch, self.dec_padding_mask)
                 # Apply padding_mask mask and get loss
                 self._loss = _avg(loss_per_step, self.dec_padding_mask)
+                tf.summary.scalar('loss', self._loss)
                 self._eval_loss = _avg(eval_loss_per_step, self.dec_padding_mask)
+                tf.summary.scalar('eval_loss', self._eval_loss)
 
                 # for training of GAN
                 # Calculate coverage loss from the attention distributions
@@ -362,6 +364,7 @@ class PointerGenerator(object):
                             self.attn_dists, self.dec_padding_mask)
                     self._total_loss = \
                         self._loss + hps.cov_loss_wt * self._coverage_loss
+                    tf.summary.scalar('total_loss', self._total_loss)
 
             with tf.variable_scope('GAN_loss'):
                 k_gan_losses = []
@@ -372,6 +375,7 @@ class PointerGenerator(object):
                     k_gan_losses.append(_avg(gan_loss_per_step, k_sample_targets_mask_ls[k]))
 
                 self.gan_loss = tf.reduce_mean(tf.stack(k_gan_losses))
+                tf.summary.scalar('gan_loss', self._gan_loss)
 
         # We run decode beam search mode one decoder step at a time
         # log_dists is a singleton list containing shape (batch_size,

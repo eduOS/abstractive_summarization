@@ -9,6 +9,7 @@ import utils
 import time
 import sys
 import data
+from collections import deque
 from batcher import GenBatcher, DisBatcher
 from decode import Decoder
 from pointer_generator import PointerGenerator
@@ -162,7 +163,10 @@ def pretrain_generator(model, batcher, sess, val_batcher, model_saver, model_dir
     # the eval job keeps a smoother, running average loss to tell it when to
     # implement early stopping
     start_time = time.time()
+    loss_horizen = 5
     counter = 0
+    eval_save_steps = FLAGS.steps_per_checkpoint
+    last_ten_eval_loss = deque(maxlen=loss_horizen)
     while True:  # repeats until interrupted
         batch = batcher.next_batch()
         if batch is None:
@@ -181,11 +185,14 @@ def pretrain_generator(model, batcher, sess, val_batcher, model_saver, model_dir
         running_avg_loss = calc_running_avg_loss(
             np.asscalar(loss), running_avg_loss, global_step)
 
-        if global_step % FLAGS.steps_per_checkpoint == 0:
+        if global_step % eval_save_steps == 0:
             # check if it is the best checkpoint so far
             eval_loss, best_loss = save_ckpt(
                 sess, model, best_loss, model_dir, model_saver,
                 val_batcher, val_dir, val_saver, global_step)
+            last_ten_eval_loss.apend(eval_loss)
+            if len(last_ten_eval_loss) == loss_horizen and min(last_ten_eval_loss) == last_ten_eval_loss[0] and eval_save_steps > 1000:
+                eval_save_steps /= 2
 
             # print the print the dashboard
             current_speed = (time.time() - start_time) / (counter * hps.batch_size)
