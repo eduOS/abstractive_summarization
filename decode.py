@@ -198,7 +198,7 @@ class Decoder(object):
 
                 _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
                 # is the beam_size here 1?
-                outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps[0]]
+                outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps]
 
                 original_articles = batch.original_articles
                 original_abstracts = batch.original_abstracts

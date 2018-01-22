@@ -247,9 +247,10 @@ def run_beam_search(sess, model, vocab, batch, top_k=1):
 
         # Sort hypotheses by average log probability
         hyps_sorted = sort_hyps(results)
-        best_k_hyp = hyps_sorted[:top_k]
         if top_k == 1:
             best_k_hyp = hyps_sorted[0]
+        else:
+            best_k_hyp = hyps_sorted[:top_k]
         best_k_hyps.append(best_k_hyp)
 
     # Return the hypothesis with highest average log prob
