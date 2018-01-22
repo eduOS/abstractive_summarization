@@ -293,7 +293,7 @@ class GenBatcher(object):
         self._mode = mode
         self._single_pass = single_pass
         self._data_path = os.path.join(hps.data_path, mode) + ".txt_*"
-        if self._mode == "val":
+        if self._mode in ["val", "test"]:
             self._single_pass = True
 
         # Initialize a queue of Batches waiting to be used, and a queue of
@@ -360,7 +360,6 @@ class GenBatcher(object):
                         self._batch_queue.qsize(),
                         self._example_queue.qsize()))
             if self._single_pass and self._finished_reading:
-                tf.logging.info("Finished reading dataset in single_pass mode.")
                 return None
 
         batch = self._batch_queue.get()  # get the next Batch
@@ -468,7 +467,7 @@ class GenBatcher(object):
         """
         while True:
             filelist = glob.glob(self._data_path)  # get the list of datafiles
-            if self._mode == "val":
+            if self._mode in ["val", 'test']:
                 assert len(filelist) == 1, \
                     "in val mode the len should be 1 but %s given." % len(filelist)
             assert filelist, ('Error: Empty filelist at %s' % self._data_path)
@@ -489,6 +488,9 @@ class GenBatcher(object):
                             f.seek(0)
                             yield (None, None)
                             continue
+                        elif self._mode == 'test':
+                            yield (None, None)
+                            break
                         else:
                             f.close()
                             print("closing file %s" % ff)
@@ -498,6 +500,9 @@ class GenBatcher(object):
                         yield (article_text, abstract_text)
                     else:
                         print('Found an example with empty article text. Skipping it.')
+
+            if self._mode == "test":
+                break
 
 
 def get_batch(self, data, batch_size, balance=False, put_back=True):

@@ -412,6 +412,7 @@ def main(argv):
     # --------------- train models ---------------
     if FLAGS.mode != "pretrain_dis":
         gen_batcher_train = GenBatcher("train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
+        decoder_batcher = GenBatcher("test", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
         decoder = Decoder(sess, generator, gen_vocab)
         gen_batcher_val = GenBatcher("val", gen_vocab, hps_gen, single_pass=True)
         val_saver = tf.train.Saver(max_to_keep=10,
@@ -588,7 +589,7 @@ def main(argv):
     # --------------- decoding samples ---------------
     elif FLAGS.mode == "decode":
         print('Going to decode from the generator.')
-        decoder.bs_decode(gen_batcher_train)
+        decoder.bs_decode(decoder_batcher)
         print("Finished decoding..")
         # decode for generating corpus for discriminator
 
