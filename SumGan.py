@@ -527,6 +527,9 @@ def main(argv):
                 for samples_words in k_samples_words:
                     dec_batch_words = batch.target_batch
                     conditions_words = batch.enc_batch_extend_vocab
+                    zeros = np.zeros((conditions_words.shape[0], hps_gen.max_enc_steps))
+                    zeros[:, :conditions_words.shape[1]] = conditions_words
+                    conditions_words = zeros
                     if hps_dis.vocab_type == "char":
                         samples = gen_vocab2dis_vocab(
                             samples_words, gen_vocab, articles_oovs,
