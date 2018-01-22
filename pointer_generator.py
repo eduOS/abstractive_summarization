@@ -639,7 +639,7 @@ class PointerGenerator(object):
         }
 
         if method == "bs":
-            to_return["ids"] = self._topk_id
+            to_return["ids"] = self._topk_ids
             to_return["probs"] = self._topk_log_probs
         elif method == "mc":
             to_return["ran_id"] = self._ran_id
