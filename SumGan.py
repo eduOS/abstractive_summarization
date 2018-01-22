@@ -2,7 +2,7 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 import tensorflow as tf
-from collections import namedtuple
+from collections import namedtuple, deque
 import numpy as np
 import datetime
 import utils
@@ -48,7 +48,7 @@ tf.app.flags.DEFINE_integer("pool_layers", 2, "Number of pooling layers in the m
 tf.app.flags.DEFINE_integer("kernel_size", 3, "The kernel size of the filters along the sentence length dimension.")
 tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
-tf.app.flags.DEFINE_integer("dis_vocab_size", 10000, "vocabulary size.")
+tf.app.flags.DEFINE_integer("dis_vocab_size", 100000, "vocabulary size.")
 tf.app.flags.DEFINE_string("dis_vocab_file", "dis_vocab", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_string("vocab_type", "char", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
@@ -133,6 +133,7 @@ tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many t
 tf.app.flags.DEFINE_integer('rollout_num', 3, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
 tf.app.flags.DEFINE_integer('sample_num', 4, 'beam size for beam search decoding.')
+tf.app.flags.DEFINE_float('gan_lr', 0.0005, 'learning rate for the gen in GAN training')
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -153,6 +154,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, model_saver, val_saver
     print("starting run_training")
     best_loss = None  # will hold the best loss achieved so far
     val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
+    model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator'))
     best_loss = get_best_loss_from_chpt(val_dir)
     # get the val loss score
     coverage_loss = None
@@ -162,6 +164,8 @@ def pretrain_generator(model, batcher, sess, val_batcher, model_saver, val_saver
     # the eval job keeps a smoother, running average loss to tell it when to
     # implement early stopping
     start_time = time.time()
+    eval_save_steps = FLAGS.steps_per_checkpoint
+    last_ten_eval_loss = deque(maxlen=10)
     counter = 0
     while True:  # repeats until interrupted
         batch = batcher.next_batch()
@@ -181,11 +185,14 @@ def pretrain_generator(model, batcher, sess, val_batcher, model_saver, val_saver
         running_avg_loss = calc_running_avg_loss(
             np.asscalar(loss), running_avg_loss, global_step)
 
-        if global_step % FLAGS.steps_per_checkpoint == 0:
+        if global_step % eval_save_steps == 0:
             # check if it is the best checkpoint so far
             eval_loss, best_loss = save_ckpt(
-                sess, model, best_loss, hps.model_dir, model_saver,
+                sess, model, best_loss, model_dir, model_saver,
                 val_batcher, val_dir, val_saver, global_step)
+            last_ten_eval_loss.append(eval_loss)
+            if len(last_ten_eval_loss) == 10 and min(last_ten_eval_loss) == last_ten_eval_loss[0] and eval_save_steps > 5000:
+                eval_save_steps -= 1000
 
             # print the print the dashboard
             current_speed = (time.time() - start_time) / (counter * hps.batch_size)
@@ -310,8 +317,6 @@ def main(argv):
             hps_dict[key] = val  # add it to the dict
 
     hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
-    hps_dis = hps_dis._replace(max_enc_steps=hps_dis.max_enc_steps * 2)
-    hps_dis = hps_dis._replace(max_dec_steps=hps_dis.max_dec_steps * 2)
     if hps_gen.gen_vocab_file == hps_dis.dis_vocab_file:
         hps_dis = hps_dis._replace(vocab_type="word")
         hps_dis = hps_dis._replace(layer_size=hps_gen.emb_dim)
@@ -340,6 +345,7 @@ def main(argv):
         'gan_iter',
         'gan_gen_iter',
         'gan_dis_iter',
+        'gan_lr',
         'rollout_num',
         'sample_num',
     ]
@@ -448,7 +454,8 @@ def main(argv):
             # Train the generator for one step
             g_losses = []
             current_speed = []
-            for it in range(hps_gan.gan_gen_iter):
+            # for it in range(hps_gan.gan_gen_iter):
+            for it in range(0):
                 start_time = time.time()
                 batch = gen_batcher_train.next_batch()
 
@@ -485,7 +492,7 @@ def main(argv):
 
             # Test
             # if FLAGS.gan_gen_iter and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
-            if i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1:
+            if 0 and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
                 print('Going to test the generator.')
                 current_speed = sum(current_speed) / (len(current_speed) * hps_gen.batch_size)
                 everage_g_loss = sum(g_losses) / len(g_losses)

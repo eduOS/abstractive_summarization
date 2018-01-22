@@ -406,7 +406,7 @@ class PointerGenerator(object):
                 global_step=self.global_step)
 
         # for the loss
-        g_opt = self.g_optimizer(self.hps.gen_lr)
+        g_opt = self.g_optimizer(FLAGS.gan_lr)
         trainable_variables = tf.trainable_variables()
         gradients = tf.gradients(self.gan_loss, trainable_variables,
                                  aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
