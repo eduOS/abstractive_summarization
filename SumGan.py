@@ -412,12 +412,13 @@ def main(argv):
     # --------------- train models ---------------
     if FLAGS.mode not in ["pretrain_dis", "decode"]:
         gen_batcher_train = GenBatcher("train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
-        decoder_batcher = GenBatcher("test", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
         gen_batcher_val = GenBatcher("val", gen_vocab, hps_gen, single_pass=True)
         val_saver = tf.train.Saver(max_to_keep=10,
                                    var_list=[v for v in all_variables if "generator" in v.name])
+
     if FLAGS.mode == "decode":
         decoder = Decoder(sess, generator, gen_vocab)
+        decoder_batcher = GenBatcher("test", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
 
     if FLAGS.mode not in ["pretrain_gen", "decode"]:
         dis_val_batch_size = hps_dis.batch_size * hps_dis.num_models \
