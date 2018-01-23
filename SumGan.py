@@ -102,7 +102,7 @@ tf.app.flags.DEFINE_integer('emb_dim', 300, 'dimension of word embeddings')
 tf.app.flags.DEFINE_integer('max_enc_steps', 75, 'max timesteps of encoder (max source text tokens)')  # 400
 tf.app.flags.DEFINE_integer('max_dec_steps', 12, 'max timesteps of decoder (max summary tokens)')  # 100
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
-tf.app.flags.DEFINE_integer('min_dec_steps', 3, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
+tf.app.flags.DEFINE_integer('min_dec_steps', 6, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('gen_vocab_size', 100000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
@@ -404,14 +404,14 @@ def main(argv):
                 discriminator.init_emb(sess, join_path(FLAGS.model_dir, "discriminator", "init_embed"))
 
     # --------------- train models ---------------
-    if FLAGS.mode != "pretrain_dis":
+    if FLAGS.mode not in ["pretrain_dis", "decode"]:
         gen_batcher_train = GenBatcher("train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
         decoder = Decoder(sess, generator, gen_vocab)
         gen_batcher_val = GenBatcher("val", gen_vocab, hps_gen, single_pass=True)
         val_saver = tf.train.Saver(max_to_keep=10,
                                    var_list=[v for v in all_variables if "generator" in v.name])
 
-    if FLAGS.mode != "pretrain_gen":
+    if FLAGS.mode not in ["pretrain_gen", "decode"]:
         dis_val_batch_size = hps_dis.batch_size * hps_dis.num_models \
             if hps_dis.mode == "train_gan" else hps_dis.batch_size * hps_dis.num_models * 2
         dis_batcher_val = DisBatcher(

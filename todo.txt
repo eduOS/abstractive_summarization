@@ -62,4 +62,9 @@
   2) multiple D and G
   3) matchmaking ranking
   4) add noise
+5. when should the GAN stop
+6. test results by training 770000 * 16 samples with the evaluation loss being converged to 4.462
+    1). the ROUGE-1 recall is 0.3599 and the precision is 0.4273, then the F-1 is 0.3907
+    2). the copy mechanism: 40.11% of those should be copied are copied or generated, 
+7. discriminator overrate those bad samples(repetitive and etc that the generator would generate in the early stage) which was unseen whilie training
 
