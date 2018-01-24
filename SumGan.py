@@ -134,6 +134,7 @@ tf.app.flags.DEFINE_integer('rollout_num', 3, 'how many times to repeat the roll
 tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
 tf.app.flags.DEFINE_integer('sample_num', 4, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_float('gan_lr', 0.0005, 'learning rate for the gen in GAN training')
+tf.app.flags.DEFINE_float('rouge_reward_ratio', 0.0, 'The importance of rollout in calculating the reward.')
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -348,6 +349,7 @@ def main(argv):
         'gan_lr',
         'rollout_num',
         'sample_num',
+        'rouge_reward_ratio',
     ]
     hps_dict = {}
     for key, val in FLAGS.__flags.iteritems():  # for each flag
@@ -397,6 +399,7 @@ def main(argv):
         gan_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         utils.load_ckpt(dec_saver, sess, val_dir, (FLAGS.mode in ["train_gan", "decode"]))
+        decoder = Decoder(sess, generator, gen_vocab)
 
     if FLAGS.mode in ["pretrain_dis", "train_gan"]:
         dis_saver = tf.train.Saver(
@@ -417,7 +420,6 @@ def main(argv):
                                    var_list=[v for v in all_variables if "generator" in v.name])
 
     if FLAGS.mode == "decode":
-        decoder = Decoder(sess, generator, gen_vocab)
         decoder_batcher = GenBatcher("test", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
 
     if FLAGS.mode not in ["pretrain_gen", "decode"]:
@@ -457,8 +459,8 @@ def main(argv):
             # Train the generator for one step
             g_losses = []
             current_speed = []
-            # for it in range(hps_gan.gan_gen_iter):
-            for it in range(0):
+            # for it in range(0):
+            for it in range(hps_gan.gan_gen_iter):
                 start_time = time.time()
                 batch = gen_batcher_train.next_batch()
 
@@ -467,8 +469,8 @@ def main(argv):
                     batch, include_start_token=True, s_num=hps_gan.sample_num)
                 # get rewards for the samples
                 n_rewards = rollout.get_reward(
-                    sess, gen_vocab, dis_vocab, batch, enc_states,
-                    dec_in_state, n_samples, hps_gan.rollout_num, discriminator)
+                    hps_gan, sess, gen_vocab, dis_vocab, batch, enc_states,
+                    dec_in_state, n_samples, discriminator)
 
                 # fine tune the generator
                 n_sample_targets = [samples[:, 1:] for samples in n_samples]
@@ -524,11 +526,13 @@ def main(argv):
                     )
 
             # Train the discriminator
-            print('Going to train the discriminator.')
             dis_best_loss = 1000
             dis_losses = []
             dis_accuracies = []
-            for d_gan in range(hps_gan.gan_dis_iter):
+            gan_dis_iter = hps_gan.gan_dis_iter if hps_gan.rouge_reward_ratio != 1 else 0
+            if gan_dis_iter:
+                print('Going to train the discriminator.')
+            for d_gan in range(gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
                 enc_states, dec_in_state, k_samples_words, _ = decoder.mc_generate(
                     batch, s_num=hps_gan.sample_num)

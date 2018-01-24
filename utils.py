@@ -212,3 +212,45 @@ def linear3d(args, output_size, bias, bias_start=0.0, scope=None):
         output = res + bias_term
 
     return output
+
+
+def my_lcs(string, sub):
+    """
+    Calculates longest common subsequence for a pair of tokenized strings
+    :param string : list of str : tokens from a string split using whitespace
+    :param sub : list of str : shorter string, also split using whitespace
+    :returns: length (list of int): length of the longest common subsequence between the two strings
+
+    Note: my_lcs only gives length of the longest common subsequence, not the actual LCS
+    """
+    if(len(string) < len(sub)):
+        sub, string = string, sub
+
+    lengths = [[0 for i in range(0, len(sub)+1)] for j in range(0, len(string)+1)]
+
+    for j in range(1, len(sub)+1):
+        for i in range(1, len(string)+1):
+            if(string[i-1] == sub[j-1]):
+                lengths[i][j] = lengths[i-1][j-1] + 1
+            else:
+                lengths[i][j] = max(lengths[i-1][j], lengths[i][j-1])
+
+    return lengths[len(string)][len(sub)]
+
+
+def rouge_l(samples, references, beta=1.2):
+    prec = []
+    rec = []
+    scores = []
+    for s, r in zip(samples, references):
+        lcs = my_lcs(s, r)
+        prec.append(lcs/float(len(s)))
+        rec.append(lcs/float(len(r)))
+
+    for p, r in zip(prec, rec):
+        if(p != 0 and r != 0):
+            score = ((1 + beta**2) * p * r) / float(r + beta**2 * p)
+        else:
+            score = 0.0
+        scores.append(score)
+    return scores

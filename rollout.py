@@ -7,6 +7,7 @@ from tensorflow.python.ops import tensor_array_ops, control_flow_ops
 import numpy as np
 from data import gen_vocab2dis_vocab
 import data
+from utils import rouge_l
 PAD_TOKEN = "[PAD]"
 STOP_DECODING = '[STOP]'
 FLAGS = tf.app.flags.FLAGS
@@ -24,12 +25,12 @@ class Rollout(object):
 
         # placeholder definition
         self.summ = tf.placeholder(
-            tf.int32, shape=[self._gen_hps.batch_size, self._gen_hps.max_dec_steps+1])
+            tf.int32, shape=[self._gen_hps.batch_size, self._gen_hps.max_dec_steps+1], name="summ")
         self.cell_c = tf.placeholder(
-            tf.float32, shape=[self._gen_hps.batch_size, self._gen_hps.hidden_dim])
+            tf.float32, shape=[self._gen_hps.batch_size, self._gen_hps.hidden_dim], name="cell_c")
         self.cell_h = tf.placeholder(
-            tf.float32, shape=[self._gen_hps.batch_size, self._gen_hps.hidden_dim])
-        self.given_num = tf.placeholder(tf.int32)
+            tf.float32, shape=[self._gen_hps.batch_size, self._gen_hps.hidden_dim], name="cell_h")
+        self.given_num = tf.placeholder(tf.int32, name="given_num")
         # self.enc_states = tf.placeholder(
         #     tf.float32, shape=[self._gen_hps.batch_size, self._gen_hps.max_enc_steps,
         #                        self._gen_hps.hidden_dim])
@@ -86,11 +87,13 @@ class Rollout(object):
         # self.gen_summ_ar = tf.stop_gradient(self.gen_summ_ar)
         # batch_size x seq_length
 
-    def get_reward(self, sess, gen_vocab, dis_vocab, source_batch,
+    def get_reward(self, hps_gan, sess, gen_vocab, dis_vocab, source_batch,
                    enc_states, dec_in_state, k_samples,
-                   rollout_num, discriminator):
+                   discriminator):
         # dec_in_state is [batch_size, hidden_dim * 2] and that should be
         # changed to [batch_size, hidden_dim] for the attention_decoder
+        rollout_num = hps_gan.rollout_num
+        rouge_ratio = hps_gan.rouge_reward_ratio
 
         article_oovs = source_batch.art_oovs
         art_words = source_batch.enc_batch_extend_vocab
@@ -99,14 +102,18 @@ class Rollout(object):
                 art_words, gen_vocab, article_oovs,
                 dis_vocab, discriminator.hps.max_enc_steps, PAD_TOKEN)
         else:
-            articles = art_words
+            conditions_words = art_words
+            zeros = np.zeros((conditions_words.shape[0], discriminator.hps.max_enc_steps))
+            zeros[:, :conditions_words.shape[1]] = conditions_words
+            articles = zeros
         # abs_chars = np.array(gen_vocab2dis_vocab(
         #     source_batch.target_batch, gen_vocab, article_oovs,
         #     dis_vocab, self._gen_hps.max_dec_steps, STOP_DECODING))
         k_rewards = []
 
         for k, samples in enumerate(k_samples):
-            rewards = []
+            dis_rewards = []
+            rouge_rewards = []
             for i in range(rollout_num):
                 for given_num in range(2, self._gen_hps.max_dec_steps+1):
                     feed_dict = {}
@@ -133,39 +140,62 @@ class Rollout(object):
                     else:
                         rollout_samples = rollout_samples_words
 
+                    if rouge_ratio != 1:
+                        feed = {
+                            discriminator.inputs: rollout_samples,
+                            discriminator.conditions: articles}
+                        ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
+                        ypred = np.array([item[1] for item in ypred_for_auc])
+                        if i == 0:
+                            dis_rewards.append(ypred)
+                        else:
+                            dis_rewards[given_num - 2] += ypred
+                    if rouge_ratio:
+                        rpred = rouge_l(rollout_samples.tolist(), source_batch.dec_batch.tolist())
+                        if i == 0:
+                            rouge_rewards.append(rpred)
+                        else:
+                            rouge_rewards[given_num - 2] += np.array(rpred)
+
+                # print(samples)
+                if rouge_ratio != 1:
+                    samples_without_start = [s[1:].tolist() for s in samples]
+                    # the last token reward
+                    if i == 0 and k == 0:
+                        ps = "multinomial in rollout"
+                    else:
+                        ps = False
+                    if discriminator.hps.vocab_type == "char":
+                        _samples = gen_vocab2dis_vocab(
+                            samples_without_start, gen_vocab, article_oovs,
+                            dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, print_sample=ps)
+                    else:
+                        _samples = samples_without_start
                     feed = {
-                        discriminator.inputs: rollout_samples,
+                        discriminator.inputs: _samples,
                         discriminator.conditions: articles}
                     ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
                     ypred = np.array([item[1] for item in ypred_for_auc])
                     if i == 0:
-                        rewards.append(ypred)
+                        dis_rewards.append(ypred)
                     else:
-                        rewards[given_num - 2] += ypred
+                        dis_rewards[self._gen_hps.max_dec_steps - 1] += ypred
+                if rouge_ratio:
+                    rpred = rouge_l(rollout_samples.tolist(), source_batch.dec_batch.tolist())
+                    if i == 0:
+                        rouge_rewards.append(rpred)
+                    else:
+                        rouge_rewards[self._gen_hps.max_dec_steps - 1] += np.array(rpred)
 
-                # the last token reward
-                samples_without_start = [s[1:].tolist() for s in samples]
-                if i == 0 and k == 0:
-                    ps = "multinomial in rollout"
-                else:
-                    ps = False
-                if discriminator.hps.vocab_type == "char":
-                    samples = gen_vocab2dis_vocab(
-                        samples_without_start, gen_vocab, article_oovs,
-                        dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, print_sample=ps)
-                else:
-                    samples = samples_without_start
-                feed = {
-                    discriminator.inputs: samples,
-                    discriminator.conditions: articles}
-                ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
-                ypred = np.array([item[1] for item in ypred_for_auc])
-                if i == 0:
-                    rewards.append(ypred)
-                else:
-                    rewards[self._gen_hps.max_dec_steps - 1] += ypred
+            if rouge_ratio == 1:
+                rewards = np.transpose(np.array(rouge_rewards))
+            elif rouge_ratio == 0:
+                rewards = np.transpose(np.array(dis_rewards))
+            else:
+                rewards = (1 - rouge_ratio)*np.transpose(np.array(dis_rewards)) \
+                    + rouge_ratio*np.transpose(np.array(rouge_rewards))
 
-            k_rewards.append(np.transpose(np.array(rewards)) / (1.0 * rollout_num))
+            k_rewards.append(rewards / (1.0 * rollout_num))
             # batch_size x seq_length
 
         return k_rewards
