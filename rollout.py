@@ -9,6 +9,7 @@ from data import gen_vocab2dis_vocab
 from data import strip_pads
 import data
 from utils import rouge_l
+from termcolor import colored
 PAD_TOKEN = "[PAD]"
 STOP_DECODING = '[STOP]'
 FLAGS = tf.app.flags.FLAGS
@@ -49,7 +50,9 @@ class Rollout(object):
         emb_summ_ar = emb_summ_ar.unstack(self.emb_summ)
 
         summ_ar = tensor_array_ops.TensorArray(dtype=tf.int32, size=self._gen_hps.max_dec_steps + 1)
+        # _summ = tf.slice(, [1, 0], [-1, -1])
         summ_ar = summ_ar.unstack(tf.transpose(self.summ, perm=[1, 0]))
+
         ######################################################################
 
         self.gen_summ_ar = tensor_array_ops.TensorArray(
@@ -117,6 +120,7 @@ class Rollout(object):
             rouge_rewards = []
             for ir in range(rollout_num):
                 for given_num in range(2, self._gen_hps.max_dec_steps+1):
+
                     feed_dict = {}
                     feed_dict[self.summ] = samples
                     # this is the source
@@ -151,16 +155,17 @@ class Rollout(object):
                             dis_rewards.append(ypred)
                         else:
                             dis_rewards[given_num - 2] += ypred
-                    if rouge_ratio:
+
+                    if rouge_ratio != 0:
                         rpred = rouge_l(strip_pads(rollout_samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
-                                        source_batch.dec_batch.tolist())
+                                        source_batch.dec_batch.tolist(), rs=rollout_samples)
                         if ir == 0:
                             rouge_rewards.append(rpred)
                         else:
                             rouge_rewards[given_num - 2] += np.array(rpred)
 
+                samples_without_start = [s[1:].tolist() for s in samples]
                 if rouge_ratio != 1:
-                    samples_without_start = [s[1:].tolist() for s in samples]
                     # the last token reward
                     if ir == 0 and k == 0:
                         ps = "multinomial in rollout"
@@ -182,9 +187,9 @@ class Rollout(object):
                     else:
                         dis_rewards[self._gen_hps.max_dec_steps - 1] += ypred
                 if rouge_ratio:
-                    rpred = rouge_l(strip_pads(samples.tolist(),
+                    rpred = rouge_l(strip_pads(samples_without_start,
                                                gen_vocab.word2id(STOP_DECODING)),
-                                    source_batch.dec_batch.tolist())
+                                    source_batch.dec_batch.tolist(), rs=rollout_samples)
                     if ir == 0:
                         rouge_rewards.append(rpred)
                     else:

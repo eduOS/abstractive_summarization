@@ -238,11 +238,15 @@ def my_lcs(string, sub):
     return lengths[len(string)][len(sub)]
 
 
-def rouge_l(samples, references, beta=1.2):
+def rouge_l(samples, references, beta=1.2, rs=None):
     prec = []
     rec = []
     scores = []
-    for s, r in zip(samples, references):
+    for n, (s, r) in enumerate(zip(samples, references)):
+        if len(s) == 0 or len(r) == 0:
+            prec.append(0)
+            rec.append(0)
+            continue
         lcs = my_lcs(s, r)
         prec.append(lcs/float(len(s)))
         rec.append(lcs/float(len(r)))

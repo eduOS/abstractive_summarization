@@ -39,7 +39,7 @@ tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training
 tf.app.flags.DEFINE_boolean('restore_best_model', False, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_integer('steps_per_checkpoint', 10000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decay by this rate')
-tf.app.flags.DEFINE_float('sample_rate', 0.0001, 'Learning rate decay by this rate')
+tf.app.flags.DEFINE_float('sample_rate', 0.0004, 'Learning rate decay by this rate')
 
 # ------------------------------------- discriminator
 
@@ -104,7 +104,7 @@ tf.app.flags.DEFINE_integer('emb_dim', 300, 'dimension of word embeddings')
 tf.app.flags.DEFINE_integer('max_enc_steps', 75, 'max timesteps of encoder (max source text tokens)')  # 400
 tf.app.flags.DEFINE_integer('max_dec_steps', 12, 'max timesteps of decoder (max summary tokens)')  # 100
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
-tf.app.flags.DEFINE_integer('min_dec_steps', 6, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
+tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('gen_vocab_size', 100000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
@@ -130,11 +130,11 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 # ------------------------------------- gan
 
 tf.app.flags.DEFINE_integer('gan_iter', 200000, 'how many times to run the gan')
-tf.app.flags.DEFINE_integer('gan_gen_iter', 20, 'in each gan step run how many times the generator')
+tf.app.flags.DEFINE_integer('gan_gen_iter', 5, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many times the generator')
-tf.app.flags.DEFINE_integer('rollout_num', 3, 'how many times to repeat the rollout process.')
+tf.app.flags.DEFINE_integer('rollout_num', 12, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
-tf.app.flags.DEFINE_integer('sample_num', 4, 'beam size for beam search decoding.')
+tf.app.flags.DEFINE_integer('sample_num', 2, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_float('gan_lr', 0.0005, 'learning rate for the gen in GAN training')
 tf.app.flags.DEFINE_float('rouge_reward_ratio', 0.0, 'The importance of rollout in calculating the reward.')
 
@@ -152,7 +152,7 @@ if FLAGS.min_dec_steps > FLAGS.max_dec_steps / 2:
 ensure_exists(FLAGS.model_dir)
 
 
-def pretrain_generator(model, batcher, sess, val_batcher, model_saver, val_saver):
+def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver):
     """Repeatedly runs training iterations, logging loss to screen and writing
     summaries"""
     print("starting run_training")
@@ -193,7 +193,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, model_saver, val_saver
             # check if it is the best checkpoint so far
             eval_loss, best_loss = save_ckpt(
                 sess, model, best_loss, model_dir, model_saver,
-                val_batcher, val_dir, val_saver, global_step)
+                batcher_val, val_dir, val_saver, global_step)
             last_ten_eval_loss.append(eval_loss)
             if len(last_ten_eval_loss) == 10 and min(last_ten_eval_loss) == last_ten_eval_loss[0] and eval_save_steps > 5000:
                 eval_save_steps -= 1000
@@ -207,7 +207,7 @@ def pretrain_generator(model, batcher, sess, val_batcher, model_saver, val_saver
                             coverage_loss if coverage_loss else "not set")
 
 
-def pretrain_discriminator(sess, model, eval_batcher, dis_vocab, batcher, saver):
+def pretrain_discriminator(sess, model, batcher_val, dis_vocab, batcher, saver):
     """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
     # TODO: load two pretained model: the generator and the embedding
     eval_loss_best = sys.float_info.max
@@ -234,7 +234,7 @@ def pretrain_discriminator(sess, model, eval_batcher, dis_vocab, batcher, saver)
         if current_step % hps.steps_per_checkpoint == 0:
             # Print statistics for the previous epoch.
             eval_accuracy, eval_loss, stop_flag, eval_loss_best = dump_chpt(
-                eval_batcher, hps, model, sess, saver, eval_loss_best, hps.early_stop)
+                batcher_val, hps, model, sess, saver, eval_loss_best, hps.early_stop)
             if stop_flag:
                 break
             print_dashboard("Discriminator", results["global_step"], hps.batch_size,
@@ -467,6 +467,7 @@ def main(argv):
             g_losses = []
             current_speed = []
             # for it in range(0):
+            print('Going to train the generator.')
             for it in range(hps_gan.gan_gen_iter):
                 start_time = time.time()
                 batch = gen_batcher_train.next_batch()
@@ -505,7 +506,7 @@ def main(argv):
             # Test
             # if FLAGS.gan_gen_iter and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
             if i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1:
-                print('Going to test the generator.')
+                print('Going to test the loss of the generator.')
                 current_speed = sum(current_speed) / (len(current_speed) * hps_gen.batch_size)
                 everage_g_loss = sum(g_losses) / len(g_losses)
                 # one more process hould be opened for the evaluation
@@ -532,10 +533,14 @@ def main(argv):
                             )
                     )
 
-            if i_gan % 1000 == 0 or i_gan == hps_gan.gan_iter - 1:
+            if i_gan % 200 == 0 or i_gan == hps_gan.gan_iter - 1:
+                print("Going to evaluate rouge.")
                 ave_rouge, best_rouge = check_rouge(sess, decoder, best_rouge, gen_batcher_val,
                                                     gan_val_dir, gan_val_saver, gen_global_step, sample_rate=FLAGS.sample_rate)
-                print("The best rouge is %s and the average rouge is %s" % (best_rouge, ave_rouge))
+                print("The best rouge is %s and the average rouge is %s %s" % (
+                    best_rouge, ave_rouge,
+                    datetime.datetime.now().strftime("on %m-%d at %H:%M")
+                ))
 
             # Train the discriminator
             dis_best_loss = 1000
@@ -547,7 +552,7 @@ def main(argv):
             for d_gan in range(gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
                 enc_states, dec_in_state, k_samples_words, _ = decoder.mc_generate(
-                    batch, s_num=hps_gan.sample_num)
+                    batch, s_num=hps_gan.sample_num, include_start_token=True)
                 # shuould first tanslate to words to avoid unk
                 articles_oovs = batch.art_oovs
                 for samples_words in k_samples_words:

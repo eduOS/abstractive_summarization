@@ -102,6 +102,7 @@ def run_monte_carlo_search(sess, model, vocab, batch, s_num=10):
     # [STOP] token)
 
     # this can be optimized into multithread
+    resample_num = 0
     for k in xrange(batch_size):
         hyps = batch_hyps[k]
         assert len(hyps) == s_num
@@ -139,6 +140,9 @@ def run_monte_carlo_search(sess, model, vocab, batch, s_num=10):
                 dec_init_states=states, prev_coverage=prev_coverage,
                 method="mc"
             )
+            if steps < FLAGS.min_dec_steps and [stop_id] in ran_id.tolist():
+                resample_num += 1
+                continue
             steps += 1
 
             num_orig_hyps = len(hyps)
@@ -158,6 +162,11 @@ def run_monte_carlo_search(sess, model, vocab, batch, s_num=10):
 
         assert len(hyps) == s_num, colored("Hypothesis should be %s but given %s" % (s_num, len(hyps)), "red")
         k_hyps.append(hyps)
+
+    if resample_num > (batch_size / 2):
+        print(colored(
+            "resampled %s times, the min_dec_steps is %s"
+            % (resample_num, FLAGS.min_dec_steps), "red"))
 
     # Return the hypothesis with highest average log prob
     return enc_states, dec_in_state, k_hyps
