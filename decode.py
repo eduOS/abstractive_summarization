@@ -209,6 +209,8 @@ class Decoder(object):
 
                 sample = randint(0, int(1 / sample_rate) if sample_rate else 0)
                 if sample == 1 or save2file:
+                    if sample == 1:
+                        print()
                     art_oovs = [batch.art_oovs[i]
                                 for i in xrange(self._hps.batch_size)]
                     decoded_words_list = data.outputsids2words(
@@ -224,7 +226,7 @@ class Decoder(object):
                         except ValueError:
                             pass
                         decoded_output = ' '.join(decoded_words)
-                        if sample:
+                        if sample == 1:
                             print(decoded_output)
                         elif save2file:
                             decoded_outputs.append(decoded_output)
