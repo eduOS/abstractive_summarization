@@ -284,9 +284,10 @@ class GenBatcher(object):
           data_path: tf.Example filepattern.
           vocab: Vocabulary object
           hps: hyperparameters
-          single_pass: If True, run through the dataset exactly once (useful for
-          when you want to run evaluation on the dev or test set). Otherwise
-          generate random batches indefinitely (useful for training).
+          single_pass: it only works for training dataset, for evaluation and testing
+          it is permenently true. if it is true, a None batch will return, and the files
+          will only be read once; however if it is False, multiple times will be read and
+          multiple threads are generated.
         """
         self._vocab = vocab
         self._hps = hps
@@ -488,10 +489,12 @@ class GenBatcher(object):
                             f.seek(0)
                             yield (None, None)
                             continue
-                        elif self._mode == 'test':
+                        elif self._mode == 'test' or self._single_pass:
+                            f.close()
                             yield (None, None)
                             break
                         else:
+                            # for training and not single_pass
                             f.close()
                             print("closing file %s" % ff)
                             break
@@ -501,7 +504,7 @@ class GenBatcher(object):
                     else:
                         print('Found an example with empty article text. Skipping it.')
 
-            if self._mode == "test":
+            if self._mode == "test" or (self._mode == 'train' and self._single_pass):
                 break
 
 

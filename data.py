@@ -27,6 +27,7 @@ import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 from cntk.tokenizer import text2charlist
 from codecs import open
+from itertools import dropwhile
 
 # <s> and </s> are used in the data files to segment the abstracts into
 # sentences. They don't receive vocab ids.
@@ -385,3 +386,17 @@ def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab,
         print('\n')
     assert len(samples_words) == len(samples_ids)
     return np.array(samples_ids)
+
+
+def strip_pads(id_batch, STOP_ID):
+    """
+    """
+    new_batch = []
+    for sample_ids in id_batch:
+        try:
+            fst_stop_idx = sample_ids.index(STOP_ID)  # index of the (first) [STOP] symbol
+            sample_ids = sample_ids[:fst_stop_idx]
+        except ValueError:
+            sample_ids = sample_ids
+        new_batch.append(sample_ids)
+    return new_batch

@@ -68,3 +68,6 @@
     2). the copy mechanism: 40.83% of those should be copied are copied or generated, 
 7. discriminator overrate those bad samples(repetitive and etc that the generator would generate in the early stage) which was unseen whilie training
 
+# error
+1. a list of float cannot be joined
+2. two list cannot be updated by += but if the right side is a numpy it is ok

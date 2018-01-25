@@ -22,8 +22,11 @@ from __future__ import absolute_import
 from __future__ import division
 
 import os
+from utils import rouge_l
+from data import strip_pads
 import time
 import tensorflow as tf
+from random import randint
 import beam_search
 import monte_carlo_search
 import data
@@ -34,7 +37,7 @@ from codecs import open
 import numpy as np
 import logging
 from six.moves import xrange
-from data import PAD_TOKEN
+from data import PAD_TOKEN, STOP_DECODING
 # import numpy as np
 FLAGS = tf.app.flags.FLAGS
 
@@ -59,34 +62,27 @@ class Decoder(object):
         self._sess = sess
         self._hps = model.hps
 
-        if self._hps.single_pass:
-            # Make a descriptive decode directory name
-            # this is something of the form "ckpt-123456"
-            # ckpt_name = "ckpt-" + ckpt_path.split('-')[-1]
-            ckpt_name = str(time.time())[:10]
-            self._decode_dir = os.path.join(
-                self._hps.log_root, get_decode_dir_name(self._hps, ckpt_name))
-            if os.path.exists(self._decode_dir):
-                raise Exception(
-                    "single_pass decode directory %s should not already exist" %
-                    self._decode_dir)
-
-        else:  # Generic decode dir name
-            self._decode_dir = os.path.join(self._hps.log_root, "decode")
+    def prepare_dir(self):
+        ckpt_name = str(time.time())[:10]
+        self._decode_dir = os.path.join(
+            self._hps.log_root, get_decode_dir_name(self._hps, ckpt_name))
+        if os.path.exists(self._decode_dir):
+            raise Exception(
+                "single_pass decode directory %s should not already exist" %
+                self._decode_dir)
 
         # Make the decode dir if necessary
         if not os.path.exists(self._decode_dir):
             os.mkdir(self._decode_dir)
 
-        if self._hps.single_pass:
-            # Make the dirs to contain output written in the correct format for
-            # pyrouge
-            self._rouge_ref_dir = os.path.join(self._decode_dir, "reference")
-            if not os.path.exists(self._rouge_ref_dir):
-                os.mkdir(self._rouge_ref_dir)
-            self._rouge_dec_dir = os.path.join(self._decode_dir, "decoded")
-            if not os.path.exists(self._rouge_dec_dir):
-                os.mkdir(self._rouge_dec_dir)
+        # Make the dirs to contain output written in the correct format for
+        # pyrouge
+        self._rouge_ref_dir = os.path.join(self._decode_dir, "reference")
+        if not os.path.exists(self._rouge_ref_dir):
+            os.mkdir(self._rouge_ref_dir)
+        self._rouge_dec_dir = os.path.join(self._decode_dir, "decoded")
+        if not os.path.exists(self._rouge_dec_dir):
+            os.mkdir(self._rouge_dec_dir)
 
     def mc_generate(self, batch, include_start_token=False, s_num=4):
         # Run beam search to get best Hypothesis
@@ -158,12 +154,15 @@ class Decoder(object):
 
         return enc_states, dec_in_state, np.array(ran_ids), np.array(id_mappings)
 
-    def bs_decode(self, batcher):
+    def bs_decode(self, batcher, save2file=True, single_pass=True, sample_rate=0):
         """Decode examples until data is exhausted (if self._hps.single_pass) and
         return, or decode indefinitely, loading latest checkpoint at regular
         intervals"""
+
+        rouge_scores = []
         # t0 = time.time()
-        if self._hps.single_pass:
+        if save2file:
+            self.prepare_dir()
             ref_file = os.path.join(
                 self._rouge_ref_dir, "reference.txt")
             decoded_file = os.path.join(
@@ -173,6 +172,7 @@ class Decoder(object):
             ref_f = open(ref_file, "a", 'utf-8')
             dec_f = open(decoded_file, "a", 'utf-8')
             ove_f = open(overview_file, "a", 'utf-8')
+
         counter = 0
         try:
             while True:
@@ -180,10 +180,12 @@ class Decoder(object):
                 batch = batcher.next_batch()
                 if batch is None:
                     # finished decoding dataset in single_pass mode
-                    assert self._hps.single_pass, (
+                    assert single_pass, (
                         "Dataset exhausted, but we are not in single_pass mode")
                     print("Decoder has finished reading dataset for single_pass.")
-                    if self._hps.single_pass:
+                    if not save2file:
+                        return np.mean(np.array(rouge_scores))
+                    else:
                         ref_f.close()
                         dec_f.close()
                         ove_f.close()
@@ -198,54 +200,63 @@ class Decoder(object):
 
                 _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
                 # is the beam_size here 1?
-                outputs_ids = [[int(t) for t in hyp.tokens[1:]] for hyp in best_hyps]
+                outputs_ids = [[t for t in hyp.tokens[1:]] for hyp in best_hyps]
 
                 original_articles = batch.original_articles
                 original_abstracts = batch.original_abstracts
                 # original_abstract_sents = batch.original_abstracts_sents[0]
                 # list of strings
 
-                art_oovs = [batch.art_oovs[i]
-                            for i in xrange(self._hps.batch_size)]
+                sample = randint(0, int(1 / sample_rate) if sample_rate else 0)
+                if sample == 1 or save2file:
+                    art_oovs = [batch.art_oovs[i]
+                                for i in xrange(self._hps.batch_size)]
+                    decoded_words_list = data.outputsids2words(
+                        outputs_ids, self._vocab, art_oovs)
+
+                    decoded_outputs = []
+
+                    # Remove the [STOP] token from decoded_words, if necessary
+                    for decoded_words in decoded_words_list:
+                        try:
+                            fst_stop_idx = decoded_words.index(data.STOP_DECODING)
+                            decoded_words = decoded_words[:fst_stop_idx]
+                        except ValueError:
+                            pass
+                        decoded_output = ' '.join(decoded_words)
+                        if sample:
+                            print(decoded_output)
+                        elif save2file:
+                            decoded_outputs.append(decoded_output)
+
+                if not save2file:
+                    rouges = rouge_l(
+                        strip_pads(batch.dec_batch.tolist(),
+                                   self._vocab.word2id(STOP_DECODING)),
+                        outputs_ids)
+                    rouge_scores += rouges
+                    continue
+
                 # articles_withunks = data.show_art_oovs(original_articles, self._vocab)
                 # abstracts_withunks = data.show_abs_oovs(original_abstracts, self._vocab, art_oovs)
 
-                # Run beam search to get best Hypothesis
+                # write ref summary and decoded summary to file, to eval with
+                # pyrouge later
+                # self.write_for_discriminator(
+                #     original_articles, original_abstracts, decoded_outputs)
+                counter += 1  # this is how many examples we've decoded
+                if counter % 10000 == 0:
+                    print("Have decoded %s samples." % (counter * FLAGS.batch_size))
 
-                decoded_words_list = data.outputsids2words(
-                    outputs_ids, self._vocab, art_oovs)
-                # art_oovs[0] should be changed, batch size examples should be
-                # concluded
-                decoded_outputs = []
-
-                # Remove the [STOP] token from decoded_words, if necessary
-                for decoded_words in decoded_words_list:
-                    try:
-                        fst_stop_idx = decoded_words.index(data.STOP_DECODING)
-                        decoded_words = decoded_words[:fst_stop_idx]
-                    except ValueError:
-                        pass
-                    decoded_outputs.append(' '.join(decoded_words))
-
-                if self._hps.single_pass:
-                    # write ref summary and decoded summary to file, to eval with
-                    # pyrouge later
-                    # self.write_for_discriminator(
-                    #     original_articles, original_abstracts, decoded_outputs)
-                    counter += 1  # this is how many examples we've decoded
-                    if counter % 10000 == 0:
-                        print("Have decoded %s samples." % (counter * FLAGS.batch_size))
-
-                    for idx, sent in enumerate(original_abstracts):
-                        ref_f.write(sent+"\n")
-                    for idx, sent in enumerate(decoded_outputs):
-                        dec_f.write(sent+"\n")
-                    for artc, refe, hypo in zip(original_articles, original_abstracts, decoded_outputs):
-                        ove_f.write("article: "+artc+"\n")
-                        ove_f.write("reference: "+refe+"\n")
-                        ove_f.write("hypothesis: "+hypo+"\n")
-                        ove_f.write("\n")
-                # else:
+                for idx, sent in enumerate(original_abstracts):
+                    ref_f.write(sent+"\n")
+                for idx, sent in enumerate(decoded_outputs):
+                    dec_f.write(sent+"\n")
+                for artc, refe, hypo in zip(original_articles, original_abstracts, decoded_outputs):
+                    ove_f.write("article: "+artc+"\n")
+                    ove_f.write("reference: "+refe+"\n")
+                    ove_f.write("hypothesis: "+hypo+"\n")
+                    ove_f.write("\n")
                 #     print_results(articles_withunks, abstracts_withunks, decoded_outputs)
                 #     # log output to screen
                 #     self.write_for_attnvis(articles_withunks, abstracts_withunks,
@@ -265,9 +276,10 @@ class Decoder(object):
         except KeyboardInterrupt as exc:
             print(exc)
             print("Have decoded %s samples." % (counter * FLAGS.batch_size))
-            ref_f.close()
-            dec_f.close()
-            ove_f.close()
+            if save2file:
+                ref_f.close()
+                dec_f.close()
+                ove_f.close()
 
     def write_for_discriminator(self, artcls, reference_sents, decoded_outputs):
         for artc, refe, hypo in zip(artcls, reference_sents, decoded_outputs):

@@ -17,6 +17,7 @@ from data import gen_vocab2dis_vocab
 from os.path import join as join_path
 from utils import ensure_exists
 from gen_utils import calc_running_avg_loss
+from gen_utils import check_rouge
 from gen_utils import get_best_loss_from_chpt
 from gen_utils import save_ckpt
 from utils import print_dashboard
@@ -38,6 +39,7 @@ tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training
 tf.app.flags.DEFINE_boolean('restore_best_model', False, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_integer('steps_per_checkpoint', 10000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decay by this rate')
+tf.app.flags.DEFINE_float('sample_rate', 0.05, 'Learning rate decay by this rate')
 
 # ------------------------------------- discriminator
 
@@ -106,7 +108,7 @@ tf.app.flags.DEFINE_integer('min_dec_steps', 6, 'Minimum sequence length of gene
 tf.app.flags.DEFINE_integer('gen_vocab_size', 100000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
-tf.app.flags.DEFINE_float('gen_lr', 0.0005, 'learning rate')
+tf.app.flags.DEFINE_float('gen_lr', 0.0009, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
 tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
@@ -128,7 +130,7 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 # ------------------------------------- gan
 
 tf.app.flags.DEFINE_integer('gan_iter', 200000, 'how many times to run the gan')
-tf.app.flags.DEFINE_integer('gan_gen_iter', 2, 'in each gan step run how many times the generator')
+tf.app.flags.DEFINE_integer('gan_gen_iter', 20, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 3, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
@@ -139,6 +141,7 @@ tf.app.flags.DEFINE_float('rouge_reward_ratio', 0.0, 'The importance of rollout 
 FLAGS = tf.app.flags.FLAGS
 
 assert FLAGS.mode in ["pretrain_gen", "pretrain_dis", "train_gan", "decode", "test"]
+assert FLAGS.sample_rate > 0 and FLAGS.sample_rate < 1, "sample rate should be (0, 1)"
 
 if FLAGS.mode == "train_gan":
     FLAGS.single_pass = False
@@ -396,7 +399,10 @@ def main(argv):
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
         gan_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir))
+        gan_val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir, "val"))
         gan_saver = tf.train.Saver(
+            max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
+        gan_val_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         utils.load_ckpt(dec_saver, sess, val_dir, (FLAGS.mode in ["train_gan", "decode"]))
         decoder = Decoder(sess, generator, gen_vocab)
@@ -420,7 +426,7 @@ def main(argv):
                                    var_list=[v for v in all_variables if "generator" in v.name])
 
     if FLAGS.mode == "decode":
-        decoder_batcher = GenBatcher("test", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
+        decoder_batcher = GenBatcher("test", gen_vocab, hps_gen, single_pass=True)
 
     if FLAGS.mode not in ["pretrain_gen", "decode"]:
         dis_val_batch_size = hps_dis.batch_size * hps_dis.num_models \
@@ -452,6 +458,7 @@ def main(argv):
             tf.logging.info("Caught keyboard interrupt on worker....")
 
     elif FLAGS.mode == "train_gan":
+        best_rouge = 0.2
         gen_best_loss = get_best_loss_from_chpt(val_dir)
         gen_global_step = 0
         print('Going to tune the two using Gan')
@@ -497,14 +504,14 @@ def main(argv):
 
             # Test
             # if FLAGS.gan_gen_iter and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
-            if 0 and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
+            if i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1:
                 print('Going to test the generator.')
                 current_speed = sum(current_speed) / (len(current_speed) * hps_gen.batch_size)
                 everage_g_loss = sum(g_losses) / len(g_losses)
                 # one more process hould be opened for the evaluation
                 eval_loss, gen_best_loss = save_ckpt(
                     sess, generator, gen_best_loss, gan_dir, gan_saver,
-                    gen_batcher_val, val_dir, val_saver, gen_global_step)
+                    gen_batcher_val, gan_val_dir, val_saver, gen_global_step)
 
                 if eval_loss:
                     print(
@@ -513,7 +520,7 @@ def main(argv):
                         "\tBatch size:\t%s\n"
                         "\tVocabulary size:\t%s\n"
                         "\tCurrent speed:\t%.4f seconds/article\n"
-                        "\tAverage training loss:\t%.4f; "
+                        "\tAverage GAN training loss:\t%.4f; "
                         "eval loss:\t%.4f" % (
                             datetime.datetime.now().strftime("on %m-%d at %H:%M"),
                             gen_global_step,
@@ -524,6 +531,11 @@ def main(argv):
                             eval_loss.item(),
                             )
                     )
+
+            if i_gan % 1000 == 0 or i_gan == hps_gan.gan_iter - 1:
+                ave_rouge, best_rouge = check_rouge(sess, decoder, best_rouge, gen_batcher_val,
+                                                    gan_val_dir, gan_val_saver, gen_global_step, sample=FLAGS.sample_rate)
+                print("The best rouge is %s and the average rouge is %s" % (best_rouge, ave_rouge))
 
             # Train the discriminator
             dis_best_loss = 1000

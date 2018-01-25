@@ -6,6 +6,7 @@ from tensorflow.python.ops import tensor_array_ops, control_flow_ops
 # from tensorflow.python.ops import variable_scope
 import numpy as np
 from data import gen_vocab2dis_vocab
+from data import strip_pads
 import data
 from utils import rouge_l
 PAD_TOKEN = "[PAD]"
@@ -114,7 +115,7 @@ class Rollout(object):
         for k, samples in enumerate(k_samples):
             dis_rewards = []
             rouge_rewards = []
-            for i in range(rollout_num):
+            for ir in range(rollout_num):
                 for given_num in range(2, self._gen_hps.max_dec_steps+1):
                     feed_dict = {}
                     feed_dict[self.summ] = samples
@@ -146,22 +147,22 @@ class Rollout(object):
                             discriminator.conditions: articles}
                         ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
                         ypred = np.array([item[1] for item in ypred_for_auc])
-                        if i == 0:
+                        if ir == 0:
                             dis_rewards.append(ypred)
                         else:
                             dis_rewards[given_num - 2] += ypred
                     if rouge_ratio:
-                        rpred = rouge_l(rollout_samples.tolist(), source_batch.dec_batch.tolist())
-                        if i == 0:
+                        rpred = rouge_l(strip_pads(rollout_samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
+                                        source_batch.dec_batch.tolist())
+                        if ir == 0:
                             rouge_rewards.append(rpred)
                         else:
                             rouge_rewards[given_num - 2] += np.array(rpred)
 
-                # print(samples)
                 if rouge_ratio != 1:
                     samples_without_start = [s[1:].tolist() for s in samples]
                     # the last token reward
-                    if i == 0 and k == 0:
+                    if ir == 0 and k == 0:
                         ps = "multinomial in rollout"
                     else:
                         ps = False
@@ -176,16 +177,34 @@ class Rollout(object):
                         discriminator.conditions: articles}
                     ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
                     ypred = np.array([item[1] for item in ypred_for_auc])
-                    if i == 0:
+                    if ir == 0:
                         dis_rewards.append(ypred)
                     else:
                         dis_rewards[self._gen_hps.max_dec_steps - 1] += ypred
                 if rouge_ratio:
-                    rpred = rouge_l(rollout_samples.tolist(), source_batch.dec_batch.tolist())
-                    if i == 0:
+                    rpred = rouge_l(strip_pads(samples.tolist(),
+                                               gen_vocab.word2id(STOP_DECODING)),
+                                    source_batch.dec_batch.tolist())
+                    if ir == 0:
                         rouge_rewards.append(rpred)
                     else:
                         rouge_rewards[self._gen_hps.max_dec_steps - 1] += np.array(rpred)
+
+                if 0 and ir == 0:
+                    _art_oovs = [source_batch.art_oovs[i]
+                                 for i in range(len(source_batch.dec_batch))]
+                    # articles_withunks = data.show_art_oovs(original_articles, self._vocab)
+                    # abstracts_withunks = data.show_abs_oovs(original_abstracts, self._vocab, art_oovs)
+
+                    # Run beam search to get best Hypothesis
+
+                    _decoded_words_list = data.outputsids2words(
+                        samples, gen_vocab, _art_oovs)
+                    for s in _decoded_words_list:
+                        print("\t".join(s[1:]))
+
+                    for rwi in np.transpose(np.array(rouge_rewards)).tolist():
+                        print("\t".join([str(r)[:4] for r in rwi]))
 
             if rouge_ratio == 1:
                 rewards = np.transpose(np.array(rouge_rewards))
