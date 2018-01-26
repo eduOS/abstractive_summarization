@@ -5,6 +5,7 @@ from __future__ import absolute_import
 from __future__ import division
 import os
 from termcolor import colored
+from tensorflow.python import pywrap_tensorflow
 import datetime
 import tensorflow as tf
 import time
@@ -258,3 +259,12 @@ def rouge_l(samples, references, beta=1.2, rs=None):
             score = 0.0
         scores.append(score)
     return scores
+
+
+def variable_names_from_dir(chpt_dir, name_filter=""):
+    ckpt = tf.train.get_checkpoint_state(chpt_dir)
+    if ckpt:
+        reader = pywrap_tensorflow.NewCheckpointReader(ckpt.model_checkpoint_path)
+        var_to_shape_map = reader.get_variable_to_shape_map()
+        variable_names = [key for key in var_to_shape_map if name_filter in key]
+    return variable_names
