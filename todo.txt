@@ -69,6 +69,7 @@
 7. discriminator overrate those bad samples(repetitive and etc that the generator would generate in the early stage) which was unseen whilie training
 8. the more the generator is trained by RL the less words it will generate
   it should be the reward mask rather than the sample mask to mask the loss. If the sample mask is used the more it sample the less the rewards
+9. the dictionary 100000 is too big, in this paper <Incorporating Copying Mechanism in Sequence-to-Sequence Learning> it is 10000. this will decrease the variance by decreasing the search space.
 
 # error
 1. a list of float cannot be joined
