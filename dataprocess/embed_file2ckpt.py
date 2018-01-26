@@ -11,6 +11,8 @@ import random
 import sys
 
 # generate checkpoint from vocab and embeddings
+# python embed_file2ckpt.py vocab_file embed_file vocab_size out_dir
+# python dataprocess/embed_file2ckpt.py data/vocab ../../data/zh_emb/emb_wd/embedding.300 100000 ./temp/
 
 
 def read_from_file(vocab_path, embed_path, vocab_size):
@@ -26,7 +28,7 @@ def read_from_file(vocab_path, embed_path, vocab_size):
             v, emb = embed.strip().split("\t")
         except:
             print(embed)
-        v = v.strip()
+        v = v.strip().lower
         if v in old_embed_dic:
             continue
         emb_l = [float(e) for e in emb.split()]
@@ -79,4 +81,4 @@ as_op = embeddings.assign(emb_ph)
 
 sess = tf.Session()
 sess.run(as_op, feed_dict={emb_ph: emb_l})
-saver.save(sess, "./temp/embeddings")
+saver.save(sess, sys.argv[-1])

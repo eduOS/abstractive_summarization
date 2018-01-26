@@ -19,6 +19,8 @@ build vocabulary from
 
 # python build_dictionary ['word', 'char'] (./filepathes) output_dir
 
+with_digits = False
+
 
 def main():
     mode = sys.argv[1]
@@ -36,13 +38,20 @@ def main():
                 if not line or line.strip().startswith("<"):
                     continue
                 if mode == "word":
-                    words_in = sourceline2words(line)
+                    words_in = sourceline2words(line, with_digits)
                 elif mode == "char":
                     words_in = text2charlist(line)
                 for w in words_in:
                     if w not in word_freqs:
                         word_freqs[w] = 0
                     word_freqs[w] += 1
+
+    if not with_digits:
+        try:
+            del word_freqs["*"]
+        except:
+            print("unexpectedly * is not in dic")
+            pass
 
     words = word_freqs.keys()
     freqs = word_freqs.values()
