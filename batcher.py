@@ -361,12 +361,11 @@ class GenBatcher(object):
         """
         # If the batch queue is empty, print a warning
         if self._batch_queue.qsize() == 0:
-            print('Bucket input queue is empty when calling next_batch. Bucket \
-                    queue size: %i, Input queue size: %i' % (
+            print('Bucket input queue is empty when calling next_batch. Bucket queue size: %i, Input queue size: %i' % (
                         self._batch_queue.qsize(),
                         self._example_queue.qsize()))
-            red_assert(self.mode == "test" and self._finished_reading, "queue is empty, the mode should be 'test' but %s found" % self.mode)
-            if self._finished_reading:
+            # red_assert(self._mode == "test" and self._finished_reading, "queue is empty, the mode should be 'test' but %s found" % self._mode)
+            if self._mode == "test" and self._finished_reading:
                 return None
             else:
                 red_print("batch queue empty, waiting 2 seconds")
@@ -390,7 +389,7 @@ class GenBatcher(object):
                 red_print(
                     "The example generator for this example queue filling thread\
                     has exhausted data.")
-                if self.mode in ['test']:
+                if self._mode in ['test']:
                     red_print(
                         "single_pass mode is on, so we've finished reading\
                         dataset. This thread is stopping.", "yellow")
@@ -413,7 +412,7 @@ class GenBatcher(object):
                 # what is the vocab here? the extended vocab?
                 # place the Example in the example queue.
                 self._example_queue.put(example)
-            elif self.mode in ['val', 'test']:
+            elif self._mode in ['val', 'test']:
                 self._example_queue.put(None)
             else:
                 red_print("something wrong may happened in putting example to queue")
