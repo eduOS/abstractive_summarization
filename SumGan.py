@@ -29,6 +29,7 @@ from termcolor import colored
 from res_discriminator import Seq2ClassModel
 from data import Vocab
 STOP_DECODING = '[STOP]'
+epsilon = sys.float_info.epsilon
 
 # tf.logging.set_verbosity(tf.logging.ERROR)
 tf.app.flags.DEFINE_string(
@@ -39,7 +40,7 @@ tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training
 tf.app.flags.DEFINE_boolean('restore_best_model', False, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_integer('steps_per_checkpoint', 10000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decay by this rate')
-tf.app.flags.DEFINE_float('sample_rate', 0.0004, 'Learning rate decay by this rate')
+tf.app.flags.DEFINE_float('sample_rate', 0.004, 'the sample rate, should be [0, 0.5]')
 
 # ------------------------------------- discriminator
 
@@ -141,7 +142,7 @@ tf.app.flags.DEFINE_float('rouge_reward_ratio', 0.0, 'The importance of rollout 
 FLAGS = tf.app.flags.FLAGS
 
 assert FLAGS.mode in ["pretrain_gen", "pretrain_dis", "train_gan", "decode", "test"]
-assert FLAGS.sample_rate > 0 and FLAGS.sample_rate < 1, "sample rate should be (0, 1)"
+assert FLAGS.sample_rate >= 0 and FLAGS.sample_rate <= 0.5, "sample rate should be [0, 0.5]"
 
 if FLAGS.mode == "train_gan":
     FLAGS.single_pass = False
@@ -199,7 +200,7 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
                 eval_save_steps -= 1000
 
             # print the print the dashboard
-            current_speed = (time.time() - start_time) / (counter * hps.batch_size)
+            current_speed = (time.time() - start_time + epsilon) / ((counter * hps.batch_size) + epsilon)
             total_training_time = (time.time() - start_time) * global_step / (counter * 3600)
             print_dashboard("Generator", global_step, hps.batch_size, hps.gen_vocab_size,
                             running_avg_loss, eval_loss,
@@ -507,8 +508,8 @@ def main(argv):
             # if FLAGS.gan_gen_iter and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
             if i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1:
                 print('Going to test the loss of the generator.')
-                current_speed = sum(current_speed) / (len(current_speed) * hps_gen.batch_size)
-                everage_g_loss = sum(g_losses) / len(g_losses)
+                current_speed = (float(sum(current_speed)) + epsilon) / (int(len(current_speed)) * hps_gen.batch_size + epsilon)
+                everage_g_loss = (float(sum(g_losses)) + epsilon) / int((len(g_losses)) + epsilon)
                 # one more process hould be opened for the evaluation
                 eval_loss, gen_best_loss = save_ckpt(
                     sess, generator, gen_best_loss, gan_dir, gan_saver,
@@ -528,7 +529,7 @@ def main(argv):
                             FLAGS.batch_size,
                             hps_gen.gen_vocab_size,
                             current_speed,
-                            everage_g_loss.item(),
+                            everage_g_loss,
                             eval_loss.item(),
                             )
                     )

@@ -173,6 +173,8 @@ class Decoder(object):
             dec_f = open(decoded_file, "a", 'utf-8')
             ove_f = open(overview_file, "a", 'utf-8')
 
+        batch_size = self._hps.batch_size
+
         counter = 0
         try:
             while True:
@@ -209,24 +211,25 @@ class Decoder(object):
 
                 sample = randint(0, int(1 / sample_rate) if sample_rate else 0)
                 if sample == 1 or save2file:
+                    sample_n = randint(0, batch_size)
                     if sample == 1:
                         print()
                     art_oovs = [batch.art_oovs[i]
-                                for i in xrange(self._hps.batch_size)]
+                                for i in xrange(batch_size)]
                     decoded_words_list = data.outputsids2words(
                         outputs_ids, self._vocab, art_oovs)
 
                     decoded_outputs = []
 
                     # Remove the [STOP] token from decoded_words, if necessary
-                    for decoded_words in decoded_words_list:
+                    for s_n, decoded_words in enumerate(decoded_words_list):
                         try:
                             fst_stop_idx = decoded_words.index(data.STOP_DECODING)
                             decoded_words = decoded_words[:fst_stop_idx]
                         except ValueError:
                             pass
                         decoded_output = ' '.join(decoded_words)
-                        if sample == 1:
+                        if sample == 1 and s_n == sample_n:
                             print(decoded_output)
                         elif save2file:
                             decoded_outputs.append(decoded_output)

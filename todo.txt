@@ -67,6 +67,8 @@
     1). the ROUGE-1 recall is 0.3671 and the precision is 0.4203, then the F-1 is 0.3919
     2). the copy mechanism: 40.83% of those should be copied are copied or generated, 
 7. discriminator overrate those bad samples(repetitive and etc that the generator would generate in the early stage) which was unseen whilie training
+8. the more the generator is trained by RL the less words it will generate
+  it should be the reward mask rather than the sample mask to mask the loss. If the sample mask is used the more it sample the less the rewards
 
 # error
 1. a list of float cannot be joined

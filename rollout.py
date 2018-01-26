@@ -195,22 +195,6 @@ class Rollout(object):
                     else:
                         rouge_rewards[self._gen_hps.max_dec_steps - 1] += np.array(rpred)
 
-                if 0 and ir == 0:
-                    _art_oovs = [source_batch.art_oovs[i]
-                                 for i in range(len(source_batch.dec_batch))]
-                    # articles_withunks = data.show_art_oovs(original_articles, self._vocab)
-                    # abstracts_withunks = data.show_abs_oovs(original_abstracts, self._vocab, art_oovs)
-
-                    # Run beam search to get best Hypothesis
-
-                    _decoded_words_list = data.outputsids2words(
-                        samples, gen_vocab, _art_oovs)
-                    for s in _decoded_words_list:
-                        print("\t".join(s[1:]))
-
-                    for rwi in np.transpose(np.array(rouge_rewards)).tolist():
-                        print("\t".join([str(r)[:4] for r in rwi]))
-
             if rouge_ratio == 1:
                 rewards = np.transpose(np.array(rouge_rewards))
             elif rouge_ratio == 0:
