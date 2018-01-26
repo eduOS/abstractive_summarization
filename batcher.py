@@ -26,7 +26,6 @@ from termcolor import colored
 from threading import Thread
 import time
 import numpy as np
-import tensorflow as tf
 import glob
 import data
 import gzip
@@ -34,6 +33,7 @@ import os
 from cntk.tokenizer import text2charlist
 from codecs import open
 import datetime
+from utils import red_assert, red_print
 
 
 def fopen(filename, mode='r'):
@@ -131,7 +131,9 @@ class Example(object):
             target = target[:max_len]  # no end_token
         else:  # no truncation
             target.append(stop_id)  # end token
-        assert len(inp) == len(target)
+        red_assert(
+            len(inp) == len(target),
+            "abstracts and targets should be of same length but %s and %s" % (len(inp), len(target)))
         return inp, target
 
     def pad_decoder_inp_targ(self, max_len, pad_id):
@@ -276,26 +278,30 @@ class GenBatcher(object):
 
     BATCH_QUEUE_MAX = 100  # max number of batches the batch_queue can hold
 
-    def __init__(self, mode, vocab, hps, single_pass):
+    def __init__(self, file_name, mode, vocab, hps):
         """Initialize the batcher. Start threads that process the data into
         batches.
 
         Args:
-          data_path: tf.Example filepattern.
+          file_name: the file name of the corpus, extensions are fixed in regex form
+          mode:
+              mode should be in ["train", 'test', 'val']
+              train:
+                  multiple threads and never generate None, never close files
+              val:
+                  single thread and generate None but never close files
+              test
+                  single thread and generate None and close files when it ends
           vocab: Vocabulary object
-          hps: hyperparameters
-          single_pass: it only works for training dataset, for evaluation and testing
-          it is permenently true. if it is true, a None batch will return, and the files
-          will only be read once; however if it is False, multiple times will be read and
-          multiple threads are generated.
+          hps: hyperparameters from the generator
         """
         self._vocab = vocab
         self._hps = hps
+        red_assert(
+            mode in ["train", "test", "val"],
+            "mode should be in ['train', 'test', 'val'] but %s provided" % mode)
         self._mode = mode
-        self._single_pass = single_pass
         self._data_path = os.path.join(hps.data_path, mode) + ".txt_*"
-        if self._mode in ["val", "test"]:
-            self._single_pass = True
 
         # Initialize a queue of Batches waiting to be used, and a queue of
         # Examples waiting to be batched
@@ -305,7 +311,7 @@ class GenBatcher(object):
 
         # Different settings depending on whether we're in single_pass mode or
         # not
-        if single_pass:
+        if mode in ["test", "val"]:
             # just one thread, so we read through the dataset just once
             self._num_example_q_threads = 1
             self._num_batch_q_threads = 1  # just one thread to batch examples
@@ -322,6 +328,14 @@ class GenBatcher(object):
             # bucketing
             self._bucketing_cache_size = 100
 
+            # Start a thread that watches the other threads and restarts them if
+            # they're dead
+            self._watch_thread = Thread(target=self.watch_threads)
+            self._watch_thread.daemon = True
+            self._watch_thread.start()
+            # We don't want a watcher in single_pass mode because the threads
+            # shouldn't run forever
+
         # Start the threads that load the queues
         self._example_q_threads = []
         for _ in range(self._num_example_q_threads):
@@ -334,15 +348,6 @@ class GenBatcher(object):
             self._batch_q_threads.append(Thread(target=self.fill_batch_queue))
             self._batch_q_threads[-1].daemon = True
             self._batch_q_threads[-1].start()
-
-        # Start a thread that watches the other threads and restarts them if
-        # they're dead
-        if not single_pass:
-            # We don't want a watcher in single_pass mode because the threads
-            # shouldn't run forever
-            self._watch_thread = Thread(target=self.watch_threads)
-            self._watch_thread.daemon = True
-            self._watch_thread.start()
 
     def next_batch(self):
         """Return a Batch from the batch queue.
@@ -360,8 +365,12 @@ class GenBatcher(object):
                     queue size: %i, Input queue size: %i' % (
                         self._batch_queue.qsize(),
                         self._example_queue.qsize()))
-            if self._single_pass and self._finished_reading:
+            red_assert(self.mode == "test" and self._finished_reading, "queue is empty, the mode should be 'test' but %s found" % self.mode)
+            if self._finished_reading:
                 return None
+            else:
+                red_print("batch queue empty, waiting 2 seconds")
+                time.sleep(2)
 
         batch = self._batch_queue.get()  # get the next Batch
         return batch
@@ -378,13 +387,13 @@ class GenBatcher(object):
                 # strings.
                 (article, abstract) = input_gen.next()
             except StopIteration:  # if there are no more examples:
-                tf.logging.info(
+                red_print(
                     "The example generator for this example queue filling thread\
                     has exhausted data.")
-                if self._single_pass:
-                    tf.logging.info(
+                if self.mode in ['test']:
+                    red_print(
                         "single_pass mode is on, so we've finished reading\
-                        dataset. This thread is stopping.")
+                        dataset. This thread is stopping.", "yellow")
                     self._finished_reading = True
                     break
                 else:
@@ -404,8 +413,10 @@ class GenBatcher(object):
                 # what is the vocab here? the extended vocab?
                 # place the Example in the example queue.
                 self._example_queue.put(example)
-            else:
+            elif self.mode in ['val', 'test']:
                 self._example_queue.put(None)
+            else:
+                red_print("something wrong may happened in putting example to queue")
 
     def fill_batch_queue(self):
         """Takes Examples out of example queue, sorts them by encoder sequence
@@ -433,7 +444,7 @@ class GenBatcher(object):
             batches = []
             for i in range(0, len(inputs), self._hps.batch_size):
                 batches.append(inputs[i:i + self._hps.batch_size])
-            if not self._single_pass:
+            if self._mode == "train":
                 shuffle(batches)
             for b in batches:  # each b is a list of Example objects
                 if len(b) != self._hps.batch_size:
@@ -460,21 +471,14 @@ class GenBatcher(object):
                     new_t.start()
 
     def text_generator(self):
-        """read abstract and article pairs directly from file
-
-        Args:
-            data_dir: where to find the text files
-            single_pass: if the single pass
-        """
+        """read abstract and article pairs directly from file"""
         while True:
             filelist = glob.glob(self._data_path)  # get the list of datafiles
             if self._mode in ["val", 'test']:
                 assert len(filelist) == 1, \
                     "in val mode the len should be 1 but %s given." % len(filelist)
-            assert filelist, ('Error: Empty filelist at %s' % self._data_path)
-            if self._single_pass:
-                filelist = sorted(filelist)
-            else:
+            red_assert(filelist, 'Error: Empty filelist at %s' % self._data_path)
+            if self._mode == "train":
                 random.shuffle(filelist)
             for ff in filelist:
                 print("opening file %s" % ff)
@@ -489,12 +493,12 @@ class GenBatcher(object):
                             f.seek(0)
                             yield (None, None)
                             continue
-                        elif self._mode == 'test' or self._single_pass:
+                        elif self._mode == 'test':
                             f.close()
                             yield (None, None)
                             break
                         else:
-                            # for training and not single_pass
+                            # for training
                             f.close()
                             print("closing file %s" % ff)
                             break
@@ -504,7 +508,7 @@ class GenBatcher(object):
                     else:
                         print('Found an example with empty article text. Skipping it.')
 
-            if self._mode == "test" or (self._mode == 'train' and self._single_pass):
+            if self._mode == "test":
                 break
 
 

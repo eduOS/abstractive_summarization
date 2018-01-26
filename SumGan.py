@@ -146,6 +146,7 @@ assert FLAGS.sample_rate >= 0 and FLAGS.sample_rate <= 0.5, "sample rate should 
 
 if FLAGS.mode == "train_gan":
     FLAGS.single_pass = False
+    FLAGS.beam_size = int(FLAGS.beam_size / 2) if FLAGS.beam_size > 3 else 2
 
 if FLAGS.min_dec_steps > FLAGS.max_dec_steps / 2:
     FLAGS.min_dec_steps = int(FLAGS.max_dec_steps / 2)
@@ -408,7 +409,7 @@ def main(argv):
         utils.load_ckpt(dec_saver, sess, val_dir, (FLAGS.mode in ["train_gan", "decode"]))
         decoder = Decoder(sess, generator, gen_vocab)
 
-    if FLAGS.mode in ["pretrain_dis", "train_gan"]:
+    if FLAGS.mode == "pretrain_dis" or (FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1):
         dis_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "discriminator" in v.name])
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
@@ -421,13 +422,16 @@ def main(argv):
 
     # --------------- train models ---------------
     if FLAGS.mode not in ["pretrain_dis", "decode"]:
-        gen_batcher_train = GenBatcher("train", gen_vocab, hps_gen, single_pass=hps_gen.single_pass)
-        gen_batcher_val = GenBatcher("val", gen_vocab, hps_gen, single_pass=True)
+        gen_batcher_train = GenBatcher("train", "train", gen_vocab, hps_gen)
+        gen_batcher_val = GenBatcher("val", "val", gen_vocab, hps_gen)
         val_saver = tf.train.Saver(max_to_keep=10,
                                    var_list=[v for v in all_variables if "generator" in v.name])
 
     if FLAGS.mode == "decode":
-        decoder_batcher = GenBatcher("test", gen_vocab, hps_gen, single_pass=True)
+        decoder_batcher = GenBatcher("test", "test", gen_vocab, hps_gen)
+
+    if FLAGS.mode == "train_gan":
+        gan_batcher_val = GenBatcher("test", "val", gen_vocab, hps_gen)
 
     if FLAGS.mode not in ["pretrain_gen", "decode"]:
         dis_val_batch_size = hps_dis.batch_size * hps_dis.num_models \
@@ -536,7 +540,7 @@ def main(argv):
 
             if i_gan % 200 == 0 or i_gan == hps_gan.gan_iter - 1:
                 print("Going to evaluate rouge.")
-                ave_rouge, best_rouge = check_rouge(sess, decoder, best_rouge, gen_batcher_val,
+                ave_rouge, best_rouge = check_rouge(sess, decoder, best_rouge, gan_batcher_val,
                                                     gan_val_dir, gan_val_saver, gen_global_step, sample_rate=FLAGS.sample_rate)
                 print("The best rouge is %s and the average rouge is %s %s" % (
                     best_rouge, ave_rouge,

@@ -268,3 +268,11 @@ def variable_names_from_dir(chpt_dir, name_filter=""):
         var_to_shape_map = reader.get_variable_to_shape_map()
         variable_names = [key for key in var_to_shape_map if name_filter in key]
     return variable_names
+
+
+def red_assert(statement, message, color='red'):
+    assert statement, colored(message, color)
+
+
+def red_print(message, color='red'):
+    print(colored(message, color))
