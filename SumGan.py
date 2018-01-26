@@ -468,7 +468,7 @@ def main(argv):
             g_losses = []
             current_speed = []
             # for it in range(0):
-            print('Going to train the generator.')
+            # print('Going to train the generator.')
             for it in range(hps_gan.gan_gen_iter):
                 start_time = time.time()
                 batch = gen_batcher_train.next_batch()
