@@ -129,7 +129,7 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 
 
 # ------------------------------------- gan
-
+tf.app.flags.DEFINE_integer('rollout_start', 0, 'how many times to run the gan')
 tf.app.flags.DEFINE_integer('gan_iter', 200000, 'how many times to run the gan')
 tf.app.flags.DEFINE_integer('gan_gen_iter', 5, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many times the generator')
@@ -355,6 +355,7 @@ def main(argv):
         'rollout_num',
         'sample_num',
         'rouge_reward_ratio',
+        "rollout_start",
     ]
     hps_dict = {}
     for key, val in FLAGS.__flags.iteritems():  # for each flag
@@ -481,7 +482,7 @@ def main(argv):
 
                 # generate samples
                 enc_states, dec_in_state, n_samples, n_targets_padding_mask = decoder.mc_generate(
-                    batch, include_start_token=True, s_num=hps_gan.sample_num)
+                    batch, s_num=hps_gan.sample_num)
                 # get rewards for the samples
                 n_rewards = rollout.get_reward(
                     hps_gan, sess, gen_vocab, dis_vocab, batch, enc_states,
@@ -559,7 +560,7 @@ def main(argv):
             for d_gan in range(gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
                 enc_states, dec_in_state, k_samples_words, _ = decoder.mc_generate(
-                    batch, s_num=hps_gan.sample_num, include_start_token=True)
+                    batch, s_num=hps_gan.sample_num)
                 # shuould first tanslate to words to avoid unk
                 articles_oovs = batch.art_oovs
                 for samples_words in k_samples_words:
