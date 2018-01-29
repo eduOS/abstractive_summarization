@@ -214,9 +214,6 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
             context_vector, _, coverage = attention(initial_state, coverage)
         for i, inp in enumerate(decoder_inputs):
             # when should this terminate due to beam size
-            tf.logging.info(
-                "Adding attention_decoder timestep %i of %i", i,
-                len(decoder_inputs))
             if i > 0:
                 variable_scope.get_variable_scope().reuse_variables()
 

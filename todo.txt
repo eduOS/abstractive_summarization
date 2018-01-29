@@ -51,6 +51,8 @@
 41. add the reinforcement rouge reward
 42. collect some keywords from the long content to form a dynamic vocabulary, but how to make use of those keywords remains a problem
 43. the rollout can be move out from the graph to make it less error-prone
+44. vocab acumulative probability to choose the vocab_size
+https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-python
 
 # problems
 1. cannot end
@@ -70,7 +72,20 @@
 8. the more the generator is trained by RL the less words it will generate
   it should be the reward mask rather than the sample mask to mask the loss. If the sample mask is used the more it sample the less the rewards
 9. the dictionary 100000 is too big, in this paper <Incorporating Copying Mechanism in Sequence-to-Sequence Learning> it is 10000. this will decrease the variance by decreasing the search space.
+  when the vocab size is 10k the loss only decreases from 4.5 and 4.1(160000 samples) to 3.82(val) and 3.30(train) after training 4640000 samples, that never decreases in training the later 11920000 - 4640000 samples
+  when the vocab size is 50k the start losses are 4.22(training) and 5.19(val)(160000 samples)
+10. the length problem
+  normal distribution
+  the rouge is acumulated but how to add the previous influence?
+  minuts the previous word's rouge value is a good idea
+11. the oov problem:
+  ensure that the traditional chinese character have been transfered into simplified ones
 
 # error
 1. a list of float cannot be joined
 2. two list cannot be updated by += but if the right side is a numpy it is ok
+
+# tips 
+  immediate rewards should be given more importance, discount or impatience
+  unit testing
+  

@@ -27,7 +27,6 @@ import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 from cntk.tokenizer import text2charlist
 from codecs import open
-from itertools import dropwhile
 
 # <s> and </s> are used in the data files to segment the abstracts into
 # sentences. They don't receive vocab ids.
@@ -73,7 +72,7 @@ class Vocab(object):
         with open(vocab_file, 'r', 'utf-8') as vocab_f:
             for line in vocab_f:
                 pieces = line.split()
-                if len(pieces) != 2:
+                if len(pieces) != 3:
                     print('Warning: incorrectly formatted line in vocabulary file: %s\n' % line)
                     continue
                 w = pieces[0]

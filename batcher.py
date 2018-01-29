@@ -30,6 +30,7 @@ import glob
 import data
 import gzip
 import os
+from collections import defaultdict as dd
 from cntk.tokenizer import text2charlist
 from codecs import open
 import datetime
@@ -302,6 +303,9 @@ class GenBatcher(object):
             "mode should be in ['train', 'test', 'val'] but %s provided" % mode)
         self._mode = mode
         self._data_path = os.path.join(hps.data_path, mode) + ".txt_*"
+        self._minutes = 0
+        self._files_name_dict = dd(lambda: 0)
+        self._log_writer = open("./gen_batcher_writer", "a", "utf-8")
 
         # Initialize a queue of Batches waiting to be used, and a queue of
         # Examples waiting to be batched
@@ -411,7 +415,20 @@ class GenBatcher(object):
                     article, abstract, self._vocab, self._hps)
                 # what is the vocab here? the extended vocab?
                 # place the Example in the example queue.
-                self._example_queue.put(example)
+                oov_len = len(example.article_oovs)
+                total_len = len(example.enc_input_extend_vocab)
+                if oov_len > total_len / 3:
+                    self._log_writer.write("article oovs %s, total length of the article %s" % (oov_len, total_len))
+                    self._log_writer.write("\n")
+                    self._log_writer.write(example.original_article)
+                    self._log_writer.write("\n")
+                    self._log_writer.write(example.original_abstract)
+                    self._log_writer.write("\n")
+                    self._log_writer.write(" ".join(example.article_oovs))
+                    self._log_writer.write("\n")
+                    self._log_writer.write("\n")
+                else:
+                    self._example_queue.put(example)
             elif self._mode in ['val', 'test']:
                 self._example_queue.put(None)
             else:
@@ -454,6 +471,10 @@ class GenBatcher(object):
         """Watch example queue and batch queue threads and restart if dead."""
         while True:
             time.sleep(60)
+            # self._minutes += 1
+            # if 0 and self._minutes % 30 == 0:
+            #     for fn, count in self._files_name_dict.iteritems():
+            #         print(fn, count, count/sum(self._files_name_dict.values()))
             for idx, t in enumerate(self._example_q_threads):
                 if not t.is_alive():  # if the thread is dead
                     print('Found example queue thread dead. Restarting.')
@@ -503,6 +524,7 @@ class GenBatcher(object):
                             break
                     article_text, abstract_text = art_abs
                     if article_text and abstract_text:
+                        # self._files_name_dict[f.name] += 1
                         yield (article_text, abstract_text)
                     else:
                         print('Found an example with empty article text. Skipping it.')

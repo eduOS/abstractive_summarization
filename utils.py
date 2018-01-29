@@ -27,30 +27,38 @@ def get_config():
     return config
 
 
-def load_ckpt(saver, sess, dire, force=False, lastest_filename="checkpoint"):
+def load_ckpt(saver, sess, dire, mode="train", force=False, lastest_filename="checkpoint"):
     """Load checkpoint from the train directory and restore it to saver and sess,
     waiting 10 secs in the case of failure. Also returns checkpoint name."""
     while True:
         try:
-            ckpt_state = tf.train.get_checkpoint_state(dire, lastest_filename)
+            if mode == "train":
+                first_ckpt_dir = dire
+            else:
+                first_ckpt_dir = dire + "/val"
+            ckpt_state = tf.train.get_checkpoint_state(first_ckpt_dir, lastest_filename)
             print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
             saver.restore(sess, ckpt_state.model_checkpoint_path)
             return ckpt_state.model_checkpoint_path
         except Exception as ex:
-            print(colored("Failed to load checkpoint from %s. " % dire, 'red'))
+            print(colored("Failed to load checkpoint from %s. " % first_ckpt_dir, 'red'))
             try:
-                ckpt_state = tf.train.get_checkpoint_state(dire+'/val', lastest_filename)
+                if mode == "train":
+                    second_ckpt_dir = dire + "/val"
+                else:
+                    second_ckpt_dir = dire
+                ckpt_state = tf.train.get_checkpoint_state(second_ckpt_dir, lastest_filename)
                 print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
                 saver.restore(sess, ckpt_state.model_checkpoint_path)
                 return ckpt_state.model_checkpoint_path
             except Exception as ex:
                 print(ex)
                 if not force:
-                    print(colored("Failed to load checkpoint from %s also. Training from scratch.." % (dire+'/val'), 'red'))
+                    print(colored("Failed to load checkpoint from %s also. Training from scratch.." % (second_ckpt_dir), 'red'))
                     return None
-                else:
-                    print("Failed to load checkpoint from %s Sleeping %s munites to waite." % (dire, 10))
-                    time.sleep(10)
+                elif mode == "train":
+                    print("Failed to load checkpoint from %s Sleeping %s munites to waite." % (second_ckpt_dir, 10))
+                    time.sleep(10 * 60)
 
 
 def initialize_uninitialized(sess):

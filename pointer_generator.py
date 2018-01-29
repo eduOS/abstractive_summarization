@@ -26,6 +26,7 @@ import numpy as np
 import tensorflow as tf
 from termcolor import colored
 from attention_decoder import attention_decoder
+from codecs import open
 # from share_function import tableLookup
 from six.moves import xrange
 
@@ -39,6 +40,7 @@ class PointerGenerator(object):
     def __init__(self, hps, vocab):
         self.hps = hps
         self._vocab = vocab
+        self._log_writer = open("./pg_log", "a", "utf-8")
 
     def _add_placeholders(self):
         """Add placeholders to the graph. These are entry points for any input
@@ -99,6 +101,47 @@ class PointerGenerator(object):
           encoder.
           update: only for the evaluation and training of the generator in gan training
         """
+        # print("batch.enc_batch")
+        # print(batch.enc_batch.shape)
+        # print("\n")
+        # print(batch.enc_batch)
+        # print("\n")
+        # print("batch.enc_batch_extend_vocab")
+        # print(batch.enc_batch_extend_vocab.shape)
+        # print("\n")
+        # print(batch.enc_batch_extend_vocab)
+        # print("\n")
+        # print("batch.max_art_oovs")
+        # print("\n")
+        # print(batch.max_art_oovs)
+        # print("\n")
+        # print("batch.enc_lens")
+        # print(batch.enc_lens.shape)
+        # print("\n")
+        # print(batch.enc_lens)
+        # print("\n")
+        # print("batch.enc_padding_mask")
+        # print(batch.enc_padding_mask.shape)
+        # print("\n")
+        # print(batch.enc_padding_mask)
+        # print("\n")
+        # print("\n")
+        # print("batch.dec_batch")
+        # print(batch.dec_batch.shape)
+        # print("\n")
+        # print(batch.dec_batch)
+        # print("\n")
+        # print("batch.target_batch")
+        # print(batch.target_batch.shape)
+        # print("\n")
+        # print(batch.target_batch)
+        # print("\n")
+        # print("batch.dec_padding_mask")
+        # print(batch.dec_padding_mask.shape)
+        # print("\n")
+        # print(batch.dec_padding_mask)
+        # print("\n")
+
         if gan_eval:
             gan = True
         feed_dict = {}
@@ -416,7 +459,7 @@ class PointerGenerator(object):
 
         return decoder_scope
 
-    def _add_decoder(self, emb_dec_inputs, dec_in_state, is_sequence=False):
+    def _add_decoder(self, emb_dec_inputs, dec_in_state):
         """
         input:
             emb_dec_inputs, the input of the cell
@@ -436,7 +479,6 @@ class PointerGenerator(object):
         # a placeholder, why not a variable?
         prev_coverage = self.prev_coverage if self.hps.coverage and self.hps.mode in ["train_gan", "decode"] else None
         # coverage is for decoding in beam_search and gan training
-        is_sequence = self.hps.mode == ["pretrain_gen"] or is_sequence
 
         outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
             emb_dec_inputs, dec_in_state, self.enc_states, self.enc_padding_mask, cell,
@@ -506,10 +548,9 @@ class PointerGenerator(object):
             to_return['coverage_loss'] = self._coverage_loss
         return sess.run(to_return, feed_dict)
 
-    def run_gan_batch(
-        self, sess, batch, samples, sample_targets,
-        sample_padding_mask, rewards, update=True, gan_eval=False
-    ):
+    def run_gan_batch(self, sess, batch, samples, sample_targets,
+                      sample_padding_mask, rewards, update=True, gan_eval=False
+                      ):
         feed_dict = self._make_feed_dict(batch, gan_eval=gan_eval, gan=True)
 
         # this can be combined with evaluation method
@@ -572,7 +613,7 @@ class PointerGenerator(object):
             the embedded input
         """
         # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
-        _, _, _, final_dists, new_states = self._add_decoder(emb_dec_inputs, dec_in_state, is_sequence=True)
+        _, _, _, final_dists, new_states = self._add_decoder(emb_dec_inputs, dec_in_state)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         # final_dists_sliced = tf.slice(final_dists[0], [0, 0], [-1, self._vocab.size()])
         final_dists = final_dists[0]

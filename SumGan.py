@@ -51,7 +51,7 @@ tf.app.flags.DEFINE_integer("pool_layers", 2, "Number of pooling layers in the m
 tf.app.flags.DEFINE_integer("kernel_size", 3, "The kernel size of the filters along the sentence length dimension.")
 tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
-tf.app.flags.DEFINE_integer("dis_vocab_size", 10000, "vocabulary size.")
+tf.app.flags.DEFINE_integer("dis_vocab_size", 50000, "vocabulary size.")
 tf.app.flags.DEFINE_string("dis_vocab_file", "dis_vocab", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_string("vocab_type", "char", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
@@ -102,11 +102,11 @@ tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 300, 'dimension of word embeddings')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
-tf.app.flags.DEFINE_integer('max_enc_steps', 75, 'max timesteps of encoder (max source text tokens)')  # 400
-tf.app.flags.DEFINE_integer('max_dec_steps', 12, 'max timesteps of decoder (max summary tokens)')  # 100
+tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 400
+tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 100
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
-tf.app.flags.DEFINE_integer('gen_vocab_size', 10000, 'Size of vocabulary. These will be read from the vocabulary file in'
+tf.app.flags.DEFINE_integer('gen_vocab_size', 50000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
 tf.app.flags.DEFINE_float('gen_lr', 0.0009, 'learning rate')
@@ -336,7 +336,7 @@ def main(argv):
             print("Building generator graph ...")
             gen_decoder_scope = generator.build_graph()
 
-    if FLAGS.mode != "pretrain_gen":
+    if FLAGS.mode not in ["pretrain_gen", 'decode']:
         print("Building vocabulary for discriminator ...")
         dis_vocab = Vocab(join_path(hps_dis.data_path, hps_dis.dis_vocab_file), hps_dis.dis_vocab_size)
     if FLAGS.mode in ['train_gan', 'pretrain_dis']:
@@ -382,7 +382,7 @@ def main(argv):
         # gen_dir = ensure_exists(FLAGS.model_dir)
         # temp_saver = tf.train.Saver(
         #     var_list=[v for v in all_variables if "generator" in v.name and "Adagrad" not in v.name])
-        ckpt_path = utils.load_ckpt(gen_saver, sess, gen_dir)
+        ckpt_path = utils.load_ckpt(gen_saver, sess, gen_dir, mode="train")
         print('going to restore embeddings from checkpoint')
         if not ckpt_path:
             emb_path = join_path(FLAGS.model_dir, "generator", "init_embed")
@@ -406,14 +406,16 @@ def main(argv):
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         gan_val_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
-        utils.load_ckpt(dec_saver, sess, val_dir, (FLAGS.mode in ["train_gan", "decode"]))
+        utils.load_ckpt(dec_saver, sess, val_dir, mode="val", force=True)
         decoder = Decoder(sess, generator, gen_vocab)
 
     if FLAGS.mode == "pretrain_dis" or (FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1):
         dis_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "discriminator" in v.name])
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
-        ckpt = utils.load_ckpt(dis_saver, sess, dis_dir)
+        mode = "train" if FLAGS.mode == "pretrain_dis" else "val"
+        ckpt = utils.load_ckpt(dis_saver, sess, dis_dir, mode=mode, force=(FLAGS.mode == "train_gan"))
+        del mode
         if not ckpt:
             if hps_dis.vocab_type == "word":
                 discriminator.init_emb(sess, join_path(FLAGS.model_dir, "generator", "init_embed"))
@@ -423,7 +425,7 @@ def main(argv):
     # --------------- train models ---------------
     if FLAGS.mode not in ["pretrain_dis", "decode"]:
         gen_batcher_train = GenBatcher("train", "train", gen_vocab, hps_gen)
-        gen_batcher_val = GenBatcher("val", "val", gen_vocab, hps_gen)
+        gen_batcher_val = GenBatcher("test", "val", gen_vocab, hps_gen)
         val_saver = tf.train.Saver(max_to_keep=10,
                                    var_list=[v for v in all_variables if "generator" in v.name])
 

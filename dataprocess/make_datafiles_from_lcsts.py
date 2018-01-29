@@ -15,7 +15,8 @@ from cntk.tokenizer import JiebaTokenizer
 from utils import sourceline2words
 from cntk.constants.punctuation import Punctuation
 from cntk.standardizer import Standardizer
-import re
+import numpy as np
+import time
 tokenizer = JiebaTokenizer()
 standardizor = Standardizer()
 sys.path.append(
@@ -27,22 +28,11 @@ END_TOKENS = Punctuation.SENTENCE_DELIMITERS
 SENTENCE_START = '<s>'
 SENTENCE_END = '</s>'
 
-all_train_urls = "url_lists/all_train.txt"
-all_val_urls = "url_lists/all_val.txt"
-all_test_urls = "url_lists/all_test.txt"
-
-cnn_tokenized_stories_dir = "cnn_stories_tokenized"
-dm_tokenized_stories_dir = "dm_stories_tokenized"
 finished_files_dir = "./finished_files/"
-chunks_dir = os.path.join(finished_files_dir, "chunked")
-
-# These are the number of .story files we expect there to be in
-# cnn_stories_dir and dm_stories_dir
-num_expected_cnn_stories = 92579
-num_expected_dm_stories = 219506
 
 VOCAB_SIZE = 200000
-CHUNK_SIZE = 1000  # num examples per chunk, for the chunked data
+start = time.time()
+must_include = ['[PAD]', '[UNK]', '[STOP]', '[START]']
 
 
 def read_text_file(text_file):
@@ -57,6 +47,13 @@ def process_line(line):
     return sourceline2words(line)
 
 
+must_include = ['[PAD]', '[UNK]', '[STOP]', '[START]']
+len_art = []
+len_abs = []
+
+log_file = open('corpus_log', 'a', 'utf-8')
+
+
 def get_pairs_from_lcsts(filePath, segment=True):
     """
     both should be segmented
@@ -68,24 +65,74 @@ def get_pairs_from_lcsts(filePath, segment=True):
 
     line = f.readline().strip()
     lines = 0
+    flag = 0
     while line:
         if line == '<summary>':
             summary = f.readline().strip()
+            if flag != 0:
+                print(summary)
+                raise Exception("something went wrong in %s" % filePath)
+            if f.readline().strip() != "</summary>":
+                print(summary)
+                raise Exception("something went wrong in %s" % filePath)
+            flag = 1
+
             if segment:
                 summary = process_line(summary)
 
-            f.readline()
-            f.readline()
-            text = f.readline().strip()
-            if segment:
-                text = process_line(text)
+            line = f.readline().strip()
 
+        elif line == '<short_text>':
+            text = f.readline().strip()
+            if flag != 1:
+                print(summary)
+                raise Exception("something went wrong in %s" % filePath)
+            if f.readline().strip() != "</short_text>":
+                print(text)
+                raise Exception("something went wrong in %s" % filePath)
+            flag = 0
+
+            text = process_line(text)
+            line = f.readline().strip()
+
+        else:
+            line = f.readline().strip()
+            continue
+
+        if flag == 0:
+            dont_yield = 0
+            abs_l = len(summary)
+            len_abs.append(abs_l)
+            if abs_l <= 2:
+                log_file.write(filePath)
+                log_file.write('\n')
+                log_file.write('summary')
+                log_file.write('\n')
+                log_file.write(" ".join(summary))
+                log_file.write('\n')
+                log_file.write('\n')
+                dont_yield = 1
+            art_l = len(text)
+            len_art.append(art_l)
+            if art_l < 20:
+                log_file.write(filePath)
+                log_file.write('\n')
+                log_file.write('text')
+                log_file.write('\n')
+                log_file.write(" ".join(text))
+                log_file.write('\n')
+                log_file.write('\n')
+                dont_yield = 1
             pair = (text, summary)
-            yield pair
-            lines += 1
-            if lines % 200000 == 0:
-                print(lines)
-        line = f.readline().strip()
+            if dont_yield:
+                continue
+            else:
+                lines += 1
+                if lines % 200000 == 0:
+                    print(lines)
+                yield pair
+
+    f.close()
     print(lines)
 
 
@@ -126,15 +173,23 @@ def write_to_txt(source_path, out_file, makevocab=False, max_length=100000):
             tokens = [t for t in tokens if t != ""]  # remove empty
             vocab_counter.update(tokens)
 
+    writer.close()
     # write vocab to file
     if makevocab:
         print("Writing vocab file...")
+        total_vocab = sum(vocab_counter.values())
+        acc_p = 0
         with open(
             os.path.join(finished_files_dir, "vocab"), 'w', 'utf-8'
         ) as writer:
+            for mi in must_include:
+                writer.write(mi + ' ' + "1" + " 0.0" + '\n')
             for word, count in vocab_counter.most_common(VOCAB_SIZE):
-                writer.write(word + ' ' + str(count) + '\n')
+                acc_p += (count / total_vocab)
+                writer.write(word + ' ' + str(count) + " " + str(acc_p) + '\n')
         print("Finished writing vocab file")
+
+    # cumulative probability
 
 
 def check_num_stories(stories_dir, num_expected):
@@ -170,8 +225,31 @@ if __name__ == '__main__':
     )
     write_to_txt(
         source_dir+"PART_I.txt",
-        os.path.join(finished_files_dir, "train.txt"),
+        os.path.join(finished_files_dir, "train.txt"), makevocab=True,
     )
+
+    log_file.write("the mean of art: %s" % float(np.mean(len_art)))
+    log_file.write('\n')
+    log_file.write("the std of art: %s" % float(np.std(len_art)))
+    log_file.write('\n')
+    log_file.write("the max of art: %s" % float(np.max(len_art)))
+    log_file.write('\n')
+    log_file.write("the min of art: %s" % float(np.min(len_art)))
+    log_file.write('\n')
+    log_file.write('\n')
+
+    log_file.write("the mean of abs: %s" % float(np.mean(len_abs)))
+    log_file.write('\n')
+    log_file.write("the std of abs: %s" % float(np.std(len_abs)))
+    log_file.write('\n')
+    log_file.write("the max of abs: %s" % float(np.max(len_abs)))
+    log_file.write('\n')
+    log_file.write("the min of abs: %s" % float(np.min(len_abs)))
+    log_file.write('\n')
+    log_file.write('\n')
+    ts = (time.time() - start) / 3600
+    log_file.write('time spent %.4f h' % ts)
+    log_file.close()
 
     # Chunk the data. This splits each of train.bin, val.bin and test.bin into
     # smaller chunks, each containing e.g. 1000 examples, and saves them in

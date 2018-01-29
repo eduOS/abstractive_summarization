@@ -51,7 +51,7 @@ def read_from_file(vocab_path, embed_path, vocab_size):
     vocab_f = open(vocab_path, 'r', 'utf-8')
     v_l = []
     while(count < vocab_size):
-        v, c = vocab_f.readline().strip().split()
+        v, c, _ = vocab_f.readline().strip().split()
         v = v.strip()
         if v in v_l:
             raise "%s is seen previously" % v
