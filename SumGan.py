@@ -157,7 +157,7 @@ ensure_exists(FLAGS.model_dir)
 def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver):
     """Repeatedly runs training iterations, logging loss to screen and writing
     summaries"""
-    print("starting run_training")
+    print("starting pre_training")
     best_loss = None  # will hold the best loss achieved so far
     val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
     model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator'))
@@ -184,6 +184,14 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
         # print('seconds for training step: %.3f', t1-t0)
 
         loss = results['loss']
+        # loss_per_step = np.transpose(np.array(results['loss_per_step']))
+        # original_abstracts = data.show_abs_oovs(batch.original_abstracts, model._vocab, batch.art_oovs)
+        # original_articles = data.show_art_oovs(batch.original_articles, model._vocab)
+        # for n, lo in enumerate(loss_per_step):
+        #     print('\t'.join(original_articles[n].split()))
+        #     print('\t'.join(original_abstracts[n].split()))
+        #     print("\t".join([str(round(ii, 1)) for ii in lo.tolist()]))
+        # print()
         # print('loss: %f', loss)  # print the loss to screen
         if hps.coverage:
             coverage_loss = results['coverage_loss']
@@ -195,7 +203,7 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
             # check if it is the best checkpoint so far
             eval_loss, best_loss = save_ckpt(
                 sess, model, best_loss, model_dir, model_saver,
-                batcher_val, val_dir, val_saver, global_step)
+                batcher_val, val_dir, val_saver, global_step, gan_eval=False)
             last_ten_eval_loss.append(eval_loss)
             if len(last_ten_eval_loss) == 10 and min(last_ten_eval_loss) == last_ten_eval_loss[0] and eval_save_steps > 5000:
                 eval_save_steps -= 1000
@@ -331,7 +339,7 @@ def main(argv):
         hps_gen = hps_gen._replace(batch_size=hps_gen.batch_size * hps_dis.num_models)
 
     if FLAGS.mode != "pretrain_dis":
-        with tf.variable_scope("generator"):
+        with tf.variable_scope("generator"), tf.device("/gpu:0"):
             generator = PointerGenerator(hps_gen, gen_vocab)
             print("Building generator graph ...")
             gen_decoder_scope = generator.build_graph()
@@ -449,7 +457,8 @@ def main(argv):
         # get reload the
         print('Going to pretrain the generator')
         try:
-            pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, gen_saver, val_saver)
+            with tf.device("/gpu:0"):
+                pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, gen_saver, val_saver)
         except KeyboardInterrupt:
             tf.logging.info("Caught keyboard interrupt on worker....")
 
@@ -520,7 +529,7 @@ def main(argv):
                 # one more process hould be opened for the evaluation
                 eval_loss, gen_best_loss = save_ckpt(
                     sess, generator, gen_best_loss, gan_dir, gan_saver,
-                    gen_batcher_val, gan_val_dir, val_saver, gen_global_step)
+                    gen_batcher_val, gan_val_dir, val_saver, gen_global_step, gan_eval=True)
 
                 if eval_loss:
                     print(

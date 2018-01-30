@@ -105,6 +105,8 @@ class Example(object):
         # Store the original strings ART:
         self.original_article = article
         self.original_abstract = abstract
+        # print("article oovs: %s\n abstract_words: %s\n original article: %s\n original abstract: %s\n" %
+        #       (' '.join(self.article_oovs), ' '.join(abstract_words), article, abstract))
         # self.original_abstract_sents = abstract_sentences
 
     def get_dec_inp_targ_seqs(self, sequence, max_len, start_id, stop_id):
@@ -326,11 +328,14 @@ class GenBatcher(object):
             self._finished_reading = False
         else:
             self._num_example_q_threads = 16
+            # self._num_example_q_threads = 1
             # num threads to fill example queue
             self._num_batch_q_threads = 4  # num threads to fill batch queue
+            # self._num_batch_q_threads = 1  # num threads to fill batch queue
             # how many batches-worth of examples to load into cache before
             # bucketing
             self._bucketing_cache_size = 100
+            # self._bucketing_cache_size = 1
 
             # Start a thread that watches the other threads and restarts them if
             # they're dead

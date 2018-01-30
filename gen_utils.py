@@ -38,7 +38,7 @@ def convert_to_coverage_model():
     exit()
 
 
-def calc_running_avg_loss(loss, running_avg_loss, step, decay=0.9):
+def calc_running_avg_loss(loss, running_avg_loss, step, decay=0.99):
     """Calculate the running average loss via exponential decay.
     This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
 
@@ -72,7 +72,7 @@ def get_best_loss_from_chpt(val_dir, key_name="least_val_loss"):
 
 
 def save_ckpt(sess, model, best_loss, model_dir, model_saver,
-              val_batcher, val_dir, val_saver, global_step):
+              val_batcher, val_dir, val_saver, global_step, gan_eval=True):
     """
     save model to model dir or evaluation directory
     """
@@ -88,7 +88,7 @@ def save_ckpt(sess, model, best_loss, model_dir, model_saver,
         val_batch = val_batcher.next_batch()
         if not val_batch:
             break
-        results_val = model.run_one_batch(sess, val_batch, update=False, gan_eval=True)
+        results_val = model.run_one_batch(sess, val_batch, update=False, gan_eval=gan_eval)
         loss_eval = results_val["loss"]
         # why there exists nan?
         if not math.isnan(loss_eval):

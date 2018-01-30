@@ -194,6 +194,7 @@ def abstract2ids(abstract_words, vocab, article_oovs):
                 vocab_idx = vocab.size() + article_oovs.index(w)
                 ids.append(vocab_idx)
             else:  # If w is an out-of-article OOV
+                # print('oov', w)
                 ids.append(unk_id)  # Map to the UNK token id
                 # that means all words appear in the decoded abstract should be
                 # from the

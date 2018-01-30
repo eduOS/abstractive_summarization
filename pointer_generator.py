@@ -27,7 +27,6 @@ import tensorflow as tf
 from termcolor import colored
 from attention_decoder import attention_decoder
 from codecs import open
-# from share_function import tableLookup
 from six.moves import xrange
 
 FLAGS = tf.app.flags.FLAGS
@@ -101,46 +100,6 @@ class PointerGenerator(object):
           encoder.
           update: only for the evaluation and training of the generator in gan training
         """
-        # print("batch.enc_batch")
-        # print(batch.enc_batch.shape)
-        # print("\n")
-        # print(batch.enc_batch)
-        # print("\n")
-        # print("batch.enc_batch_extend_vocab")
-        # print(batch.enc_batch_extend_vocab.shape)
-        # print("\n")
-        # print(batch.enc_batch_extend_vocab)
-        # print("\n")
-        # print("batch.max_art_oovs")
-        # print("\n")
-        # print(batch.max_art_oovs)
-        # print("\n")
-        # print("batch.enc_lens")
-        # print(batch.enc_lens.shape)
-        # print("\n")
-        # print(batch.enc_lens)
-        # print("\n")
-        # print("batch.enc_padding_mask")
-        # print(batch.enc_padding_mask.shape)
-        # print("\n")
-        # print(batch.enc_padding_mask)
-        # print("\n")
-        # print("\n")
-        # print("batch.dec_batch")
-        # print(batch.dec_batch.shape)
-        # print("\n")
-        # print(batch.dec_batch)
-        # print("\n")
-        # print("batch.target_batch")
-        # print(batch.target_batch.shape)
-        # print("\n")
-        # print(batch.target_batch)
-        # print("\n")
-        # print("batch.dec_padding_mask")
-        # print(batch.dec_padding_mask.shape)
-        # print("\n")
-        # print(batch.dec_padding_mask)
-        # print("\n")
 
         if gan_eval:
             gan = True
@@ -392,6 +351,7 @@ class PointerGenerator(object):
 
                 # for training of generator
                 loss_per_step = get_loss(final_dists, self.target_batch, self.dec_padding_mask)
+                # self.loss_per_step = loss_per_step
                 eval_loss_per_step = get_loss(eval_final_dists, self.target_batch, self.dec_padding_mask)
                 # Apply padding_mask mask and get loss
                 self._loss = _avg(loss_per_step, self.dec_padding_mask)
@@ -482,7 +442,7 @@ class PointerGenerator(object):
 
         outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
             emb_dec_inputs, dec_in_state, self.enc_states, self.enc_padding_mask, cell,
-            initial_state_attention=(len(emb_dec_inputs) > 1),
+            initial_state_attention=(len(emb_dec_inputs) == 1),
             use_coverage=self.hps.coverage, prev_coverage=prev_coverage)
 
         # Add the output projection to obtain the vocabulary distribution
@@ -544,6 +504,7 @@ class PointerGenerator(object):
         if update:
             # if update is False it is for the generator evaluation
             to_return['train_op'] = self._train_op
+            # to_return['loss_per_step'] = self.loss_per_step
         if self.hps.coverage:
             to_return['coverage_loss'] = self._coverage_loss
         return sess.run(to_return, feed_dict)
