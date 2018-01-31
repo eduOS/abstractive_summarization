@@ -40,6 +40,8 @@ class PointerGenerator(object):
         self.hps = hps
         self._vocab = vocab
         self._log_writer = open("./pg_log", "a", "utf-8")
+        with tf.variable_scope("OptimizeLoss"):
+            self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(hps.dis_lr))
 
     def _add_placeholders(self):
         """Add placeholders to the graph. These are entry points for any input

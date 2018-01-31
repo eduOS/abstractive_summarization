@@ -58,8 +58,7 @@ tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_integer("num_models", 3, "Size of each model layer. The actural size is doubled.")
 
 # Training parameters
-tf.app.flags.DEFINE_float("dis_lr", 0.0005, "Learning rate.")
-tf.app.flags.DEFINE_float("lr_decay_factor", 0.5, "Learning rate decays by this much.")
+tf.app.flags.DEFINE_float("lr_decay_factor", 0.8, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("dis_max_gradient", 2.0, "Clip gradients to this norm.")
 # TODO: how much thould this be?
 tf.app.flags.DEFINE_boolean("early_stop", False, "Set to True to turn on early stop.")
@@ -108,7 +107,6 @@ tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of gene
 tf.app.flags.DEFINE_integer('gen_vocab_size', 5000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
-tf.app.flags.DEFINE_float('gen_lr', 0.0002, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
 tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
@@ -135,7 +133,6 @@ tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many t
 tf.app.flags.DEFINE_integer('rollout_num', 12, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
 tf.app.flags.DEFINE_integer('sample_num', 2, 'beam size for beam search decoding.')
-tf.app.flags.DEFINE_float('gan_lr', 0.0005, 'learning rate for the gen in GAN training')
 tf.app.flags.DEFINE_float('rouge_reward_ratio', 0.0, 'The importance of rollout in calculating the reward.')
 
 FLAGS = tf.app.flags.FLAGS
@@ -279,9 +276,9 @@ def main(argv):
         'vocab_type',
         'gen_vocab_size',
         'hidden_dim',
-        'gen_lr',
         'gen_max_gradient',
         'max_dec_steps',
+        'lr_decay_factor',
         'max_enc_steps',
         'min_dec_steps',
         'trunc_norm_init_std',
@@ -318,7 +315,6 @@ def main(argv):
         'pool_layers',
         'dis_max_gradient',
         'batch_size',
-        'dis_lr',
         'lr_decay_factor',
         'cell_type',
         'max_enc_steps',
@@ -374,9 +370,9 @@ def main(argv):
         'gan_iter',
         'gan_gen_iter',
         'gan_dis_iter',
-        'gan_lr',
         'rollout_num',
         'sample_num',
+        'lr_decay_factor',
         'rouge_reward_ratio',
         "rollout_start",
     ]
