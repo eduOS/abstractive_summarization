@@ -108,7 +108,7 @@ tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of gene
 tf.app.flags.DEFINE_integer('gen_vocab_size', 5000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
-tf.app.flags.DEFINE_float('gen_lr', 0.0002, 'learning rate')
+tf.app.flags.DEFINE_float('gen_lr', 0.0001, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
 tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
@@ -205,7 +205,6 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
                 batcher_val, val_dir, val_saver, global_step, gan_eval=False)
             last_ten_eval_loss.append(eval_loss)
             if len(last_ten_eval_loss) == 10 and min(last_ten_eval_loss) == last_ten_eval_loss[0] and eval_save_steps > 5000:
-                model.
                 last_ten_eval_loss = deque(maxlen=10)
                 eval_save_steps -= 1000
 
@@ -400,8 +399,13 @@ def main(argv):
     sess.run(tf.variables_initializer(all_variables))
     if FLAGS.mode == "pretrain_gen":
         print("Restoring the generator model from the latest checkpoint...")
-        gen_saver = tf.train.Saver(
-            max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
+        var_list = [v for v in all_variables if "generator" in v.name]
+        gen_newly_added = []
+        # add the newly added variables here
+        for vn in gen_newly_added:
+            var_list = [v for v in var_list if vn not in v.name]
+        gen_saver = tf.train.Saver(max_to_keep=3, var_list=var_list)
+        gen_val_saver = tf.train.Saver(max_to_keep=10, var_list=var_list)
         gen_dir = ensure_exists(join_path(FLAGS.model_dir, "generator"))
         # gen_dir = ensure_exists(FLAGS.model_dir)
         # temp_saver = tf.train.Saver(
@@ -426,10 +430,13 @@ def main(argv):
         val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
         gan_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir))
         gan_val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir, "val"))
-        gan_saver = tf.train.Saver(
-            max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
-        gan_val_saver = tf.train.Saver(
-            max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
+        gan_newly_added = []
+        # add the newly added variables here
+        var_list = [v for v in all_variables if "generator" in v.name]
+        for vn in gan_newly_added:
+            var_list = [v for v in var_list if vn not in v.name]
+        gan_saver = tf.train.Saver(max_to_keep=3, var_list=var_list)
+        gan_val_saver = tf.train.Saver(max_to_keep=3, var_list=var_list)
         utils.load_ckpt(dec_saver, sess, val_dir, mode="val", force=True)
         decoder = Decoder(sess, generator, gen_vocab)
 
@@ -449,9 +456,7 @@ def main(argv):
     # --------------- train models ---------------
     if FLAGS.mode not in ["pretrain_dis", "decode"]:
         gen_batcher_train = GenBatcher("train", "train", gen_vocab, hps_gen)
-        gen_batcher_val = GenBatcher("test", "val", gen_vocab, hps_gen)
-        val_saver = tf.train.Saver(max_to_keep=10,
-                                   var_list=[v for v in all_variables if "generator" in v.name])
+        gen_batcher_val = GenBatcher("val", "val", gen_vocab, hps_gen)
 
     if FLAGS.mode == "decode":
         decoder_batcher = GenBatcher("test", "test", gen_vocab, hps_gen)
@@ -473,7 +478,7 @@ def main(argv):
         print('Going to pretrain the generator')
         try:
             with tf.device("/gpu:0"):
-                pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, gen_saver, val_saver)
+                pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, gen_saver, gen_val_saver)
         except KeyboardInterrupt:
             tf.logging.info("Caught keyboard interrupt on worker....")
 
@@ -544,7 +549,7 @@ def main(argv):
                 # one more process hould be opened for the evaluation
                 eval_loss, gen_best_loss = save_ckpt(
                     sess, generator, gen_best_loss, gan_dir, gan_saver,
-                    gen_batcher_val, gan_val_dir, val_saver, gen_global_step, gan_eval=True)
+                    gen_batcher_val, gan_val_dir, gen_val_saver, gen_global_step, gan_eval=True)
 
                 if eval_loss:
                     print(

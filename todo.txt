@@ -56,6 +56,7 @@
 https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-python
 45. add the learning rate update
 46. add the checkpoint modification
+47. the content can be used to train a value iteration for the reward, if can be found in the content the reward is higher
 
 # problems
 1. cannot end
