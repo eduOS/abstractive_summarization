@@ -28,7 +28,7 @@ def read_from_file(vocab_path, embed_path, vocab_size):
             v, emb = embed.strip().split("\t")
         except:
             print(embed)
-        v = v.strip().lower()
+        v = v.strip()
         if v in old_embed_dic:
             continue
         emb_l = [float(e) for e in emb.split()]

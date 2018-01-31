@@ -11,7 +11,7 @@ import collections
 # from tensorflow.core.example import example_pb2
 import os.path
 from codecs import open
-from cntk.tokenizer import JiebaTokenizer
+from cntk.tokenizer import JiebaTokenizer, text2charlist
 from utils import sourceline2words
 from cntk.constants.punctuation import Punctuation
 from cntk.standardizer import Standardizer
@@ -56,7 +56,7 @@ log_file = open('corpus_log', 'a', 'utf-8')
 
 def get_pairs_from_lcsts(filePath, segment=True):
     """
-    both should be segmented
+    both should be segmented if segment is true
     """
 
     # training set
@@ -79,6 +79,8 @@ def get_pairs_from_lcsts(filePath, segment=True):
 
             if segment:
                 summary = process_line(summary)
+            else:
+                summary = text2charlist(summary)
 
             line = f.readline().strip()
 
@@ -92,7 +94,10 @@ def get_pairs_from_lcsts(filePath, segment=True):
                 raise Exception("something went wrong in %s" % filePath)
             flag = 0
 
-            text = process_line(text)
+            if segment:
+                text = process_line(text)
+            else:
+                text = text2charlist(text)
             line = f.readline().strip()
 
         else:
@@ -103,7 +108,7 @@ def get_pairs_from_lcsts(filePath, segment=True):
             dont_yield = 0
             abs_l = len(summary)
             len_abs.append(abs_l)
-            if abs_l <= 2:
+            if abs_l <= 3:
                 log_file.write(filePath)
                 log_file.write('\n')
                 log_file.write('summary')
@@ -136,7 +141,7 @@ def get_pairs_from_lcsts(filePath, segment=True):
     print(lines)
 
 
-def write_to_txt(source_path, out_file, makevocab=False, max_length=100000):
+def write_to_txt(source_path, out_file, makevocab=False, max_length=100000, segment=True):
     """Reads the tokenized .story files corresponding to the urls listed in the
     url_file and writes them to a out_file."""
 
@@ -148,7 +153,7 @@ def write_to_txt(source_path, out_file, makevocab=False, max_length=100000):
 
     writer = open(out_file + "_" + str(file_num), 'w', 'utf-8')
 
-    for art_tokens, abs_tokens in get_pairs_from_lcsts(source_path):
+    for art_tokens, abs_tokens in get_pairs_from_lcsts(source_path, segment=segment):
         # Write to file
         if length >= max_length:
             file_num += 1
@@ -205,6 +210,7 @@ if __name__ == '__main__':
         print("USAGE: python make_datafiles.py <source_dir>")
         sys.exit()
     source_dir = sys.argv[1]
+    segment = False
 
     # Create some new directories
     if not os.path.exists(finished_files_dir):
@@ -217,15 +223,18 @@ if __name__ == '__main__':
     # files
     write_to_txt(
         source_dir+"PART_III.txt",
-        os.path.join(finished_files_dir, "test.txt")
+        os.path.join(finished_files_dir, "test.txt"),
+        segment=segment
     )
     write_to_txt(
         source_dir+"PART_II.txt",
-        os.path.join(finished_files_dir, "val.txt")
+        os.path.join(finished_files_dir, "val.txt"),
+        segment=segment
     )
     write_to_txt(
         source_dir+"PART_I.txt",
         os.path.join(finished_files_dir, "train.txt"), makevocab=True,
+        segment=segment
     )
 
     log_file.write("the mean of art: %s" % float(np.mean(len_art)))

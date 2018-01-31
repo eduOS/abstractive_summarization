@@ -40,6 +40,7 @@
 30. decode the not pointer generator option in the graph
 31. separate the discriminator graph and the generator graph but load them together in order to train then separately [check]
 32. train my own vocabulary for the discriminator
+  already get a pretrained one
 33. rollout weights decay
 34. the beam search is too slow thus a multithread function should be added
 35. it seems that using two dictionaries is less efficient in using the reward
@@ -47,12 +48,14 @@
 37. initialize the variables in the graph but cannot be loaded from the checkpoint
 38. update the validation dataset with the improvement of the quality of the generated sample
 39. while processing the data, I should tokenize the article into sentences first and then segment them into words.
-40. vocabulary should be rebuilt because there were traditional chinese in corpus when building it
+40. vocabulary should be rebuilt because there were traditional chinese in corpus when building it [check]
 41. add the reinforcement rouge reward
 42. collect some keywords from the long content to form a dynamic vocabulary, but how to make use of those keywords remains a problem
 43. the rollout can be move out from the graph to make it less error-prone
 44. vocab acumulative probability to choose the vocab_size
 https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-python
+45. add the learning rate update
+46. add the checkpoint modification
 
 # problems
 1. cannot end
@@ -80,6 +83,8 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
   minuts the previous word's rouge value is a good idea
 11. the oov problem:
   ensure that the traditional chinese character have been transfered into simplified ones
+12. the word segmentation tool doesn't work well
+  change to charater based 
 
 # error
 1. a list of float cannot be joined
@@ -87,5 +92,14 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 
 # tips 
   immediate rewards should be given more importance, discount or impatience
+    because the summition is finite then we just set the discount to 1
+    if discout is set to 0.8 it works better practically
+    https://pdfs.semanticscholar.org/4814/21dd6b320e9aa2325420cc27cdee22ee36cd.pdf
+  vocabulary:
+    95.5% about 5000, zipf's law
+  length:
+    min, max = mean - 2 * STD, mean + 2 * STD
+    cover 96% lengthes
+  reward is for what to do but not how to do it
   unit testing
   

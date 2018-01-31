@@ -248,6 +248,10 @@ def my_lcs(string, sub):
 
 
 def rouge_l(samples, references, beta=1.2, rs=None):
+    """
+    samples: list of list,
+    references: list of list
+    """
     prec = []
     rec = []
     scores = []

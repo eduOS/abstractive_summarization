@@ -51,8 +51,8 @@ tf.app.flags.DEFINE_integer("pool_layers", 2, "Number of pooling layers in the m
 tf.app.flags.DEFINE_integer("kernel_size", 3, "The kernel size of the filters along the sentence length dimension.")
 tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
-tf.app.flags.DEFINE_integer("dis_vocab_size", 50000, "vocabulary size.")
-tf.app.flags.DEFINE_string("dis_vocab_file", "dis_vocab", "the path of the discriminator vocabulary.")
+tf.app.flags.DEFINE_integer("dis_vocab_size", 5000, "vocabulary size.")
+tf.app.flags.DEFINE_string("dis_vocab_file", "vocab", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_string("vocab_type", "char", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_integer("num_models", 3, "Size of each model layer. The actural size is doubled.")
@@ -95,7 +95,6 @@ tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True
 tf.app.flags.DEFINE_string('log_root', './log/', 'Root directory for all logging.')
 tf.app.flags.DEFINE_string('dec_dir', '', 'Where to generate the decode results. If false the time stamp is toke.')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in adirectory with this name, under log_root.')
-tf.app.flags.DEFINE_boolean('update_gen', True, 'to decide if to train generator.')
 
 # Hyperparameters
 tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
@@ -106,10 +105,10 @@ tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max 
 tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 100
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
-tf.app.flags.DEFINE_integer('gen_vocab_size', 50000, 'Size of vocabulary. These will be read from the vocabulary file in'
+tf.app.flags.DEFINE_integer('gen_vocab_size', 5000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
-tf.app.flags.DEFINE_float('gen_lr', 0.0009, 'learning rate')
+tf.app.flags.DEFINE_float('gen_lr', 0.0002, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
 tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
@@ -206,6 +205,8 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
                 batcher_val, val_dir, val_saver, global_step, gan_eval=False)
             last_ten_eval_loss.append(eval_loss)
             if len(last_ten_eval_loss) == 10 and min(last_ten_eval_loss) == last_ten_eval_loss[0] and eval_save_steps > 5000:
+                model.
+                last_ten_eval_loss = deque(maxlen=10)
                 eval_save_steps -= 1000
 
             # print the print the dashboard
@@ -275,6 +276,7 @@ def main(argv):
         'emb_dim',
         'rand_unif_init_mag',
         'gen_vocab_file',
+        'vocab_type',
         'gen_vocab_size',
         'hidden_dim',
         'gen_lr',
@@ -332,9 +334,22 @@ def main(argv):
 
     hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
     if hps_gen.gen_vocab_file == hps_dis.dis_vocab_file:
-        hps_dis = hps_dis._replace(vocab_type="word")
+        assert hps_dis.vocab_type == hps_gen.vocab_type, (
+            "the vocab type of the generator and the discriminator should be the same")
         hps_dis = hps_dis._replace(layer_size=hps_gen.emb_dim)
         hps_dis = hps_dis._replace(dis_vocab_size=hps_gen.gen_vocab_size)
+
+    if hps_gen.vocab_type == 'word' == hps_dis.vocab_type:
+        hps_dis = hps_dis._replace(max_dec_steps=15)
+        hps_dis = hps_dis._replace(max_enc_steps=73)
+        hps_gen = hps_gen._replace(max_dec_steps=15)
+        hps_gen = hps_gen._replace(max_enc_steps=73)
+    elif hps_gen.vocab_type == 'char' == hps_dis.vocab_type:
+        hps_dis = hps_dis._replace(max_dec_steps=25)
+        hps_dis = hps_dis._replace(max_enc_steps=120)
+        hps_gen = hps_gen._replace(max_dec_steps=25)
+        hps_gen = hps_gen._replace(max_enc_steps=120)
+
     if FLAGS.mode == "train_gan":
         hps_gen = hps_gen._replace(batch_size=hps_gen.batch_size * hps_dis.num_models)
 
@@ -426,7 +441,7 @@ def main(argv):
         ckpt = utils.load_ckpt(dis_saver, sess, dis_dir, mode=mode, force=(FLAGS.mode == "train_gan"))
         del mode
         if not ckpt:
-            if hps_dis.vocab_type == "word":
+            if hps_dis.vocab_type == hps_gen.vocab_type:
                 discriminator.init_emb(sess, join_path(FLAGS.model_dir, "generator", "init_embed"))
             else:
                 discriminator.init_emb(sess, join_path(FLAGS.model_dir, "discriminator", "init_embed"))
@@ -568,30 +583,25 @@ def main(argv):
                 print('Going to train the discriminator.')
             for d_gan in range(gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
-                enc_states, dec_in_state, k_samples_words, _ = decoder.mc_generate(
+                enc_states, dec_in_state, k_samples, _ = decoder.mc_generate(
                     batch, s_num=hps_gan.sample_num)
                 # shuould first tanslate to words to avoid unk
                 articles_oovs = batch.art_oovs
-                for samples_words in k_samples_words:
-                    dec_batch_words = batch.target_batch
-                    conditions_words = batch.enc_batch_extend_vocab
-                    zeros = np.zeros((conditions_words.shape[0], hps_gen.max_enc_steps))
-                    zeros[:, :conditions_words.shape[1]] = conditions_words
-                    conditions_words = zeros
-                    if hps_dis.vocab_type == "char":
+                for samples in k_samples:
+                    dec_batch = batch.target_batch
+                    conditions = batch.enc_batch_extend_vocab
+                    zeros = np.zeros((conditions.shape[0], hps_gen.max_enc_steps))
+                    zeros[:, :conditions.shape[1]] = conditions
+                    conditions = zeros
+                    if hps_gen.vocab_type == "word" and hps_dis.vocab_type == "char":
                         samples = gen_vocab2dis_vocab(
-                            samples_words, gen_vocab, articles_oovs,
+                            samples, gen_vocab, articles_oovs,
                             dis_vocab, hps_dis.max_dec_steps, STOP_DECODING)
                         dec_batch = gen_vocab2dis_vocab(
-                            dec_batch_words, gen_vocab, articles_oovs, dis_vocab, hps_dis.max_dec_steps, STOP_DECODING)
+                            dec_batch, gen_vocab, articles_oovs, dis_vocab, hps_dis.max_dec_steps, STOP_DECODING)
                         conditions = gen_vocab2dis_vocab(
-                            conditions_words, gen_vocab, articles_oovs,
+                            conditions, gen_vocab, articles_oovs,
                             dis_vocab, hps_dis.max_enc_steps, PAD_TOKEN)
-                    else:
-                        samples = samples_words
-                        dec_batch = dec_batch_words
-                        conditions = conditions_words
-                        # the unknown in target
 
                     inputs = np.concatenate([samples, dec_batch], 0)
                     conditions = np.concatenate([conditions, conditions], 0)

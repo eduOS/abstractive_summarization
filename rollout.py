@@ -9,7 +9,6 @@ from data import gen_vocab2dis_vocab
 from data import strip_pads
 import data
 from utils import rouge_l
-from termcolor import colored
 PAD_TOKEN = "[PAD]"
 START_DECODING = '[START]'
 STOP_DECODING = '[STOP]'
@@ -103,17 +102,17 @@ class Rollout(object):
         rouge_ratio = hps_gan.rouge_reward_ratio
 
         article_oovs = source_batch.art_oovs
-        art_words = source_batch.enc_batch_extend_vocab
-        batch_size = art_words.shape[0]
+        articles = source_batch.enc_batch_extend_vocab
+        batch_size = articles.shape[0]
 
-        if discriminator.hps.vocab_type == "char":
+        if self.generator.hps.vocab_type == "word" and discriminator.hps.vocab_type == "char":
             articles = gen_vocab2dis_vocab(
-                art_words, gen_vocab, article_oovs,
+                articles, gen_vocab, article_oovs,
                 dis_vocab, discriminator.hps.max_enc_steps, PAD_TOKEN)
         else:
-            conditions_words = art_words
+            conditions = articles
             zeros = np.zeros((batch_size, discriminator.hps.max_enc_steps))
-            zeros[:, :conditions_words.shape[1]] = conditions_words
+            zeros[:, :conditions.shape[1]] = conditions
             articles = zeros
         # abs_chars = np.array(gen_vocab2dis_vocab(
         #     source_batch.target_batch, gen_vocab, article_oovs,
@@ -135,20 +134,18 @@ class Rollout(object):
                     feed_dict[self.generator.enc_padding_mask] = source_batch.enc_padding_mask
                     feed_dict[self.cell_c] = dec_in_state.c
                     feed_dict[self.cell_h] = dec_in_state.h
-                    feed_dict[self.generator.enc_batch_extend_vocab] = art_words
+                    feed_dict[self.generator.enc_batch_extend_vocab] = articles
                     feed_dict[self.generator.max_art_oovs] = source_batch.max_art_oovs
                     # how to deal with the coverage?
 
                     # the unique feature for the pointer gen is the
                     # enc_batch_extend_vocab and the max_art_oovs
-                    rollout_samples_words = sess.run(self.rollout_sample_ar, feed_dict)
+                    rollout_samples = sess.run(self.rollout_sample_ar, feed_dict)
                     # how about multiple generators for one discriminator?
-                    if discriminator.hps.vocab_type == "char":
+                    if self.generator.hps.vocab_type == "word" and discriminator.hps.vocab_type == "char":
                         rollout_samples = gen_vocab2dis_vocab(
-                            rollout_samples_words, gen_vocab, article_oovs,
-                            dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, art_words, print_sample=False)
-                    else:
-                        rollout_samples = rollout_samples_words
+                            rollout_samples, gen_vocab, article_oovs,
+                            dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, articles, print_sample=False)
 
                     if rouge_ratio != 1:
                         if given_num != 0:
@@ -173,7 +170,7 @@ class Rollout(object):
                         ps = "multinomial in rollout"
                     else:
                         ps = False
-                    if discriminator.hps.vocab_type == "char":
+                    if self.generator.hps.vocab_type == "word" and discriminator.hps.vocab_type == "char":
                         samples = gen_vocab2dis_vocab(
                             samples, gen_vocab, article_oovs,
                             dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, print_sample=ps)

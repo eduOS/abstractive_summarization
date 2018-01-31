@@ -534,6 +534,9 @@ class GenBatcher(object):
                     else:
                         print('Found an example with empty article text. Skipping it.')
 
+                if self._mode == "train":
+                    break
+
             if self._mode == "test":
                 break
 
