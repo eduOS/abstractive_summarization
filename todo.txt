@@ -103,4 +103,13 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
     cover 96% lengthes
   reward is for what to do but not how to do it
   unit testing
-  
+
+  the copy mechanism
+    the maximum chars can be copied(in the reference and in the content/len(reference)): 62.2% 
+
+    performance(in the content and in the hypothesis/hypothesis):
+
+    rate of correction(in the content, in the reference and in the hypothesis/in the content, in the reference):
+
+    rate of mistakenly copied(in the content, not in the reference, but in the hypothesis/hypothesis):
+    rate of missing(in the content, in the reference but not in the hypothesis/in the content, in the reference):

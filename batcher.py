@@ -304,7 +304,7 @@ class GenBatcher(object):
             mode in ["train", "test", "val"],
             "mode should be in ['train', 'test', 'val'] but %s provided" % mode)
         self._mode = mode
-        self._data_path = os.path.join(hps.data_path, mode) + ".txt_*"
+        self._data_path = os.path.join(hps.data_path, file_name) + ".txt_*"
         self._minutes = 0
         self._files_name_dict = dd(lambda: 0)
         self._log_writer = open("./gen_batcher_writer", "a", "utf-8")
@@ -396,12 +396,10 @@ class GenBatcher(object):
                 (article, abstract) = input_gen.next()
             except StopIteration:  # if there are no more examples:
                 red_print(
-                    "The example generator for this example queue filling thread\
-                    has exhausted data.")
+                    "The example generator for this example queue filling thread has exhausted data.")
                 if self._mode in ['test']:
                     red_print(
-                        "single_pass mode is on, so we've finished reading\
-                        dataset. This thread is stopping.", "yellow")
+                        "single_pass mode is on, so we've finished reading dataset. This thread is stopping.", "yellow")
                     self._finished_reading = True
                     break
                 else:

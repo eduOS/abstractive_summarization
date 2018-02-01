@@ -35,7 +35,7 @@ def load_ckpt(saver, sess, dire, mode="train", force=False, lastest_filename="ch
             if mode == "train":
                 first_ckpt_dir = dire
             else:
-                first_ckpt_dir = dire + "/val"
+                first_ckpt_dir = os.path.join(dire, "val")
             ckpt_state = tf.train.get_checkpoint_state(first_ckpt_dir, lastest_filename)
             print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
             saver.restore(sess, ckpt_state.model_checkpoint_path)
@@ -44,7 +44,7 @@ def load_ckpt(saver, sess, dire, mode="train", force=False, lastest_filename="ch
             print(colored("Failed to load checkpoint from %s. " % first_ckpt_dir, 'red'))
             try:
                 if mode == "train":
-                    second_ckpt_dir = dire + "/val"
+                    second_ckpt_dir = os.path.join(dire, "val")
                 else:
                     second_ckpt_dir = dire
                 ckpt_state = tf.train.get_checkpoint_state(second_ckpt_dir, lastest_filename)

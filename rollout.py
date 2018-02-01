@@ -21,7 +21,7 @@ class Rollout(object):
         self.update_rate = update_rate
         # TODO: for the variables update
         self._gen_hps = self.generator.hps
-        self.g_embeddings = tf.identity(self.generator.embeddings)
+        self.g_embeddings = self.generator.embeddings
         start_tokens = np.array([self.generator._vocab.word2id(data.START_DECODING)] * self._gen_hps.batch_size)
         emb_start_token = tf.nn.embedding_lookup(self.g_embeddings, start_tokens)
         next_input = emb_start_token

@@ -183,15 +183,9 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
         # print('seconds for training step: %.3f', t1-t0)
 
         loss = results['loss']
-        # loss_per_step = np.transpose(np.array(results['loss_per_step']))
-        # original_abstracts = data.show_abs_oovs(batch.original_abstracts, model._vocab, batch.art_oovs)
-        # original_articles = data.show_art_oovs(batch.original_articles, model._vocab)
-        # for n, lo in enumerate(loss_per_step):
-        #     print('\t'.join(original_articles[n].split()))
-        #     print('\t'.join(original_abstracts[n].split()))
-        #     print("\t".join([str(round(ii, 1)) for ii in lo.tolist()]))
-        # print()
-        # print('loss: %f', loss)  # print the loss to screen
+        if global_step == 1:
+            print("The training starts with loss %s." % loss)
+
         if hps.coverage:
             coverage_loss = results['coverage_loss']
 
@@ -459,7 +453,7 @@ def main(argv):
         gen_batcher_val = GenBatcher("val", "val", gen_vocab, hps_gen)
 
     if FLAGS.mode == "decode":
-        decoder_batcher = GenBatcher("test", "test", gen_vocab, hps_gen)
+        decoder_batcher = GenBatcher("val", "test", gen_vocab, hps_gen)
 
     if FLAGS.mode == "train_gan":
         gan_batcher_val = GenBatcher("test", "val", gen_vocab, hps_gen)
