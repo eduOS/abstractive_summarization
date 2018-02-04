@@ -33,7 +33,6 @@ import os
 from collections import defaultdict as dd
 from cntk.tokenizer import text2charlist
 from codecs import open
-import datetime
 from utils import red_assert, red_print
 
 
@@ -504,14 +503,14 @@ class GenBatcher(object):
             if self._mode == "train":
                 random.shuffle(filelist)
             for ff in filelist:
-                print("opening file %s" % ff)
+                # print("opening file %s" % ff)
                 f = open(ff, "r", 'utf-8')
                 while True:
                     art_abs = f.readline().strip().split("\t")
                     if len(art_abs) != 2:
-                        print(
-                            "file %s reaches the end of the data file %s"
-                            % (f.name, datetime.datetime.now().strftime("on %m-%d at %H:%M")))
+                        # print(
+                        #     "file %s reaches the end of the data file %s"
+                        #     % (f.name, datetime.datetime.now().strftime("on %m-%d at %H:%M")))
                         if self._mode == "val":
                             f.seek(0)
                             yield (None, None)
@@ -523,7 +522,7 @@ class GenBatcher(object):
                         else:
                             # for training
                             f.close()
-                            print("closing file %s" % ff)
+                            # print("closing file %s" % ff)
                             break
                     article_text, abstract_text = art_abs
                     if article_text and abstract_text:

@@ -8,11 +8,10 @@ import numpy as np
 from data import gen_vocab2dis_vocab
 from data import strip_pads
 import data
-from utils import rouge_l
+from gan_utils import rouge_l
 PAD_TOKEN = "[PAD]"
 START_DECODING = '[START]'
 STOP_DECODING = '[STOP]'
-FLAGS = tf.app.flags.FLAGS
 
 
 class Rollout(object):
@@ -103,17 +102,17 @@ class Rollout(object):
 
         article_oovs = source_batch.art_oovs
         articles = source_batch.enc_batch_extend_vocab
-        batch_size = articles.shape[0]
+        batch_size = int(articles.shape[0])
 
         if self.generator.hps.vocab_type == "word" and discriminator.hps.vocab_type == "char":
             articles = gen_vocab2dis_vocab(
                 articles, gen_vocab, article_oovs,
                 dis_vocab, discriminator.hps.max_enc_steps, PAD_TOKEN)
-        else:
-            conditions = articles
-            zeros = np.zeros((batch_size, discriminator.hps.max_enc_steps))
-            zeros[:, :conditions.shape[1]] = conditions
-            articles = zeros
+        # else:
+        #     conditions = articles
+        #     zeros = np.zeros((batch_size, discriminator.hps.max_enc_steps))
+        #     zeros[:, :conditions.shape[1]] = conditions
+        #     articles = zeros
         # abs_chars = np.array(gen_vocab2dis_vocab(
         #     source_batch.target_batch, gen_vocab, article_oovs,
         #     dis_vocab, self._gen_hps.max_dec_steps, STOP_DECODING))
@@ -121,7 +120,7 @@ class Rollout(object):
 
         for k, samples in enumerate(k_samples):
             dis_rewards = []
-            rouge_rewards = np.zeros(self._gen_hps.max_dec_steps+1, batch_size)
+            rouge_rewards = np.zeros((self._gen_hps.max_dec_steps+1, batch_size))
             for ir in range(rollout_num):
                 for given_num in range(hps_gan.rollout_start, self._gen_hps.max_dec_steps):
 
@@ -159,10 +158,10 @@ class Rollout(object):
                             else:
                                 dis_rewards[given_num-1] = ypred
 
-                    if rouge_ratio != 0:
+                    if rouge_ratio:
                         rpred = rouge_l(strip_pads(rollout_samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
                                         source_batch.dec_batch.tolist(), rs=rollout_samples)
-                        dis_rewards[given_num] += np.array(rpred)
+                        rouge_rewards[given_num] += np.array(rpred)
 
                 if rouge_ratio != 1:
                     # the last token reward
@@ -185,7 +184,7 @@ class Rollout(object):
                     else:
                         dis_rewards[self._gen_hps.max_dec_steps-1] += ypred
                 if rouge_ratio:
-                    rpred = rouge_l(strip_pads(samples, gen_vocab.word2id(STOP_DECODING)),
+                    rpred = rouge_l(strip_pads(samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
                                     source_batch.dec_batch.tolist(), rs=rollout_samples)
                     rouge_rewards[self._gen_hps.max_dec_steps] += np.array(rpred)
 
@@ -202,7 +201,16 @@ class Rollout(object):
             else:
                 rewards = (1 - rouge_ratio)*dis_rewards + rouge_ratio*rouge_rewards
 
-            k_rewards.append(rewards / (1.0 * rollout_num))
+            average_rewards = rewards / (1.0 * rollout_num)
+            # print('enc_states')
+            # print(enc_states)
+            # print('dec_in_state')
+            # print(dec_in_state)
+            # print('samples')
+            # print(samples)
+            # print('average_rewards')
+            # print(average_rewards)
+            k_rewards.append(average_rewards)
             # batch_size x seq_length
 
         return k_rewards

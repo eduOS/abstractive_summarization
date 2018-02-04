@@ -17,9 +17,9 @@ from data import gen_vocab2dis_vocab
 from os.path import join as join_path
 from utils import ensure_exists
 from gen_utils import calc_running_avg_loss
-from gen_utils import check_rouge
 from gen_utils import get_best_loss_from_chpt
-from gen_utils import save_ckpt
+from gen_utils import save_ckpt as gen_save_ckpt
+from gan_utils import save_ckpt as gan_save_ckpt
 from utils import print_dashboard
 from dis_utils import dump_chpt
 import math
@@ -40,7 +40,7 @@ tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training
 tf.app.flags.DEFINE_boolean('restore_best_model', False, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_integer('steps_per_checkpoint', 10000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decay by this rate')
-tf.app.flags.DEFINE_float('sample_rate', 0.004, 'the sample rate, should be [0, 0.5]')
+tf.app.flags.DEFINE_float('sample_rate', 0.001, 'the sample rate, should be [0, 0.5]')
 
 # ------------------------------------- discriminator
 
@@ -108,7 +108,7 @@ tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of gene
 tf.app.flags.DEFINE_integer('gen_vocab_size', 5000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
-tf.app.flags.DEFINE_float('gen_lr', 0.0001, 'learning rate')
+tf.app.flags.DEFINE_float('gen_lr', 0.0003, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
 tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
@@ -133,7 +133,7 @@ tf.app.flags.DEFINE_integer('gan_iter', 200000, 'how many times to run the gan')
 tf.app.flags.DEFINE_integer('gan_gen_iter', 5, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 12, 'how many times to repeat the rollout process.')
-tf.app.flags.DEFINE_string("gan_dir", "gan_dir", "Training directory.")
+tf.app.flags.DEFINE_string("gan_dir", "gan", "Training directory.")
 tf.app.flags.DEFINE_integer('sample_num', 2, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_float('gan_lr', 0.0005, 'learning rate for the gen in GAN training')
 tf.app.flags.DEFINE_float('rouge_reward_ratio', 0.0, 'The importance of rollout in calculating the reward.')
@@ -194,7 +194,7 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
 
         if global_step % eval_save_steps == 0:
             # check if it is the best checkpoint so far
-            eval_loss, best_loss = save_ckpt(
+            eval_loss, best_loss = gen_save_ckpt(
                 sess, model, best_loss, model_dir, model_saver,
                 batcher_val, val_dir, val_saver, global_step, gan_eval=False)
             last_ten_eval_loss.append(eval_loss)
@@ -408,11 +408,10 @@ def main(argv):
         print('going to restore embeddings from checkpoint')
         if not ckpt_path:
             emb_path = join_path(FLAGS.model_dir, "generator", "init_embed")
-            if emb_path:
-                generator.saver.restore(
-                    sess,
-                    tf.train.get_checkpoint_state(emb_path).model_checkpoint_path
-                )
+            ckpt_state = tf.train.get_checkpoint_state(emb_path)
+            ckpt = ckpt_state.model_checkpoint_path
+            if ckpt:
+                generator.saver.restore(sess, ckpt)
                 print(colored("successfully restored embeddings form %s" % emb_path, 'green'))
             else:
                 print(colored("failed to restore embeddings form %s" % emb_path, 'red'))
@@ -422,6 +421,7 @@ def main(argv):
         dec_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
+        model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator'))
         gan_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir))
         gan_val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir, "val"))
         gan_newly_added = []
@@ -430,8 +430,11 @@ def main(argv):
         for vn in gan_newly_added:
             var_list = [v for v in var_list if vn not in v.name]
         gan_saver = tf.train.Saver(max_to_keep=3, var_list=var_list)
+        # for the rouge or dis test
         gan_val_saver = tf.train.Saver(max_to_keep=3, var_list=var_list)
-        utils.load_ckpt(dec_saver, sess, val_dir, mode="val", force=True)
+        # for the loss test
+        gen_val_saver = tf.train.Saver(max_to_keep=10, var_list=var_list)
+        utils.load_ckpt(dec_saver, sess, model_dir, mode="val", force=True)
         decoder = Decoder(sess, generator, gen_vocab)
 
     if FLAGS.mode == "pretrain_dis" or (FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1):
@@ -456,9 +459,9 @@ def main(argv):
         decoder_batcher = GenBatcher("val", "test", gen_vocab, hps_gen)
 
     if FLAGS.mode == "train_gan":
-        gan_batcher_val = GenBatcher("test", "val", gen_vocab, hps_gen)
+        gan_batcher_val = GenBatcher("mini_val", "val", gen_vocab, hps_gen)
 
-    if FLAGS.mode not in ["pretrain_gen", "decode"]:
+    if FLAGS.mode == "pretrain_dis" or (FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1):
         dis_val_batch_size = hps_dis.batch_size * hps_dis.num_models \
             if hps_dis.mode == "train_gan" else hps_dis.batch_size * hps_dis.num_models * 2
         dis_batcher_val = DisBatcher(
@@ -506,15 +509,34 @@ def main(argv):
                 # generate samples
                 enc_states, dec_in_state, n_samples, n_targets_padding_mask = decoder.mc_generate(
                     batch, s_num=hps_gan.sample_num)
+                assert np.array(n_samples).shape == (hps_gan.sample_num,
+                                                     hps_gen.batch_size,
+                                                     hps_gen.max_dec_steps + 1)
+                assert np.array(n_targets_padding_mask).shape == (hps_gan.sample_num,
+                                                                  hps_gen.batch_size,
+                                                                  hps_gen.max_dec_steps)
                 # get rewards for the samples
-                n_rewards = rollout.get_reward(
-                    hps_gan, sess, gen_vocab, dis_vocab, batch, enc_states,
-                    dec_in_state, n_samples, discriminator)
+                # strip the start token and stop, the stop is masked out in
+                # calculatting the loss
+                n_samples_without_start_token = np.array(n_samples)[:, :, 1:]
+                try:
+                    n_rewards = rollout.get_reward(
+                        hps_gan, sess, gen_vocab, dis_vocab, batch, enc_states,
+                        dec_in_state, n_samples_without_start_token, discriminator)
+                except:
+                    print('enc_states')
+                    print(enc_states)
+                    print('enc_states.shape')
+                    print(enc_states.shape)
+                    print('dec_in_state')
+                    print(dec_in_state)
+                    for st in enc_states:
+                        print(st.shape)
+                    raise
 
                 # fine tune the generator
-                n_sample_targets = [samples[:, 1:] for samples in n_samples]
-                n_targets_padding_mask = [padding_mask[:, 1:] for padding_mask in n_targets_padding_mask]
-                n_samples = [samples[:, :-1] for samples in n_samples]
+                n_sample_targets = np.array(n_samples)[:, :, 1:]
+                n_samples = np.array(n_samples)[:, :, :-1]
                 # sample_target_padding_mask = pad_sample(sample_target, gen_vocab, hps_gen)
                 n_samples = [np.where(
                     np.less(samples, hps_gen.gen_vocab_size),
@@ -536,16 +558,17 @@ def main(argv):
 
             # Test
             # if FLAGS.gan_gen_iter and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
-            if i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1:
+            if i_gan % 50 == 0 or i_gan == hps_gan.gan_iter - 1:
                 print('Going to test the loss of the generator.')
                 current_speed = (float(sum(current_speed)) + epsilon) / (int(len(current_speed)) * hps_gen.batch_size + epsilon)
-                everage_g_loss = (float(sum(g_losses)) + epsilon) / int((len(g_losses)) + epsilon)
+                everage_g_loss = (float(sum(g_losses)) + epsilon) / float(len(g_losses) + epsilon)
                 # one more process hould be opened for the evaluation
-                eval_loss, gen_best_loss = save_ckpt(
-                    sess, generator, gen_best_loss, gan_dir, gan_saver,
-                    gen_batcher_val, gan_val_dir, gen_val_saver, gen_global_step, gan_eval=True)
+                gen_eval_loss, gen_best_loss, eval_rouge, best_rouge = gan_save_ckpt(
+                    sess, generator, decoder, gen_best_loss, best_rouge, gan_dir, gan_saver,
+                    gen_batcher_val, gan_batcher_val, gan_val_dir, gan_val_saver,
+                    gen_global_step, FLAGS.sample_rate)
 
-                if eval_loss:
+                if gen_eval_loss:
                     print(
                         "\nDashboard for " + colored("GAN Generator", 'green') + " updated %s, "
                         "finished steps:\t%s\n"
@@ -553,25 +576,17 @@ def main(argv):
                         "\tVocabulary size:\t%s\n"
                         "\tCurrent speed:\t%.4f seconds/article\n"
                         "\tAverage GAN training loss:\t%.4f; "
-                        "eval loss:\t%.4f" % (
+                        "eval loss:\t%.4f\n"
+                        "Average rouge %s; and the best rouge %s." % (
                             datetime.datetime.now().strftime("on %m-%d at %H:%M"),
                             gen_global_step,
-                            FLAGS.batch_size,
+                            hps_gen.batch_size,
                             hps_gen.gen_vocab_size,
                             current_speed,
                             everage_g_loss,
-                            eval_loss.item(),
-                            )
-                    )
-
-            if i_gan % 200 == 0 or i_gan == hps_gan.gan_iter - 1:
-                print("Going to evaluate rouge.")
-                ave_rouge, best_rouge = check_rouge(sess, decoder, best_rouge, gan_batcher_val,
-                                                    gan_val_dir, gan_val_saver, gen_global_step, sample_rate=FLAGS.sample_rate)
-                print("The best rouge is %s and the average rouge is %s %s" % (
-                    best_rouge, ave_rouge,
-                    datetime.datetime.now().strftime("on %m-%d at %H:%M")
-                ))
+                            gen_eval_loss.item(),
+                            eval_rouge, best_rouge
+                            ))
 
             # Train the discriminator
             dis_best_loss = 1000

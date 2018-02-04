@@ -188,8 +188,10 @@ class PointerGenerator(object):
             # Concatenation of fw and bw state
             old_h = tf.concat(axis=1, values=[fw_st.h, bw_st.h])
             # [batch_size * beam_size, hidden_dim]
-            new_c = tf.nn.relu(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
-            new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
+            # new_c = tf.nn.relu(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
+            # new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
+            new_c = tf.tanh(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
+            new_h = tf.tanh(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
             return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
 
     def _calc_final_dist(self, p_gens, vocab_dists, attn_dists):
@@ -318,6 +320,9 @@ class PointerGenerator(object):
 
             # Add the encoder.
             enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
+            self.fw_st = fw_st
+            self.bw_st = bw_st
+
             self.enc_states = enc_outputs
             self.dec_in_state = self._reduce_states(fw_st, bw_st)
 
@@ -372,7 +377,8 @@ class PointerGenerator(object):
                     gan_loss_per_step = get_loss(
                         k_sample_final_dists_ls[k], k_sample_targets_ls[k],
                         k_sample_targets_mask_ls[k], k_rewards_ls[k])
-                    k_gan_losses.append(_avg(gan_loss_per_step, k_sample_targets_mask_ls[k]))
+                    masked_average = _avg(gan_loss_per_step, k_sample_targets_mask_ls[k])
+                    k_gan_losses.append(masked_average)
 
                 self.gan_loss = tf.reduce_mean(tf.stack(k_gan_losses))
 
@@ -515,6 +521,15 @@ class PointerGenerator(object):
         feed_dict = self._make_feed_dict(batch, gan_eval=gan_eval, gan=True)
 
         # this can be combined with evaluation method
+        # print('----------------------')
+        # print('samples')
+        # print(samples)
+        # print('sample_targets')
+        # print(sample_targets)
+        # print('sample_padding_mask')
+        # print(sample_padding_mask)
+        # print('rewards')
+        # print(rewards)
         feed_dict.update({
             # for the decoder
             self.k_samples: samples,
@@ -526,10 +541,15 @@ class PointerGenerator(object):
         to_return = {
             'global_step': self.global_step,
             'loss': self.gan_loss,
+            # 'loss_per': self.gan_loss_per_step,
         }
         if update:
             to_return['updates'] = self.g_updates
-        return sess.run(to_return, feed_dict)
+        results = sess.run(to_return, feed_dict)
+        # print("results['loss_per']")
+        # print(results['loss_per'])
+        # print('----------------------\n\n')
+        return results
 
     def run_encoder(self, sess, batch):
         """For beam search decoding. Run the encoder on the batch and return the
@@ -578,7 +598,7 @@ class PointerGenerator(object):
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         # final_dists_sliced = tf.slice(final_dists[0], [0, 0], [-1, self._vocab.size()])
         final_dists = final_dists[0]
-        final_dists += tf.ones_like(final_dists) * sys.float_info.epsilon
+        # final_dists += tf.ones_like(final_dists) * sys.float_info.epsilon
         output_id = tf.squeeze(tf.cast(tf.reshape(tf.multinomial(tf.log(final_dists), 1), [self.hps.batch_size]), tf.int32))
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
         return output_id, new_states

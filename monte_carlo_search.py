@@ -39,7 +39,7 @@ class Hypothesis(object):
         self.coverage = coverage
 
     def __len__(self):
-        return len(self._tokens)
+        return len(self.tokens)
 
     def extend(self, token, state, coverage):
         """Return a NEW hypothesis, extended with the information from the
@@ -112,7 +112,7 @@ def run_monte_carlo_search(sess, model, vocab, batch, s_num=10):
         enc_states_ = np.tile(enc_states[k], (s_num, 1, 1))
         steps = 0
 
-        while steps < FLAGS.max_dec_steps:
+        while steps < model.hps.max_dec_steps:
             # latest token produced by each hypothesis
             latest_tokens = [h.latest_token for h in hyps]
             if latest_tokens == [stop_id for h in hyps]:

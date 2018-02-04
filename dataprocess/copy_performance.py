@@ -9,6 +9,7 @@
 #     rate of mistakenly copied(in the content, not in the reference, but in the hypothesis/hypothesis):
 #     rate of missing(in the content, in the reference but not in the hypothesis/in the content, in the reference):
 
+from __future__ import division
 import numpy as np
 import glob
 
@@ -16,7 +17,7 @@ import glob
 def cal_max_performance(content, reference):
     #  the maximum chars can be copied(in the reference and in the content/len(reference)): 62.2%
     lengths = 0
-    assert (len(reference) > len(content))
+    assert (len(reference) < len(content))
 
     for ch in reference:
         if ch in content:
@@ -50,7 +51,7 @@ def cal_correction(content, reference, hypothesis):
         if ch in content:
             lengths_1 += 1
 
-    return lengths_0 / lengths_1
+    return lengths_0 / lengths_1 if lengths_1 else 0
 
 
 def cal_mistake(content, reference, hypothesis):
@@ -79,7 +80,7 @@ def cal_missing(content, reference, hypothesis):
         if ch in content:
             lengths_1 += 1
 
-    return lengths_0 / lengths_1
+    return lengths_0 / lengths_1 if lengths_1 else 0
 
 
 def calc_score(content, reference, hypothesis):
@@ -106,6 +107,53 @@ def calc_score(content, reference, hypothesis):
     max_per = cal_max_performance(token_c, token_r)
 
     return np.array([max_per, perform, correct, missing, mistake])
+
+
+def my_lcs(string, sub):
+    """
+    Calculates longest common subsequence for a pair of tokenized strings
+    :param string : list of str : tokens from a string split using whitespace
+    :param sub : list of str : shorter string, also split using whitespace
+    :returns: length (list of int): length of the longest common subsequence between the two strings
+
+    Note: my_lcs only gives length of the longest common subsequence, not the actual LCS
+    """
+    if(len(string) < len(sub)):
+        sub, string = string, sub
+
+    lengths = [[0 for i in range(0, len(sub)+1)] for j in range(0, len(string)+1)]
+
+    for j in range(1, len(sub)+1):
+        for i in range(1, len(string)+1):
+            if(string[i-1] == sub[j-1]):
+                lengths[i][j] = lengths[i-1][j-1] + 1
+            else:
+                lengths[i][j] = max(lengths[i-1][j], lengths[i][j-1])
+
+    return lengths[len(string)][len(sub)]
+
+
+def calc_mean_rouge_l_pres(contents, references):
+    """
+    samples: list of list,
+    references: list of list
+    """
+    prec = []
+    rec = []
+    for n, (s, r) in enumerate(zip(references, contents)):
+        token_c = r.split(" ")
+        token_c = filter(lambda x: x != " ", token_c)
+
+        token_r = s.split(" ")
+        token_r = filter(lambda x: x != " ", token_r)
+
+        if len(token_r) == 0 or len(token_c) == 0:
+            prec.append(0)
+            rec.append(0)
+            continue
+        lcs = my_lcs(token_r, token_c)
+        prec.append(lcs/float(len(token_r)))
+    return np.array(prec)
 
 
 def load_textfiles(content, reference, hypothesis):
@@ -142,6 +190,7 @@ if __name__ == '__main__':
             hypothesis = hf.readlines()
 
         cont, ref, hypo = load_textfiles(content, reference, hypothesis)
+        rlprec = calc_mean_rouge_l_pres(cont, ref)
 
         scores = []
         for c, r, h in zip(cont, ref, hypo):
@@ -153,6 +202,9 @@ if __name__ == '__main__':
         print("the maximum chars can be copied(in the reference and in the content/len(reference)):")
         print(np.mean(scores[0]))
         print(np.std(scores[0]))
+        print("the rouge-l precision(lcs(in the reference and in the content)/len(reference)):")
+        print(np.mean(rlprec))
+        print(np.std(rlprec))
         print("performance(in the content and in the hypothesis/hypothesis):")
         print(np.mean(scores[1]))
         print(np.std(scores[1]))

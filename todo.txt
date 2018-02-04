@@ -105,11 +105,18 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
   unit testing
 
   the copy mechanism
-    the maximum chars can be copied(in the reference and in the content/len(reference)): 62.2% 
-
+    the maximum chars can be copied(in the reference and in the content/len(reference)):
+    0.62213374002(mean)
+    0.225145828146(std)
     performance(in the content and in the hypothesis/hypothesis):
-
+    0.969032674681
+    0.0894641280516
     rate of correction(in the content, in the reference and in the hypothesis/in the content, in the reference):
-
-    rate of mistakenly copied(in the content, not in the reference, but in the hypothesis/hypothesis):
+    0.446353624443
+    0.260164242876
     rate of missing(in the content, in the reference but not in the hypothesis/in the content, in the reference):
+    0.548669849735
+    0.261140982246
+    rate of mistakenly copied(in the content, not in the reference, but in the hypothesis/hypothesis):
+    0.581372847028
+    0.262387083345

@@ -162,7 +162,7 @@ def run_beam_search(sess, model, vocab, batch, top_k=1):
         results = []
         steps = 0
 
-        while steps < FLAGS.max_dec_steps and len(results) < beam_size:
+        while steps < model.hps.max_dec_steps and len(results) < beam_size:
             # latest token produced by each hypothesis
             latest_tokens = [h.latest_token for h in hyps]
             # change any in-article temporary OOV ids to [UNK] id, so that we can
@@ -223,7 +223,7 @@ def run_beam_search(sess, model, vocab, batch, top_k=1):
                     # if stop token is reached...
                     # If this hypothesis is sufficiently long, put in results.
                     # Otherwise discard.
-                    if steps >= FLAGS.min_dec_steps:
+                    if steps >= model.hps.min_dec_steps:
                         results.append(h)
                 else:
                     # hasn't reached stop token, so continue to extend this

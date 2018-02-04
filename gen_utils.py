@@ -112,15 +112,3 @@ def save_ckpt(sess, model, best_loss, model_dir, model_saver,
         print("Model is saved to" + colored(" %s", 'yellow') % model_save_path)
 
     return eval_loss, best_loss
-
-
-def check_rouge(sess, decoder, best_rouge, val_batcher, val_dir, val_saver, global_step, sample_rate=0):
-    """
-    model: the decoder
-    val_batcher: the gen_val_batcher
-    """
-    ave_rouge = decoder.bs_decode(val_batcher, save2file=False, single_pass=True, sample_rate=sample_rate)
-    if ave_rouge > best_rouge:
-        val_saver.save(sess, val_dir, global_step=global_step)
-        best_rouge = ave_rouge
-    return ave_rouge, best_rouge

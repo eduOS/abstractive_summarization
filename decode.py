@@ -22,7 +22,7 @@ from __future__ import absolute_import
 from __future__ import division
 
 import os
-from utils import rouge_l
+from gan_utils import rouge_l
 from data import strip_pads
 import time
 import tensorflow as tf
@@ -84,29 +84,27 @@ class Decoder(object):
         if not os.path.exists(self._rouge_dec_dir):
             os.mkdir(self._rouge_dec_dir)
 
-    def mc_generate(self, batch, include_start_token=False, s_num=4):
+    def mc_generate(self, batch, s_num=4):
         # Run beam search to get best Hypothesis
         enc_states, dec_in_state, n_hyps_batch = monte_carlo_search.run_monte_carlo_search(
             self._sess, self._model, self._vocab, batch, s_num=s_num)
 
         padded_n_hyps = []
         pad_id = self._vocab.word2id(PAD_TOKEN)
-        max_len = self._hps.max_dec_steps + 1
-        padding_mask = np.zeros((len(n_hyps_batch), s_num, max_len), dtype=np.int32)
+        padding_max_len = self._hps.max_dec_steps
+        sample_max_len = self._hps.max_dec_steps + 1
+        padding_mask = np.zeros((len(n_hyps_batch), s_num, padding_max_len), dtype=np.int32)
         for b, n_hyps in enumerate(n_hyps_batch):
             padded_hyps = []
             for n, hyp in enumerate(n_hyps):
                 tokens = hyp.tokens
-                padding_mask[b, n, :len(hyp)] = 1
-                padded_hyps.append(
-                    tokens + (max_len - len(hyp)) * [pad_id] if len(hyp) < max_len else tokens[:max_len])
+                length_exclude_start_token = len(hyp)-1
+                padding_mask[b, n, :length_exclude_start_token] = 1
+                padded = tokens + (sample_max_len - len(hyp)) * [pad_id] if len(hyp) < sample_max_len else tokens[:sample_max_len]
+                padded_hyps.append(padded)
             padded_n_hyps.append(padded_hyps)
 
         outputs_ids = np.array(padded_n_hyps).astype(int)
-
-        if not include_start_token:
-            outputs_ids = outputs_ids[:, :, 1:]
-            padding_mask = padding_mask[:, :, 1:]
 
         # transfer to (s_num, batch_size, max_dec_steps)
         outputs_ids = [np.squeeze(i, 1) for i in np.split(outputs_ids, outputs_ids.shape[1], 1)]
@@ -127,7 +125,7 @@ class Decoder(object):
         dec_state = dec_in_state
 
         steps = 0
-        while steps < FLAGS.max_dec_steps:
+        while steps < self._hps.max_dec_steps:
             ran_ids.append(latest_tokens)
             latest_tokens = [
                 t if t in xrange(
@@ -230,7 +228,10 @@ class Decoder(object):
                             pass
                         decoded_output = ' '.join(decoded_words)
                         if sample == 1 and s_n == sample_n:
-                            print(decoded_output)
+                            print("article:\t" + original_articles[sample_n])
+                            print("abstract:\t" + original_abstracts[sample_n])
+                            print("hypothesis:\t" + decoded_output)
+                            print("")
                         elif save2file:
                             decoded_outputs.append(decoded_output)
 
