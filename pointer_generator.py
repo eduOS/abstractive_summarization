@@ -296,7 +296,7 @@ class PointerGenerator(object):
                 return i < dynamic_enc_steps
 
             def mask(inputs, states, i, mask_ar):
-                mask_ar.write(linear([inputs[i]] + [states[i]], 1))
+                mask_ar.write(linear([inputs[i]] + [states[i]], 1, True))
                 return inputs, states, i, mask_ar
 
             _, _, _, mask_ar = tf.while_loop(
