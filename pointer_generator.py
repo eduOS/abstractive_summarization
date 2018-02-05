@@ -27,6 +27,7 @@ import tensorflow as tf
 from termcolor import colored
 from attention_decoder import attention_decoder
 from codecs import open
+from utils import linear
 from six.moves import xrange
 
 FLAGS = tf.app.flags.FLAGS
@@ -284,6 +285,24 @@ class PointerGenerator(object):
 
             return final_dists
 
+    def mask_input(self):
+        dynamic_enc_steps = tf.shape(self.enc_states)[1]
+        enc_states = tf.transpose(self.enc_states, perm=[1, 0, 2])
+        emb_enc_inputs = tf.transpo(self.emb_enc_inputs, perm=[1, 0, 2])
+        mask_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
+
+        with tf.variable_scope("MASK", reuse=True):
+            def cond(_e, _s, i, _m):
+                return i < dynamic_enc_steps
+
+            def mask(inputs, states, i, mask_ar):
+                mask_ar.write(linear([inputs[i]] + [states[i]], 1))
+                return inputs, states, i, mask_ar
+
+            _, _, _, mask_ar = tf.while_loop(
+                cond, mask, (emb_enc_inputs, enc_states, 0, mask_ar))
+        return mask_ar
+
     def _add_seq2seq(self):
         """Add the whole sequence-to-sequence model to the graph."""
         hps = self.hps
@@ -303,7 +322,7 @@ class PointerGenerator(object):
                 self.embeddings = tf.get_variable(
                     'embeddings', [self._vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
                 self.saver = tf.train.Saver({"embeddings": self.embeddings})
-                emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
+                self.emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
                 # for gen training(mode is pretrain_gen) and
                 # beam searching(mode is decode or train_gan)
                 emb_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
@@ -319,7 +338,7 @@ class PointerGenerator(object):
                 ]
 
             # Add the encoder.
-            enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
+            enc_outputs, fw_st, bw_st = self._add_encoder(self.emb_enc_inputs, self.enc_lens)
             self.fw_st = fw_st
             self.bw_st = bw_st
 

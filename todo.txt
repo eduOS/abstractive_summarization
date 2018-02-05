@@ -105,6 +105,8 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
   unit testing
 
   the copy mechanism
+    rouge_l precision(lcs(in the reference and in the content)/len(reference))
+    0.519930300857
     the maximum chars can be copied(in the reference and in the content/len(reference)):
     0.62213374002(mean)
     0.225145828146(std)
