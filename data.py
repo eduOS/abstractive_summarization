@@ -76,6 +76,8 @@ class Vocab(object):
                     print('Warning: incorrectly formatted line in vocabulary file: %s\n' % line)
                     continue
                 w = pieces[0]
+                if self._count == 0:
+                    assert w == PAD_TOKEN, "the first vocab should be PAD"
                 # if w in [SENTENCE_START, SENTENCE_END, UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING]:
                 #     continue
                 #   # raise Exception(
