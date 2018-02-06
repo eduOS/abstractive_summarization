@@ -5,7 +5,6 @@ import tensorflow as tf
 from tensorflow.python.ops import tensor_array_ops, control_flow_ops
 # from tensorflow.python.ops import variable_scope
 import numpy as np
-from data import gen_vocab2dis_vocab
 from data import strip_pads
 import data
 from gan_utils import rouge_l
@@ -100,22 +99,10 @@ class Rollout(object):
         rollout_num = hps_gan.rollout_num
         rouge_ratio = hps_gan.rouge_reward_ratio
 
-        article_oovs = source_batch.art_oovs
-        articles = source_batch.enc_batch_extend_vocab
-        batch_size = int(articles.shape[0])
+        articles_extend = source_batch.enc_batch_extend_vocab
+        articles = source_batch.enc_batch
+        batch_size = int(articles_extend.shape[0])
 
-        if self.generator.hps.vocab_type == "word" and discriminator.hps.vocab_type == "char":
-            articles = gen_vocab2dis_vocab(
-                articles, gen_vocab, article_oovs,
-                dis_vocab, discriminator.hps.max_enc_steps, PAD_TOKEN)
-        # else:
-        #     conditions = articles
-        #     zeros = np.zeros((batch_size, discriminator.hps.max_enc_steps))
-        #     zeros[:, :conditions.shape[1]] = conditions
-        #     articles = zeros
-        # abs_chars = np.array(gen_vocab2dis_vocab(
-        #     source_batch.target_batch, gen_vocab, article_oovs,
-        #     dis_vocab, self._gen_hps.max_dec_steps, STOP_DECODING))
         k_rewards = []
 
         for k, samples in enumerate(k_samples):
@@ -133,24 +120,32 @@ class Rollout(object):
                     feed_dict[self.generator.enc_padding_mask] = source_batch.enc_padding_mask
                     feed_dict[self.cell_c] = dec_in_state.c
                     feed_dict[self.cell_h] = dec_in_state.h
-                    feed_dict[self.generator.enc_batch_extend_vocab] = articles
+                    feed_dict[self.generator.enc_batch_extend_vocab] = articles_extend
                     feed_dict[self.generator.max_art_oovs] = source_batch.max_art_oovs
                     # how to deal with the coverage?
 
                     # the unique feature for the pointer gen is the
                     # enc_batch_extend_vocab and the max_art_oovs
-                    rollout_samples = sess.run(self.rollout_sample_ar, feed_dict)
+                    rollout_samples_extend = sess.run(self.rollout_sample_ar, feed_dict)
+                    rollout_samples = np.where(
+                        np.less(samples, self._gen_hps.gen_vocab_size),
+                        rollout_samples_extend, np.array(
+                            [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * self._gen_hps.max_dec_steps
+                             ] * self._gen_hps.batch_size))
                     # how about multiple generators for one discriminator?
-                    if self.generator.hps.vocab_type == "word" and discriminator.hps.vocab_type == "char":
-                        rollout_samples = gen_vocab2dis_vocab(
-                            rollout_samples, gen_vocab, article_oovs,
-                            dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, articles, print_sample=False)
+                    emb_rollout_samples = sess.run(
+                        self.generator.temp_embedded_seq,
+                        feed_dict={self.generator.temp_batch: rollout_samples})
+
+                    emb_articles = sess.run(
+                        self.generator.temp_embedded_seq,
+                        feed_dict={self.generator.temp_batch: articles})
 
                     if rouge_ratio != 1:
                         if given_num != 0:
                             feed = {
-                                discriminator.inputs: rollout_samples,
-                                discriminator.conditions: articles}
+                                discriminator.inputs: emb_rollout_samples,
+                                discriminator.conditions: emb_articles}
                             ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
                             ypred = np.array([item[1] for item in ypred_for_auc])
                             if ir == 0:
@@ -159,21 +154,12 @@ class Rollout(object):
                                 dis_rewards[given_num-1] = ypred
 
                     if rouge_ratio:
-                        rpred = rouge_l(strip_pads(rollout_samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
-                                        source_batch.dec_batch.tolist(), rs=rollout_samples)
+                        rpred = rouge_l(strip_pads(rollout_samples_extend.tolist(), gen_vocab.word2id(STOP_DECODING)),
+                                        source_batch.dec_batch.tolist(), rs=rollout_samples_extend)
                         rouge_rewards[given_num] += np.array(rpred)
 
                 if rouge_ratio != 1:
                     # the last token reward
-                    if ir == 0 and k == 0:
-                        ps = "multinomial in rollout"
-                    else:
-                        ps = False
-                    if self.generator.hps.vocab_type == "word" and discriminator.hps.vocab_type == "char":
-                        samples = gen_vocab2dis_vocab(
-                            samples, gen_vocab, article_oovs,
-                            dis_vocab, discriminator.hps.max_dec_steps, STOP_DECODING, print_sample=ps)
-
                     feed = {
                         discriminator.inputs: samples,
                         discriminator.conditions: articles}
@@ -185,11 +171,14 @@ class Rollout(object):
                         dis_rewards[self._gen_hps.max_dec_steps-1] += ypred
                 if rouge_ratio:
                     rpred = rouge_l(strip_pads(samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
-                                    source_batch.dec_batch.tolist(), rs=rollout_samples)
+                                    source_batch.dec_batch.tolist(), rs=rollout_samples_extend)
                     rouge_rewards[self._gen_hps.max_dec_steps] += np.array(rpred)
 
             rouge_rewards = np.transpose(rouge_rewards)
             dis_rewards = np.transpose(np.array(dis_rewards))
+
+            if hps_gan.rollout_start == 0:
+                dis_rewards = dis_rewards[:, 1:]
 
             if rouge_ratio != 0:
                 rouge_rewards = rouge_rewards[:, 1:] - rouge_rewards[:, :-1]

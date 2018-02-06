@@ -235,3 +235,83 @@ def red_assert(statement, message, color='red'):
 
 def red_print(message, color='red'):
     print(colored(message, color))
+
+
+def add_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init_mag=0.02, state_is_tuple=True):
+    """Add a single-layer bidirectional LSTM encoder to the graph.
+
+    Args:
+        encoder_inputs: A tensor of shape [batch_size, <=max_enc_steps,
+        emb_size].
+        seq_len: Lengths of encoder_inputs (before padding). A tensor of shape
+        [batch_size].
+
+    Returns:
+        encoder_outputs:
+        A tensor of shape [batch_size, <=max_enc_steps, 2*hidden_dim]. It's
+        2*hidden_dim because it's the concatenation of the forwards and
+        backwards states.
+        fw_state, bw_state:
+        Each are LSTMStateTuples of shape
+        ([batch_size,hidden_dim],[batch_size,hidden_dim])
+    """
+    rand_unif_init = tf.random_uniform_initializer(rand_unif_init_mag, rand_unif_init_mag, seed=123)
+    with tf.variable_scope('encoder'):
+        cell_fw = tf.contrib.rnn.LSTMCell(
+            hidden_dim, initializer=rand_unif_init, state_is_tuple=state_is_tuple)
+        cell_bw = tf.contrib.rnn.LSTMCell(
+            hidden_dim, initializer=rand_unif_init, state_is_tuple=state_is_tuple)
+        (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
+        # the sequence length of the encoder_inputs varies depending on the
+        # batch, which will make the second dimension of the
+        # encoder_outputs different in different batches
+
+        # concatenate the forwards and backwards states
+        encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
+        # encoder_outputs: [batch_size * beam_size, max_time, output_size*2]
+        # fw_st & bw_st: [batch_size * beam_size, num_hidden]
+    return encoder_outputs, fw_st, bw_st
+
+
+def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_init_std=1e-4):
+    """Add to the graph a linear layer to reduce the encoder's final FW and
+    BW state into a single initial state for the decoder. This is needed
+    because the encoder is bidirectional but the decoder is not.
+
+    Args:
+        fw_st: LSTMStateTuple with hidden_dim units.
+        bw_st: LSTMStateTuple with hidden_dim units.
+
+    Returns:
+        state: LSTMStateTuple with hidden_dim units.
+    """
+    trunc_norm_init = tf.truncated_normal_initializer(stddev=trunc_norm_init_std)
+
+    with tf.variable_scope('reduce_final_st'):
+
+        # Define weights and biases to reduce the cell and reduce the state
+        w_reduce_c = tf.get_variable(
+            'w_reduce_c', [hidden_dim * 2, hidden_dim],
+            dtype=tf.float32, initializer=trunc_norm_init)
+        w_reduce_h = tf.get_variable(
+            'w_reduce_h', [hidden_dim * 2, hidden_dim],
+            dtype=tf.float32, initializer=trunc_norm_init)
+        bias_reduce_c = tf.get_variable(
+            'bias_reduce_c', [hidden_dim],
+            dtype=tf.float32, initializer=trunc_norm_init)
+        bias_reduce_h = tf.get_variable(
+            'bias_reduce_h', [hidden_dim],
+            dtype=tf.float32, initializer=trunc_norm_init)
+
+        # Apply linear layer
+        # Concatenation of fw and bw cell
+        old_c = tf.concat(axis=1, values=[fw_st.c, bw_st.c])
+        # Concatenation of fw and bw state
+        old_h = tf.concat(axis=1, values=[fw_st.h, bw_st.h])
+        # [batch_size * beam_size, hidden_dim]
+        # new_c = tf.nn.relu(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
+        # new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
+        new_c = activation_fn(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
+        new_h = activation_fn(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
+        return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state

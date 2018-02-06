@@ -26,6 +26,8 @@ import numpy as np
 import tensorflow as tf
 from termcolor import colored
 from attention_decoder import attention_decoder
+from utils import add_encoder
+from utils import reduce_states
 from codecs import open
 from six.moves import xrange
 
@@ -54,6 +56,7 @@ class PointerGenerator(object):
         # -------- placeholders for training generatror and beam search decoding
         # encoder part
         self.enc_batch = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch')
+        self.temp_batch = tf.placeholder(tf.int32, [batch_size, None], name='temp_batch_for_embedding')
         self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
         self.enc_padding_mask = tf.placeholder(tf.float32, [batch_size, None], name='enc_padding_mask')
         self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch_extend_vocab')
@@ -117,82 +120,6 @@ class PointerGenerator(object):
             elif not gan:
                 feed_dict[self._dec_batch] = batch.dec_batch
         return feed_dict
-
-    def _add_encoder(self, encoder_inputs, seq_len):
-        """Add a single-layer bidirectional LSTM encoder to the graph.
-
-        Args:
-          encoder_inputs: A tensor of shape [batch_size, <=max_enc_steps,
-          emb_size].
-          seq_len: Lengths of encoder_inputs (before padding). A tensor of shape
-          [batch_size].
-
-        Returns:
-          encoder_outputs:
-            A tensor of shape [batch_size, <=max_enc_steps, 2*hidden_dim]. It's
-            2*hidden_dim because it's the concatenation of the forwards and
-            backwards states.
-          fw_state, bw_state:
-            Each are LSTMStateTuples of shape
-            ([batch_size,hidden_dim],[batch_size,hidden_dim])
-        """
-        with tf.variable_scope('encoder'):
-            cell_fw = tf.contrib.rnn.LSTMCell(
-                self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
-            cell_bw = tf.contrib.rnn.LSTMCell(
-                self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
-            (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
-                cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
-            # the sequence length of the encoder_inputs varies depending on the
-            # batch, which will make the second dimension of the
-            # encoder_outputs different in different batches
-
-            # concatenate the forwards and backwards states
-            encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
-            # encoder_outputs: [batch_size * beam_size, max_time, output_size*2]
-            # fw_st & bw_st: [batch_size * beam_size, num_hidden]
-        return encoder_outputs, fw_st, bw_st
-
-    def _reduce_states(self, fw_st, bw_st):
-        """Add to the graph a linear layer to reduce the encoder's final FW and
-        BW state into a single initial state for the decoder. This is needed
-        because the encoder is bidirectional but the decoder is not.
-
-        Args:
-          fw_st: LSTMStateTuple with hidden_dim units.
-          bw_st: LSTMStateTuple with hidden_dim units.
-
-        Returns:
-          state: LSTMStateTuple with hidden_dim units.
-        """
-        hidden_dim = self.hps.hidden_dim
-        with tf.variable_scope('reduce_final_st'):
-
-            # Define weights and biases to reduce the cell and reduce the state
-            w_reduce_c = tf.get_variable(
-                'w_reduce_c', [hidden_dim * 2, hidden_dim],
-                dtype=tf.float32, initializer=self.trunc_norm_init)
-            w_reduce_h = tf.get_variable(
-                'w_reduce_h', [hidden_dim * 2, hidden_dim],
-                dtype=tf.float32, initializer=self.trunc_norm_init)
-            bias_reduce_c = tf.get_variable(
-                'bias_reduce_c', [hidden_dim],
-                dtype=tf.float32, initializer=self.trunc_norm_init)
-            bias_reduce_h = tf.get_variable(
-                'bias_reduce_h', [hidden_dim],
-                dtype=tf.float32, initializer=self.trunc_norm_init)
-
-            # Apply linear layer
-            # Concatenation of fw and bw cell
-            old_c = tf.concat(axis=1, values=[fw_st.c, bw_st.c])
-            # Concatenation of fw and bw state
-            old_h = tf.concat(axis=1, values=[fw_st.h, bw_st.h])
-            # [batch_size * beam_size, hidden_dim]
-            # new_c = tf.nn.relu(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
-            # new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
-            new_c = tf.tanh(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
-            new_h = tf.tanh(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
-            return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
 
     def _calc_final_dist(self, p_gens, vocab_dists, attn_dists):
         # this is the core function
@@ -304,6 +231,7 @@ class PointerGenerator(object):
                     'embeddings', [self._vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
                 self.saver = tf.train.Saver({"embeddings": self.embeddings})
                 emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
+                self.temp_embedded_seq = tf.nn.embedding_lookup(self.embeddings, self.temp_batch)
                 # for gen training(mode is pretrain_gen) and
                 # beam searching(mode is decode or train_gan)
                 emb_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
@@ -319,12 +247,14 @@ class PointerGenerator(object):
                 ]
 
             # Add the encoder.
-            enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self.enc_lens)
-            self.fw_st = fw_st
-            self.bw_st = bw_st
+            enc_outputs, fw_st, bw_st = add_encoder(
+                emb_enc_inputs, self.enc_lens,
+                hidden_dim=self.hps.hidden_dim, rand_unif_init_mag=hps.rand_unif_init_mag)
 
             self.enc_states = enc_outputs
-            self.dec_in_state = self._reduce_states(fw_st, bw_st)
+            self.dec_in_state = reduce_states(
+                fw_st, bw_st, hidden_dim=self.hps.hidden_dim,
+                activation_fn=tf.tanh, trunc_norm_init_std=hps.trunc_norm_init_std)
 
             with tf.variable_scope('decoder') as decoder_scope:
                 self.attn_dists, self.p_gens, self.coverage, \

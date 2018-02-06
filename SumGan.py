@@ -13,7 +13,6 @@ from batcher import GenBatcher, DisBatcher
 from decode import Decoder
 from pointer_generator import PointerGenerator
 from rollout import Rollout
-from data import gen_vocab2dis_vocab
 from os.path import join as join_path
 from utils import ensure_exists
 from gen_utils import calc_running_avg_loss
@@ -23,7 +22,6 @@ from gan_utils import save_ckpt as gan_save_ckpt
 from utils import print_dashboard
 from dis_utils import dump_chpt
 import math
-from data import PAD_TOKEN
 from termcolor import colored
 
 from res_discriminator import Seq2ClassModel
@@ -48,7 +46,7 @@ tf.app.flags.DEFINE_float('sample_rate', 0.001, 'the sample rate, should be [0, 
 tf.app.flags.DEFINE_integer("layer_size", 300, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("conv_layers", 2, "Number of convolution layers in the model.")
 tf.app.flags.DEFINE_integer("pool_layers", 2, "Number of pooling layers in the model.")
-tf.app.flags.DEFINE_integer("kernel_size", 3, "The kernel size of the filters along the sentence length dimension.")
+tf.app.flags.DEFINE_integer("kernel_size", 3, "the kernel size of the conv")
 tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
 tf.app.flags.DEFINE_integer("dis_vocab_size", 5000, "vocabulary size.")
@@ -136,7 +134,7 @@ tf.app.flags.DEFINE_integer('rollout_num', 12, 'how many times to repeat the rol
 tf.app.flags.DEFINE_string("gan_dir", "gan", "Training directory.")
 tf.app.flags.DEFINE_integer('sample_num', 2, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_float('gan_lr', 0.0005, 'learning rate for the gen in GAN training')
-tf.app.flags.DEFINE_float('rouge_reward_ratio', 0.0, 'The importance of rollout in calculating the reward.')
+tf.app.flags.DEFINE_float('rouge_reward_ratio', 1.0, 'The importance of rollout in calculating the reward.')
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -308,18 +306,22 @@ def main(argv):
         'kernel_size',
         'early_stop',
         'pool_size',
+        'hidden_dim',
         'pool_layers',
         'dis_max_gradient',
         'batch_size',
         'dis_lr',
         'lr_decay_factor',
+        'rand_unif_init_mag',
         'cell_type',
         'max_enc_steps',
         'max_dec_steps',
         'single_pass',
         'data_path',
         'num_models',
+        'trunc_norm_init_std',
     ]
+
     hps_dict = {}
     for key, val in FLAGS.__flags.iteritems():  # for each flag
         if key in hparam_dis:  # if it's in the list
@@ -507,22 +509,30 @@ def main(argv):
                 batch = gen_batcher_train.next_batch()
 
                 # generate samples
-                enc_states, dec_in_state, n_samples, n_targets_padding_mask = decoder.mc_generate(
+                enc_states, dec_in_state, n_samples_extend, n_targets_padding_mask = decoder.mc_generate(
                     batch, s_num=hps_gan.sample_num)
-                assert np.array(n_samples).shape == (hps_gan.sample_num,
-                                                     hps_gen.batch_size,
-                                                     hps_gen.max_dec_steps + 1)
+                assert np.array(n_samples_extend).shape == (hps_gan.sample_num,
+                                                            hps_gen.batch_size,
+                                                            hps_gen.max_dec_steps + 1)
                 assert np.array(n_targets_padding_mask).shape == (hps_gan.sample_num,
                                                                   hps_gen.batch_size,
                                                                   hps_gen.max_dec_steps)
                 # get rewards for the samples
                 # strip the start token and stop, the stop is masked out in
                 # calculatting the loss
-                n_samples_without_start_token = np.array(n_samples)[:, :, 1:]
+                # n_samples = [np.where(
+                #     np.less(samples, hps_gen.gen_vocab_size),
+                #     samples, np.array(
+                #         [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
+                #     for samples in n_samples_extend]
+                n_samples_extend_no_start = np.array(n_samples_extend)[:, :, 1:]
+                # for the rouge
+                # n_samples_no_start = np.array(n_samples)[:, :, 1:]
+                # for the discriminator
                 try:
                     n_rewards = rollout.get_reward(
                         hps_gan, sess, gen_vocab, dis_vocab, batch, enc_states,
-                        dec_in_state, n_samples_without_start_token, discriminator)
+                        dec_in_state, n_samples_extend_no_start, discriminator)
                 except:
                     print('enc_states')
                     print(enc_states)
@@ -535,14 +545,14 @@ def main(argv):
                     raise
 
                 # fine tune the generator
-                n_sample_targets = np.array(n_samples)[:, :, 1:]
-                n_samples = np.array(n_samples)[:, :, :-1]
+                n_sample_targets = np.array(n_samples_extend)[:, :, 1:]
+                n_samples_extend = np.array(n_samples_extend)[:, :, :-1]
                 # sample_target_padding_mask = pad_sample(sample_target, gen_vocab, hps_gen)
                 n_samples = [np.where(
                     np.less(samples, hps_gen.gen_vocab_size),
                     samples, np.array(
                         [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
-                    for samples in n_samples]
+                    for samples in n_samples_extend]
                 results = generator.run_gan_batch(
                     sess, batch, n_samples, n_sample_targets, n_targets_padding_mask, n_rewards)
 
@@ -597,45 +607,42 @@ def main(argv):
                 print('Going to train the discriminator.')
             for d_gan in range(gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
-                enc_states, dec_in_state, k_samples, _ = decoder.mc_generate(
+                enc_states, dec_in_state, n_samples_extend, _ = decoder.mc_generate(
                     batch, s_num=hps_gan.sample_num)
                 # shuould first tanslate to words to avoid unk
-                articles_oovs = batch.art_oovs
-                for samples in k_samples:
-                    dec_batch = batch.target_batch
-                    conditions = batch.enc_batch_extend_vocab
-                    zeros = np.zeros((conditions.shape[0], hps_gen.max_enc_steps))
-                    zeros[:, :conditions.shape[1]] = conditions
-                    conditions = zeros
-                    if hps_gen.vocab_type == "word" and hps_dis.vocab_type == "char":
-                        samples = gen_vocab2dis_vocab(
-                            samples, gen_vocab, articles_oovs,
-                            dis_vocab, hps_dis.max_dec_steps, STOP_DECODING)
-                        dec_batch = gen_vocab2dis_vocab(
-                            dec_batch, gen_vocab, articles_oovs, dis_vocab, hps_dis.max_dec_steps, STOP_DECODING)
-                        conditions = gen_vocab2dis_vocab(
-                            conditions, gen_vocab, articles_oovs,
-                            dis_vocab, hps_dis.max_enc_steps, PAD_TOKEN)
+                n_samples = [np.where(
+                    np.less(samples, hps_gen.gen_vocab_size),
+                    samples, np.array(
+                        [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
+                    for samples in n_samples_extend]
+                for samples in n_samples:
+                    emb_dec_batch = sess.run(
+                        generator.temp_embedded_seq,
+                        feed_dict={generator.temp_batch: batch.dec_batch})
+                    emb_conditions = sess.run(
+                        generator.temp_embedded_seq,
+                        feed_dict={generator.temp_batch: batch.padded_enc_batch})
 
-                    inputs = np.concatenate([samples, dec_batch], 0)
-                    conditions = np.concatenate([conditions, conditions], 0)
-
-                    targets = [[1, 0] for _ in samples] + [[0, 1] for _ in dec_batch]
+                    inputs = np.concatenate([samples, emb_dec_batch], 0)
+                    conditions = np.concatenate([emb_conditions, emb_conditions], 0)
+                    condition_lens = batch.enc_lens
+                    targets = [[1, 0] for _ in samples] + [[0, 1] for _ in emb_dec_batch]
                     targets = np.array(targets)
                     # randomize the samples
                     assert len(inputs) == len(conditions) == len(targets), "lengthes of the inputs, conditions and targests should be the same."
                     indices = np.random.permutation(len(inputs))
                     inputs = np.split(inputs[indices], 2)
                     conditions = np.split(conditions[indices], 2)
+                    condition_lens = np.split(condition_lens[indices], 2)
                     targets = np.split(targets[indices], 2)
                     assert len(inputs) % 2 == 0, "the length should be mean"
 
-                    results = discriminator.run_one_batch(sess, inputs[0], conditions[0], targets[0])
+                    results = discriminator.run_one_batch(sess, inputs[0], conditions[0], condition_lens[0], targets[0])
                     dis_accuracies.append(results["accuracy"].item())
                     dis_losses.append(results["loss"].item())
 
-                    results = discriminator.run_one_batch(sess, inputs[1], conditions[1], targets[1])
-                    dis_accuracies.append(results["accuracy"].item())
+                    results = discriminator.run_one_batch(sess, inputs[1], conditions[1], condition_lens[1], targets[1])
+                    dis_accuracies.append(float(results["accuracy"]))
 
                 ave_dis_acc = sum(dis_accuracies) / len(dis_accuracies)
                 if d_gan == hps_gan.gan_dis_iter - 1:

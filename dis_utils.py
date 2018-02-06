@@ -6,7 +6,6 @@ from utils import ensure_exists
 from os.path import join as join_path
 import data
 import tensorflow as tf
-from utils import linear3d
 import numpy as np
 import sys
 
@@ -105,43 +104,29 @@ def params_decay(decay):
 
 
 # ResCNN
-def CResCNN(inputs, conditions, conv_layers, kernel_size, pool_size, pool_layers=1,
+def CResCNN(inputs, condition_emb, conv_layers, kernel_size, pool_size, pool_layers=1,
             decay=0.99999, activation_fn=tf.nn.relu, reuse=None, scope=None):
-  """ a convolutaional neural net with conv2d and max_pool layers
+    """ a convolutaional neural net with conv2d and max_pool layers
 
-  """
-  with tf.variable_scope(scope, "CResCNN", [inputs, conditions], reuse=reuse):
-    if not pool_size:
-      pool_layers = 0
-    # residual layers
-    with tf.variable_scope("inputs"):
-        inputs = convolution2d(activation_fn(inputs), kernel_size, decay=decay,
-                               activation_fn=activation_fn, reuse=False)
-    with tf.variable_scope("conditions"):
-        conditions = convolution4con(activation_fn(conditions), kernel_size, decay=decay,
-                                     activation_fn=activation_fn,
-                                     inner_conv_layers=2, reuse=False)
+    """
+    inputs = tf.concat(values=[inputs, condition_emb])
 
-    con_inputs = linear3d([inputs] + [conditions], inputs.get_shape()[1].value, True)
-
-    for j in range(pool_layers):
-      # if j > 0:
-      #     reuse = True
-      with tf.variable_scope("input_layer{0}".format(j)):
-        for i in range(conv_layers):
-          con_inputs -= convolution2d(con_inputs, kernel_size, decay=decay,
-                                      activation_fn=activation_fn)
-      pool_shape = [1, 1] + [pool_size] + [1]
-      # 1, 1, 2, 1
-      con_inputs = tf.nn.max_pool(con_inputs, pool_shape, pool_shape, padding='SAME')
-
-    # maybe dropout is useful
-    # squeeze the highth dimension
-    con_inputs = tf.squeeze(con_inputs, [1])
-    # make the embedding sequence to be only one embedding
-    con_outputs = tf.reduce_max(con_inputs, axis=1)
-
-    return con_outputs
+    with tf.variable_scope(scope, "CResCNN", [inputs], reuse=reuse):
+        if not pool_size:
+            pool_layers = 0
+        outputs = inputs
+        # residual layers
+        for j in range(pool_layers+1):
+           if j > 0:
+               pool_shape = [1, 1] + [pool_size] + [1]
+               inputs = tf.nn.max_pool(outputs, pool_shape, pool_shape, padding='SAME')
+               outputs = inputs
+               # why not tf.identity()
+           with tf.variable_scope("layer{0}".format(j)):
+               for i in range(conv_layers):
+                   outputs -= convolution2d(
+                       activation_fn(outputs), kernel_size, decay=decay, activation_fn=activation_fn)
+    return outputs
 
 
 def dump_chpt(eval_batcher, hps, model, sess, saver, eval_loss_best, early_stop=False):

@@ -5,6 +5,8 @@ from __future__ import print_function
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 from tensorflow.python.client import timeline
+from utils import add_encoder
+from utils import reduce_states
 import dis_utils
 
 
@@ -55,24 +57,22 @@ class Seq2ClassModel(object):
     self.max_dec_steps = hps.max_dec_steps
     self.layer_size = hps.layer_size
     self.conv_layers = hps.conv_layers
-    self.pool_layers = hps.pool_layers
     self.kernel_size = hps.kernel_size
+    self.pool_layers = hps.pool_layers
     self.pool_size = hps.pool_size
     self.num_class = hps.num_class
 
-  def init_emb(self, sess, emb_dir):
-    for ld in self.loaders:
-      ld.restore(sess, tf.train.get_checkpoint_state(emb_dir).model_checkpoint_path)
-    # why a loop here, isn't once enough?
-
   def _add_placeholders(self):
-    self.inputs = tf.placeholder(tf.int32, shape=[self.batch_size, self.max_dec_steps], name="inputs")
-    self.conditions = tf.placeholder(tf.int32, shape=[self.batch_size, self.max_enc_steps], name="conditions")
+    # all the inputs and conditions should not be vocabulary extened
+    self.inputs = tf.placeholder(tf.int32, shape=[self.batch_size, self.max_dec_steps, self.layer_size], name="inputs")
+    self.conditions = tf.placeholder(tf.int32, shape=[self.batch_size, None, self.layer_size], name="conditions")
+    self.condition_lens = tf.placeholder(tf.int32, [self.batch_size], name='condition_lens')
     self.targets = tf.placeholder(tf.int32, shape=[self.batch_size, 2], name="targets")
 
     self.inputs_splitted = tf.split(self.inputs, self.num_models)
     self.conditions_splitted = tf.split(self.conditions, self.num_models)
     self.targets_splitted = tf.split(self.targets, self.num_models)
+    self.condition_lens_splitted = tf.split(self.condition_lens, self.num_models)
 
   def build_graph(self):
     self._add_placeholders()
@@ -84,7 +84,7 @@ class Seq2ClassModel(object):
     for m in xrange(self.num_models):
       with tf.variable_scope("model"+str(m)):
         prob, _, _ = self._seq2class_model(
-            self.inputs, self.conditions, self.targets)
+            self.inputs, self.conditions, self.condition_len, self.targets)
         probs.append(prob)
         # print(prob.get_shape())
     self.dis_ypred_for_auc = tf.reduce_mean(tf.cast(tf.stack(probs, 2), tf.float32), 2)
@@ -101,16 +101,10 @@ class Seq2ClassModel(object):
       with tf.variable_scope("model"+str(m), reuse=True):
         _, loss, acy = self._seq2class_model(
             self.inputs_splitted[m], self.conditions_splitted[m],
-            self.targets_splitted[m])
+            self.condition_lens_splitted, self.targets_splitted[m])
         loss_train.append(tf.expand_dims(loss, 0))
         accuracy.append(acy)
         loss_cv.append(tf.expand_dims(loss, 0))
-        var_dict = {}
-        if self.hps.vocab_type == "word":
-            var_dict["embeddings"] = tf.get_variable("embed/embeddings")
-        else:
-            var_dict["embed/char_embedding"] = tf.get_variable("embed/embeddings")
-        self.loaders.append(tf.train.Saver(var_dict))
     loss_train = tf.reduce_mean(tf.concat(loss_train, 0))
     loss_cv = tf.reduce_mean(tf.concat(loss_cv, 0))
     self.accuracy = sum(accuracy) / len(accuracy)
@@ -121,22 +115,13 @@ class Seq2ClassModel(object):
         self.loss, self.global_step, tf.identity(self.learning_rate),
         'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
 
-  def _seq2class_model(self, inputs, conditions, targets):
+  def _seq2class_model(self, emb_inputs, emb_conditions, condition_lens, targets):
     """
     conditional sequence to class model
     """
 
-    batch_size = inputs.get_shape()[0].value
-    input_length = inputs.get_shape()[1].value
-    condition_length = conditions.get_shape()[1].value
     # embedding params
     with tf.variable_scope("embed"):
-      embeddings = tf.contrib.framework.model_variable("embeddings",
-                                                       shape=[self.vocab_size, self.layer_size],
-                                                       dtype=tf.float32,
-                                                       initializer=tf.truncated_normal_initializer(0.0, 0.01),
-                                                       collections=[tf.GraphKeys.WEIGHTS],
-                                                       trainable=True)
       class_output_weights = tf.contrib.framework.model_variable("class_output_weights",
                                                                  shape=[self.num_class, self.layer_size],
                                                                  dtype=tf.float32,
@@ -145,23 +130,21 @@ class Seq2ClassModel(object):
                                                                  trainable=True)
 
     with tf.variable_scope("encoder"):
-      input_masks = tf.greater(inputs, 0)
-      condition_masks = tf.greater(conditions, 0)
-      emb_inputs = tf.nn.embedding_lookup(embeddings, inputs)
-      emb_conditions = tf.nn.embedding_lookup(embeddings, conditions)
-      # substitute pads with zeros
-      emb_inputs = tf.reshape(tf.where(tf.reshape(input_masks, [-1]),
-                                       tf.reshape(emb_inputs, [-1, self.layer_size]),
-                                       tf.zeros([batch_size*input_length, self.layer_size])),
-                              [batch_size, input_length, self.layer_size])
-      emb_conditions = tf.reshape(tf.where(tf.reshape(condition_masks, [-1]),
-                                           tf.reshape(emb_conditions, [-1, self.layer_size]),
-                                           tf.zeros([batch_size*condition_length, self.layer_size])),
-                                  [batch_size, condition_length, self.layer_size])
-      cnn_emb_inputs = tf.expand_dims(emb_inputs, 1)
       cnn_emb_conditions = tf.expand_dims(emb_conditions, 1)
-      conditional_encoder_outputs = dis_utils.CResCNN(cnn_emb_inputs, cnn_emb_conditions, self.conv_layers, self.kernel_size, self.pool_size,
-                                                      pool_layers=self.pool_layers, activation_fn=tf.nn.relu, scope="cnn")
+      _, fw_st, bw_st = add_encoder(
+          cnn_emb_conditions, condition_lens,
+          hidden_dim=self.hps.hidden_dim, rand_unif_init_mag=self.hps.rand_unif_init_mag)
+
+      condition_emb = reduce_states(
+          fw_st, bw_st, hidden_dim=self.hps.hidden_dim,
+          activation_fn=tf.tanh, trunc_norm_init_std=self.hps.trunc_norm_init_std)
+      condition_emb = tf.concat(values=[condition_emb.c, condition_emb.h], axis=1)
+      # (batch_size, 2*hidden_dim)
+
+      cnn_emb_inputs = tf.expand_dims(emb_inputs, 1)
+      conditional_encoder_outputs = dis_utils.CResCNN(
+          cnn_emb_inputs, condition_emb, self.conv_layers, self.kernel_size, self.pool_size,
+          pool_layers=self.pool_layers, activation_fn=tf.nn.relu, scope="cnn")
 
     with tf.variable_scope("projection"):
       logits = tf.matmul(
@@ -176,7 +159,7 @@ class Seq2ClassModel(object):
       # tf.nn.in_top_k() is a little better
       return tf.nn.softmax(logits), loss, accuracy
 
-  def run_one_batch(self, sess, inputs, conditions, targets, update=True, do_profiling=False):
+  def run_one_batch(self, sess, inputs, conditions, condition_lens, targets, update=True, do_profiling=False):
     """Run a step of the model feeding the given inputs.
 
     Args:
@@ -199,6 +182,8 @@ class Seq2ClassModel(object):
     input_feed = {}
     input_feed[self.inputs] = inputs
     input_feed[self.conditions] = conditions
+    input_feed[self.condition_lens] = condition_lens
+
     input_feed[self.targets] = targets
 
     to_return = {
