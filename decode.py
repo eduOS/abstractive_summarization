@@ -237,7 +237,7 @@ class Decoder(object):
 
                 if not save2file:
                     rouges = rouge_l(
-                        outputs_ids,
+                        strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING)),
                         strip_pads(batch.dec_batch.tolist(),
                                    self._vocab.word2id(STOP_DECODING))
                         )

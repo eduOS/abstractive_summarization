@@ -48,6 +48,10 @@ STOP_DECODING = '[STOP]'
 # the vocab file.
 
 
+def red_assert(statement, message, color='red'):
+    assert statement, colored(message, color)
+
+
 class Vocab(object):
     """Vocabulary class for mapping between words and ids (integers)"""
 
@@ -76,6 +80,8 @@ class Vocab(object):
                     print('Warning: incorrectly formatted line in vocabulary file: %s\n' % line)
                     continue
                 w = pieces[0]
+                if self._count == 0:
+                    red_assert(w == PAD_TOKEN, "the first vocab should be 'pad' but %s found" % w)
                 # if w in [SENTENCE_START, SENTENCE_END, UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING]:
                 #     continue
                 #   # raise Exception(

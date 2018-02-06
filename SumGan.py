@@ -434,7 +434,8 @@ def main(argv):
         gan_val_saver = tf.train.Saver(max_to_keep=3, var_list=var_list)
         # for the loss test
         gen_val_saver = tf.train.Saver(max_to_keep=10, var_list=var_list)
-        utils.load_ckpt(dec_saver, sess, model_dir, mode="val", force=True)
+        # load gan variables
+        utils.load_ckpt(dec_saver, sess, gan_dir, mode="train", force=True)
         decoder = Decoder(sess, generator, gen_vocab)
 
     if FLAGS.mode == "pretrain_dis" or (FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1):

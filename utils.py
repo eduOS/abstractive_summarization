@@ -10,7 +10,7 @@ import datetime
 import tensorflow as tf
 import time
 import numpy as np
-import data
+STOP_DECODING = '[STOP]'
 
 
 def ensure_exists(dire):
@@ -101,7 +101,7 @@ def pad_sample(best_samples, vocab, hps):
     # Fill in the numpy arrays
     for i, sp in enumerate(best_samples):
         for j, p in enumerate(sp):
-            if p == vocab.word2id(data.STOP_DECODING):
+            if p == vocab.word2id(STOP_DECODING):
                 sample_padding_mask[i][j] = 1
                 break
             else:
