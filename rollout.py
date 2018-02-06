@@ -203,6 +203,11 @@ class Rollout(object):
                 rewards = (1 - rouge_ratio)*dis_rewards + rouge_ratio*rouge_rewards
 
             average_rewards = rewards / (1.0 * rollout_num)
+            # if k == 1:
+            #     for nn, oa in enumerate(source_batch.original_abstracts):
+            #         print(oa)
+            #         print(' '.join([str(round(float(a), 3)) for a in average_rewards[nn]]))
+
             # print('enc_states')
             # print(enc_states)
             # print('dec_in_state')
