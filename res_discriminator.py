@@ -122,42 +122,46 @@ class Seq2ClassModel(object):
 
     # embedding params
     with tf.variable_scope("embed"):
-      class_output_weights = tf.contrib.framework.model_variable("class_output_weights",
-                                                                 shape=[self.num_class, self.layer_size],
-                                                                 dtype=tf.float32,
-                                                                 initializer=tf.truncated_normal_initializer(0.0, 0.01),
-                                                                 collections=[tf.GraphKeys.WEIGHTS],
-                                                                 trainable=True)
+      input_weights = tf.contrib.framework.model_variable("input_weights",
+                                                          shape=[self.num_class, self.layer_size],
+                                                          dtype=tf.float32,
+                                                          initializer=tf.truncated_normal_initializer(0.0, 0.01),
+                                                          collections=[tf.GraphKeys.WEIGHTS],
+                                                          trainable=True)
+      condition_weights = tf.contrib.framework.model_variable("condition_weights",
+                                                              shape=[2 * self.layer_size, self.layer_size],
+                                                              dtype=tf.float32,
+                                                              initializer=tf.truncated_normal_initializer(0.0, 0.01),
+                                                              collections=[tf.GraphKeys.WEIGHTS],
+                                                              trainable=True)
 
-    with tf.variable_scope("encoder"):
-      cnn_emb_conditions = tf.expand_dims(emb_conditions, 1)
+    with tf.variable_scope("condition_encoder"):
       _, fw_st, bw_st = add_encoder(
-          cnn_emb_conditions, condition_lens,
+          emb_conditions, condition_lens,
           hidden_dim=self.hps.hidden_dim, rand_unif_init_mag=self.hps.rand_unif_init_mag)
 
       condition_emb = reduce_states(
           fw_st, bw_st, hidden_dim=self.hps.hidden_dim,
           activation_fn=tf.tanh, trunc_norm_init_std=self.hps.trunc_norm_init_std)
       condition_emb = tf.concat(values=[condition_emb.c, condition_emb.h], axis=1)
+      with tf.variable_scope("conduction_projection"):
+        condition_emb = tf.matmul(condition_emb, condition_weights)
       # (batch_size, 2*hidden_dim)
 
+    with tf.variable_scope("input_encoder"):
       cnn_emb_inputs = tf.expand_dims(emb_inputs, 1)
-      conditional_encoder_outputs = dis_utils.CResCNN(
-          cnn_emb_inputs, condition_emb, self.conv_layers, self.kernel_size, self.pool_size,
+      input_emb = dis_utils.CResCNN(
+          cnn_emb_inputs, self.conv_layers, self.kernel_size, self.pool_size,
           pool_layers=self.pool_layers, activation_fn=tf.nn.relu, scope="cnn")
 
-    with tf.variable_scope("projection"):
-      logits = tf.matmul(
-          conditional_encoder_outputs,
-          tf.transpose(class_output_weights/(tf.norm(class_output_weights, axis=1, keep_dims=True)+1e-20))
-      )
-      # loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=targets))
-      loss = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=targets)
-      accuracy = tf.count_nonzero(
-          tf.equal(tf.argmax(logits, 1), tf.argmax(targets, 1))
-      ) / logits.get_shape().as_list()[0]
-      # tf.nn.in_top_k() is a little better
-      return tf.nn.softmax(logits), loss, accuracy
+    logits = tf.matmul(tf.tensordot(condition_emb, input_emb, axes=1))
+    # loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=targets))
+    loss = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=targets)
+    accuracy = tf.count_nonzero(
+        tf.equal(tf.argmax(logits, 1), tf.argmax(targets, 1))
+    ) / logits.get_shape().as_list()[0]
+    # tf.nn.in_top_k() is a little better
+    return tf.nn.softmax(logits), loss, accuracy
 
   def run_one_batch(self, sess, inputs, conditions, condition_lens, targets, update=True, do_profiling=False):
     """Run a step of the model feeding the given inputs.
