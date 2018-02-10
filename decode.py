@@ -101,6 +101,7 @@ class Decoder(object):
                 length_exclude_start_token = len(hyp)-1
                 padding_mask[b, n, :length_exclude_start_token] = 1
                 padded = tokens + (sample_max_len - len(hyp)) * [pad_id] if len(hyp) < sample_max_len else tokens[:sample_max_len]
+                assert len(padded) == sample_max_len, "sample should be of length %s, but %s given." % (sample_max_len, len(padded))
                 padded_hyps.append(padded)
             padded_n_hyps.append(padded_hyps)
 

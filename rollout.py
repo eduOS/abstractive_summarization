@@ -147,11 +147,10 @@ class Rollout(object):
                                 discriminator.inputs: emb_rollout_samples,
                                 discriminator.conditions: emb_articles}
                             ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
-                            ypred = np.array([item[1] for item in ypred_for_auc])
                             if ir == 0:
-                                dis_rewards.append(ypred)
+                                dis_rewards.append(ypred_for_auc)
                             else:
-                                dis_rewards[given_num-1] = ypred
+                                dis_rewards[given_num-1] = ypred_for_auc
 
                     if rouge_ratio:
                         rpred = rouge_l(strip_pads(rollout_samples_extend.tolist(), gen_vocab.word2id(STOP_DECODING)),

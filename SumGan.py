@@ -19,10 +19,13 @@ from gen_utils import calc_running_avg_loss
 from gen_utils import get_best_loss_from_chpt
 from gen_utils import save_ckpt as gen_save_ckpt
 from gan_utils import save_ckpt as gan_save_ckpt
+from tensorflow.python import debug as tf_debug
+from utils import sattolo_cycle
 from utils import print_dashboard
 from dis_utils import dump_chpt
 import math
 from termcolor import colored
+from data import POSITIVE_LABEL, NEGATIVE_LABEL
 
 from res_discriminator import Seq2ClassModel
 from data import Vocab
@@ -129,12 +132,13 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 tf.app.flags.DEFINE_integer('rollout_start', 0, 'how many times to run the gan')
 tf.app.flags.DEFINE_integer('gan_iter', 200000, 'how many times to run the gan')
 tf.app.flags.DEFINE_integer('gan_gen_iter', 5, 'in each gan step run how many times the generator')
-tf.app.flags.DEFINE_integer('gan_dis_iter', 10, 'in each gan step run how many times the generator')
+tf.app.flags.DEFINE_integer('gan_dis_iter', 10**8, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 12, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan", "Training directory.")
 tf.app.flags.DEFINE_integer('sample_num', 2, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_float('gan_lr', 0.0005, 'learning rate for the gen in GAN training')
-tf.app.flags.DEFINE_float('rouge_reward_ratio', 1.0, 'The importance of rollout in calculating the reward.')
+tf.app.flags.DEFINE_float('rouge_reward_ratio', 0, 'The importance of rollout in calculating the reward.')
+tf.app.flags.DEFINE_float('dis_reward_ratio', 0, 'The importance of rollout in calculating the reward.')
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -373,6 +377,7 @@ def main(argv):
         'rollout_num',
         'sample_num',
         'rouge_reward_ratio',
+        'dis_reward_ratio',
         "rollout_start",
     ]
     hps_dict = {}
@@ -392,6 +397,8 @@ def main(argv):
         tf.get_collection_ref(tf.GraphKeys.WEIGHTS) + \
         tf.get_collection_ref(tf.GraphKeys.BIASES)
     sess = tf.Session(config=utils.get_config())
+    sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+    sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
     sess.run(tf.variables_initializer(all_variables))
     if FLAGS.mode == "pretrain_gen":
         print("Restoring the generator model from the latest checkpoint...")
@@ -444,13 +451,9 @@ def main(argv):
             max_to_keep=3, var_list=[v for v in all_variables if "discriminator" in v.name])
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
         mode = "train" if FLAGS.mode == "pretrain_dis" else "val"
-        ckpt = utils.load_ckpt(dis_saver, sess, dis_dir, mode=mode, force=(FLAGS.mode == "train_gan"))
+        # ckpt = utils.load_ckpt(dis_saver, sess, dis_dir, mode=mode, force=(FLAGS.mode == "train_gan"))
+        ckpt = utils.load_ckpt(dis_saver, sess, dis_dir, mode=mode, force=False)
         del mode
-        if not ckpt:
-            if hps_dis.vocab_type == hps_gen.vocab_type:
-                discriminator.init_emb(sess, join_path(FLAGS.model_dir, "generator", "init_embed"))
-            else:
-                discriminator.init_emb(sess, join_path(FLAGS.model_dir, "discriminator", "init_embed"))
 
     # --------------- train models ---------------
     if FLAGS.mode not in ["pretrain_dis", "decode"]:
@@ -463,7 +466,7 @@ def main(argv):
     if FLAGS.mode == "train_gan":
         gan_batcher_val = GenBatcher("mini_val", "val", gen_vocab, hps_gen)
 
-    if FLAGS.mode == "pretrain_dis" or (FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1):
+    if FLAGS.mode == "pretrain_dis":
         dis_val_batch_size = hps_dis.batch_size * hps_dis.num_models \
             if hps_dis.mode == "train_gan" else hps_dis.batch_size * hps_dis.num_models * 2
         dis_batcher_val = DisBatcher(
@@ -568,7 +571,7 @@ def main(argv):
 
             # Test
             # if FLAGS.gan_gen_iter and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
-            if i_gan % 50 == 0 or i_gan == hps_gan.gan_iter - 1:
+            if hps_gan.gan_gen_iter and (i_gan % 50 == 0 or i_gan == hps_gan.gan_iter - 1):
                 print('Going to test the loss of the generator.')
                 current_speed = (float(sum(current_speed)) + epsilon) / (int(len(current_speed)) * hps_gen.batch_size + epsilon)
                 everage_g_loss = (float(sum(g_losses)) + epsilon) / float(len(g_losses) + epsilon)
@@ -609,43 +612,69 @@ def main(argv):
                 batch = gen_batcher_train.next_batch()
                 enc_states, dec_in_state, n_samples_extend, _ = decoder.mc_generate(
                     batch, s_num=hps_gan.sample_num)
+                assert np.array(n_samples_extend).shape == (hps_gan.sample_num,
+                                                            hps_gen.batch_size,
+                                                            hps_gen.max_dec_steps + 1)
+                n_samples_extend_no_start = np.array(n_samples_extend)[:, :, 1:]
                 # shuould first tanslate to words to avoid unk
                 n_samples = [np.where(
                     np.less(samples, hps_gen.gen_vocab_size),
                     samples, np.array(
-                        [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
-                    for samples in n_samples_extend]
+                        [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * (hps_gen.max_dec_steps)] * hps_gen.batch_size))
+                    for samples in n_samples_extend_no_start]
                 for samples in n_samples:
                     emb_dec_batch = sess.run(
                         generator.temp_embedded_seq,
-                        feed_dict={generator.temp_batch: batch.dec_batch})
+                        feed_dict={generator.temp_batch: batch.padded_abs_ids})
                     emb_conditions = sess.run(
                         generator.temp_embedded_seq,
                         feed_dict={generator.temp_batch: batch.padded_enc_batch})
+                    emb_samples = sess.run(
+                        generator.temp_embedded_seq,
+                        feed_dict={generator.temp_batch: samples})
 
-                    inputs = np.concatenate([samples, emb_dec_batch], 0)
-                    conditions = np.concatenate([emb_conditions, emb_conditions], 0)
-                    condition_lens = batch.enc_lens
-                    targets = [[1, 0] for _ in samples] + [[0, 1] for _ in emb_dec_batch]
+                    _range = range(len(emb_dec_batch))
+                    sattolo_cycle(_range)
+                    indices = np.array(_range)
+
+                    inputs = np.concatenate([emb_samples, emb_dec_batch, emb_dec_batch[indices]], 0)
+                    conditions = np.concatenate([emb_conditions, emb_conditions, emb_conditions], 0)
+                    condition_lens = np.concatenate([batch.enc_lens, batch.enc_lens, batch.enc_lens], 0)
+                    targets = [NEGATIVE_LABEL for _ in samples] + [POSITIVE_LABEL for _ in emb_dec_batch] + [NEGATIVE_LABEL for _ in emb_dec_batch]
                     targets = np.array(targets)
+                    assert len(inputs) == len(conditions) == len(condition_lens) == len(targets)
+
                     # randomize the samples
-                    assert len(inputs) == len(conditions) == len(targets), "lengthes of the inputs, conditions and targests should be the same."
-                    indices = np.random.permutation(len(inputs))
-                    inputs = np.split(inputs[indices], 2)
-                    conditions = np.split(conditions[indices], 2)
-                    condition_lens = np.split(condition_lens[indices], 2)
-                    targets = np.split(targets[indices], 2)
-                    assert len(inputs) % 2 == 0, "the length should be mean"
+                    _range = range(len(inputs))
+                    sattolo_cycle(_range)
+                    indices = np.array(_range)
 
-                    results = discriminator.run_one_batch(sess, inputs[0], conditions[0], condition_lens[0], targets[0])
-                    dis_accuracies.append(results["accuracy"].item())
-                    dis_losses.append(results["loss"].item())
+                    parts = 3
+                    inputs = np.split(inputs[indices], parts)
+                    conditions = np.split(conditions[indices], parts)
+                    condition_lens = np.split(condition_lens[indices], parts)
+                    targets = np.split(targets[indices], parts)
 
-                    results = discriminator.run_one_batch(sess, inputs[1], conditions[1], condition_lens[1], targets[1])
-                    dis_accuracies.append(float(results["accuracy"]))
+                    for p in range(parts):
+                        results = discriminator.run_one_batch(sess, inputs[p], conditions[p], condition_lens[p], targets[p])
+                        d_loss = results["loss"]
+                        if not math.isnan(d_loss):
+                            dis_losses.append(float(d_loss))
+                            dis_accuracies.append(results["accuracy"].item())
+                        else:
+                            print(colored('a nan in dis loss', 'red'))
+                            print('inputs[p]')
+                            print(inputs[p])
+                            print('conditions[p]')
+                            print(conditions[p])
+                            print('condition_lens[p]')
+                            print(condition_lens[p])
+                            print('targets[p]')
+                            print(targets[p])
+                            break
 
                 ave_dis_acc = sum(dis_accuracies) / len(dis_accuracies)
-                if d_gan == hps_gan.gan_dis_iter - 1:
+                if gan_dis_iter % 50 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
                     if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:
                         dis_best_loss = sum(dis_losses) / len(dis_losses)
                         checkpoint_path = ensure_exists(join_path(hps_dis.model_dir, "discriminator")) + "/model.ckpt"
@@ -654,8 +683,11 @@ def main(argv):
                                     results["loss"].item(), 0.00, 0.00, 0.00)
                     print("Average training accuracy: \t%.4f" % ave_dis_acc)
 
-                if ave_dis_acc > 0.9:
+                if ave_dis_acc > 0.8:
                     break
+
+            if i_gan > 0:
+                break
 
     # --------------- decoding samples ---------------
     elif FLAGS.mode == "decode":

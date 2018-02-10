@@ -8,6 +8,7 @@ from termcolor import colored
 from tensorflow.python import pywrap_tensorflow
 import datetime
 import tensorflow as tf
+from random import randrange
 import time
 import numpy as np
 import data
@@ -255,7 +256,7 @@ def add_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init_mag=0.02, st
         Each are LSTMStateTuples of shape
         ([batch_size,hidden_dim],[batch_size,hidden_dim])
     """
-    rand_unif_init = tf.random_uniform_initializer(rand_unif_init_mag, rand_unif_init_mag, seed=123)
+    rand_unif_init = tf.random_uniform_initializer(-rand_unif_init_mag, rand_unif_init_mag, seed=123)
     with tf.variable_scope('encoder'):
         cell_fw = tf.contrib.rnn.LSTMCell(
             hidden_dim, initializer=rand_unif_init, state_is_tuple=state_is_tuple)
@@ -315,3 +316,11 @@ def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_in
         new_c = activation_fn(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
         new_h = activation_fn(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
         return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
+
+
+def sattolo_cycle(items):
+    i = len(items)
+    while i > 1:
+        i = i - 1
+        j = randrange(i)  # 0 <= j <= i-1
+        items[j], items[i] = items[i], items[j]

@@ -7,6 +7,8 @@ import tensorflow as tf
 from tensorflow.python.client import timeline
 from utils import add_encoder
 from utils import reduce_states
+import math
+import sys
 import dis_utils
 
 
@@ -64,10 +66,10 @@ class Seq2ClassModel(object):
 
   def _add_placeholders(self):
     # all the inputs and conditions should not be vocabulary extened
-    self.inputs = tf.placeholder(tf.int32, shape=[self.batch_size, self.max_dec_steps, self.layer_size], name="inputs")
-    self.conditions = tf.placeholder(tf.int32, shape=[self.batch_size, None, self.layer_size], name="conditions")
+    self.inputs = tf.placeholder(tf.float32, shape=[self.batch_size, self.max_dec_steps, self.layer_size], name="inputs")
+    self.conditions = tf.placeholder(tf.float32, shape=[self.batch_size, None, self.layer_size], name="conditions")
     self.condition_lens = tf.placeholder(tf.int32, [self.batch_size], name='condition_lens')
-    self.targets = tf.placeholder(tf.int32, shape=[self.batch_size, 2], name="targets")
+    self.targets = tf.placeholder(tf.int32, shape=[self.batch_size], name="targets")
 
     self.inputs_splitted = tf.split(self.inputs, self.num_models)
     self.conditions_splitted = tf.split(self.conditions, self.num_models)
@@ -84,12 +86,10 @@ class Seq2ClassModel(object):
     for m in xrange(self.num_models):
       with tf.variable_scope("model"+str(m)):
         prob, _, _ = self._seq2class_model(
-            self.inputs, self.conditions, self.condition_len, self.targets)
+            self.inputs, self.conditions, self.condition_lens, self.targets)
         probs.append(prob)
         # print(prob.get_shape())
-    self.dis_ypred_for_auc = tf.reduce_mean(tf.cast(tf.stack(probs, 2), tf.float32), 2)
-    self.output = tf.argmax(sum(probs), axis=1)
-    # self.output = probs[0]
+    self.dis_ypred_for_auc = tf.reduce_mean(tf.cast(tf.stack(probs, 1), tf.float32), 1)
     # would this lead the value run out to be a list of only one two
     # dimensional numpy array?
     #  ------------------ for training ----------------------
@@ -101,7 +101,7 @@ class Seq2ClassModel(object):
       with tf.variable_scope("model"+str(m), reuse=True):
         _, loss, acy = self._seq2class_model(
             self.inputs_splitted[m], self.conditions_splitted[m],
-            self.condition_lens_splitted, self.targets_splitted[m])
+            self.condition_lens_splitted[m], self.targets_splitted[m])
         loss_train.append(tf.expand_dims(loss, 0))
         accuracy.append(acy)
         loss_cv.append(tf.expand_dims(loss, 0))
@@ -110,7 +110,7 @@ class Seq2ClassModel(object):
     self.accuracy = sum(accuracy) / len(accuracy)
     self.indicator = loss_cv
     self.loss = loss_train
-    dis_utils.params_decay(1.0 - self.learning_rate)
+    # dis_utils.params_decay(1.0 - self.learning_rate)
     self.update = tf.contrib.layers.optimize_loss(
         self.loss, self.global_step, tf.identity(self.learning_rate),
         'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
@@ -122,14 +122,8 @@ class Seq2ClassModel(object):
 
     # embedding params
     with tf.variable_scope("embed"):
-      input_weights = tf.contrib.framework.model_variable("input_weights",
-                                                          shape=[self.num_class, self.layer_size],
-                                                          dtype=tf.float32,
-                                                          initializer=tf.truncated_normal_initializer(0.0, 0.01),
-                                                          collections=[tf.GraphKeys.WEIGHTS],
-                                                          trainable=True)
       condition_weights = tf.contrib.framework.model_variable("condition_weights",
-                                                              shape=[2 * self.layer_size, self.layer_size],
+                                                              shape=[2 * self.hps.hidden_dim, self.layer_size],
                                                               dtype=tf.float32,
                                                               initializer=tf.truncated_normal_initializer(0.0, 0.01),
                                                               collections=[tf.GraphKeys.WEIGHTS],
@@ -150,18 +144,24 @@ class Seq2ClassModel(object):
 
     with tf.variable_scope("input_encoder"):
       cnn_emb_inputs = tf.expand_dims(emb_inputs, 1)
-      input_emb = dis_utils.CResCNN(
+      cnn_outputs = dis_utils.CResCNN(
           cnn_emb_inputs, self.conv_layers, self.kernel_size, self.pool_size,
           pool_layers=self.pool_layers, activation_fn=tf.nn.relu, scope="cnn")
+      cnn_outputs = tf.squeeze(cnn_outputs, [1])
+      # would it be better if use reduce_sum ?
+      input_emb = tf.reduce_max(cnn_outputs, axis=1)
 
-    logits = tf.matmul(tf.tensordot(condition_emb, input_emb, axes=1))
-    # loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=targets))
-    loss = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=targets)
-    accuracy = tf.count_nonzero(
-        tf.equal(tf.argmax(logits, 1), tf.argmax(targets, 1))
-    ) / logits.get_shape().as_list()[0]
-    # tf.nn.in_top_k() is a little better
-    return tf.nn.softmax(logits), loss, accuracy
+    with tf.variable_scope("dis_loss"):
+      # prob = tf.reduce_sum(tf.multiply(condition_emb, input_emb), axis=1) / (tf.norm(condition_emb, axis=1) * tf.norm(input_emb, axis=1))
+      # normalized_condition_emb = tf.nn.l2_normalize(condition_emb, dim=1)
+      # normalized_input_emb = tf.nn.l2_normalize(input_emb, dim=1)
+      dot_product = tf.reduce_sum(tf.multiply(input_emb, condition_emb), axis=1)
+      prob = tf.sigmoid(dot_product)
+      loss = tf.reduce_mean(tf.where(tf.equal(targets, 1), -tf.log(prob), -tf.log(1-prob)))
+      pred = tf.where(tf.less(tf.fill(tf.shape(prob), 0.5), prob),
+                      tf.fill(tf.shape(prob), 1), tf.fill(tf.shape(prob), 0))
+      accuracy = tf.count_nonzero(tf.equal(pred, targets)) / tf.cast(tf.shape(pred)[0], tf.int64)
+    return prob, loss, accuracy
 
   def run_one_batch(self, sess, inputs, conditions, condition_lens, targets, update=True, do_profiling=False):
     """Run a step of the model feeding the given inputs.
@@ -184,6 +184,7 @@ class Seq2ClassModel(object):
     """
     # Input feed: encoder inputs, decoder inputs, target_weights, as provided.
     input_feed = {}
+
     input_feed[self.inputs] = inputs
     input_feed[self.conditions] = conditions
     input_feed[self.condition_lens] = condition_lens
@@ -199,7 +200,7 @@ class Seq2ClassModel(object):
       to_return["loss"] = self.loss
       to_return["accuracy"] = self.accuracy
       to_return["update"] = self.update
-      # to_return["output"] = self.output
+
     else:
       to_return["loss"] = self.indicator
       to_return["accuracy"] = self.accuracy

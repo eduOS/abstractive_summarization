@@ -45,6 +45,9 @@ def fopen(filename, mode='r'):
 class Example(object):
     """Class representing a train/val/test example for text summarization."""
 
+    def __len__(self):
+        return self.enc_len
+
     def __init__(self, article, abstract, vocab, hps):
         """Initializes the Example, performing tokenization and truncation to
         produce the encoder, decoder and target sequences, which are stored in
@@ -74,6 +77,8 @@ class Example(object):
         # Process the abstract
         abstract_words = abstract.split()  # list of strings
         # list of word ids; OOVs are represented by the id for UNK token
+        if len(abstract_words) > hps.max_dec_steps:
+            abstract_words = article_words[:hps.max_dec_steps]
         self.abs_ids = [vocab.word2id(w) for w in abstract_words]
 
         # Get the decoder input sequence and target sequence
@@ -210,14 +215,17 @@ class Batch(object):
         # each batch because we use dynamic_rnn for the encoder.
         self.enc_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
         self.padded_enc_batch = np.zeros((hps.batch_size, hps.max_enc_steps), dtype=np.int32)
+        self.padded_abs_ids = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
         self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
         self.enc_padding_mask = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.float32)
 
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):
             i_enc_input = ex.enc_input[:]
+            i_abs_ids = ex.abs_ids[:]
             self.enc_batch[i, :] = i_enc_input
-            self.padded_enc_batch[i, :len(ex)] = i_enc_input
+            self.padded_enc_batch[i, :len(i_enc_input)] = i_enc_input
+            self.padded_abs_ids[i, :len(i_abs_ids)] = i_abs_ids
             self.enc_lens[i] = ex.enc_len
             for j in range(ex.enc_len):
                 self.enc_padding_mask[i][j] = 1
@@ -451,13 +459,13 @@ class GenBatcher(object):
             inputs = []
             for _ in range(self._hps.batch_size * self._bucketing_cache_size):
                 pair = self._example_queue.get()
-                if pair:
+                if pair and pair not in inputs:
                     inputs.append(pair)
-                else:
-                    self._batch_queue.put(None)
-                    continue
+                elif not pair:
+                    inputs.append('None')
             # sort by length of encoder sequence
-            inputs = sorted(inputs, key=lambda inp: inp.enc_len)
+            inputs = list(set(inputs))
+            inputs = sorted(inputs, key=lambda inp: len(inp))
 
             # Group the sorted Examples into batches, optionally shuffle the
             # batches, and place in the batch queue.
@@ -467,7 +475,10 @@ class GenBatcher(object):
             if self._mode == "train":
                 shuffle(batches)
             for b in batches:  # each b is a list of Example objects
-                if len(b) != self._hps.batch_size:
+                if "None" in b:
+                    self._batch_queue.put(None)
+                    continue
+                elif len(b) != self._hps.batch_size:
                     continue
                 self._batch_queue.put(Batch(b, self._hps, self._vocab))
 

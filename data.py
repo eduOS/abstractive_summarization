@@ -43,6 +43,8 @@ UNKNOWN_TOKEN = '[UNK]'
 START_DECODING = '[START]'
 # This has a vocab id, which is used at the end of untruncated target sequences
 STOP_DECODING = '[STOP]'
+POSITIVE_LABEL = 1
+NEGATIVE_LABEL = 0
 
 # Note: none of <s>, </s>, [PAD], [UNK], [START], [STOP] should appear in
 # the vocab file.
@@ -328,8 +330,8 @@ def prepare_dis_pretraining_batch(batch):
     source, positives, negatives = batch
     inputs = positives + negatives
 
-    positive_labels = [[0, 1] for _ in positives]
-    negative_labels = [[1, 0] for _ in negatives]
+    positive_labels = [POSITIVE_LABEL for _ in positives]
+    negative_labels = [NEGATIVE_LABEL for _ in negatives]
     targets = positive_labels + negative_labels
 
     conditions = source + source
