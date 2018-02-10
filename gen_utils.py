@@ -112,3 +112,31 @@ def save_ckpt(sess, model, best_loss, model_dir, model_saver,
         print("Model is saved to" + colored(" %s", 'yellow') % model_save_path)
 
     return eval_loss, best_loss
+
+
+def find_the_copy_mask(condition, abstract):
+    """
+    Calculates longest common subsequence for a pair of tokenized strings
+    :param string : list of str : tokens from a string split using whitespace
+    :param sub : list of str : shorter string, also split using whitespace
+    :returns: length (list of int): length of the longest common subsequence between the two strings
+
+    Note: my_lcs only gives length of the longest common subsequence, not the actual LCS
+    """
+    assert len(condition) > len(abstract)
+
+    lengths = [[0 for i in range(0, len(abstract)+1)] for j in range(0, len(condition)+1)]
+    longest = 0
+    mask = [0] * len(condition)
+
+    for j in range(1, len(abstract)+1):
+        for i in range(1, len(condition)+1):
+            if(condition[i-1] == abstract[j-1]):
+                lengths[i][j] = lengths[i-1][j-1] + 1
+                if lengths[i][j] > longest:
+                    longest = lengths[i][j]
+                    mask[i-1] = 1
+            else:
+                lengths[i][j] = max(lengths[i-1][j], lengths[i][j-1])
+
+    return mask

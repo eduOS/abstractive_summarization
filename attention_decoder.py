@@ -35,7 +35,7 @@ from utils import linear
 
 
 def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding_mask,
-                      cell, initial_state_attention=False,
+                      enc_copy_mask, cell, initial_state_attention=False,
                       use_coverage=False, prev_coverage=None):
     """
     Args:
@@ -146,6 +146,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
                     """Take softmax of e then apply enc_padding_mask and re-normalize"""
                     attn_dist = nn_ops.softmax(e)  # take softmax. shape (batch_size, attn_length)
                     attn_dist *= enc_padding_mask  # apply mask
+                    attn_dist *= enc_copy_mask  # apply copy mask
                     masked_sums = tf.reduce_sum(attn_dist, axis=1)  # shape (batch_size)
                     return attn_dist / tf.reshape(masked_sums, [-1, 1])  # re-normalize
 

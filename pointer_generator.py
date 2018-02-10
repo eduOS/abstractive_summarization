@@ -52,6 +52,9 @@ class PointerGenerator(object):
         else:
             max_dec_steps = hps.max_dec_steps
 
+        # -------- placeholders for training enc masker and beam search decoding
+        self.enc_mask_target = tf.placeholder(tf.int32, [batch_size, None], name='enc_maske_target')
+
         # -------- placeholders for training generatror and beam search decoding
         # encoder part
         self.enc_batch = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch')
@@ -285,23 +288,24 @@ class PointerGenerator(object):
 
             return final_dists
 
-    def mask_input(self):
+    def _mask_enc_copy(self):
         dynamic_enc_steps = tf.shape(self.enc_states)[1]
-        enc_states = tf.transpose(self.enc_states, perm=[1, 0, 2])
-        emb_enc_inputs = tf.transpo(self.emb_enc_inputs, perm=[1, 0, 2])
+        enc_states = tf.transpose(tf.stop_gradient(self.enc_states), perm=[1, 0, 2])
+        emb_enc_inputs = tf.transpose(tf.stop_gradient(self.emb_enc_inputs), perm=[1, 0, 2])
         mask_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
 
-        with tf.variable_scope("MASK", reuse=True):
-            def cond(_e, _s, i, _m):
-                return i < dynamic_enc_steps
+        def cond(_e, _s, i, _m):
+            return i < dynamic_enc_steps
 
-            def mask(inputs, states, i, mask_ar):
-                mask_ar.write(linear([inputs[i]] + [states[i]], 1, True))
-                return inputs, states, i, mask_ar
+        def mask(inputs, states, i, mask_ar):
+            mask_ar.write(i, linear([inputs[i]] + [states[i]], 1, True))
+            tf.get_variable_scope().reuse_variables()
+            return inputs, states, i+1, mask_ar
 
-            _, _, _, mask_ar = tf.while_loop(
-                cond, mask, (emb_enc_inputs, enc_states, 0, mask_ar))
-        return mask_ar
+        _, _, _, mask_ar = tf.while_loop(
+            cond, mask, (emb_enc_inputs, enc_states, 0, mask_ar))
+        mask = tf.transpose(tf.squeeze(mask_ar.stack()))
+        return mask
 
     def _add_seq2seq(self):
         """Add the whole sequence-to-sequence model to the graph."""
@@ -345,9 +349,34 @@ class PointerGenerator(object):
             self.enc_states = enc_outputs
             self.dec_in_state = self._reduce_states(fw_st, bw_st)
 
+            # --------------------------------- MASK
+            with tf.variable_scope("MASK"):
+                self.enc_copy_mask = tf.sigmoid(self._mask_enc_copy())
+                enc_mask_loss = tf.where(
+                    tf.equal(self.enc_mask_target, 1),
+                    - tf.log(self.enc_copy_mask),
+                    - tf.log(1-self.enc_copy_mask)
+                )
+                self.enc_mask_loss = tf.reduce_mean(
+                    tf.reduce_sum(enc_mask_loss * self.enc_padding_mask /
+                                  tf.reduce_sum(self.enc_padding_mask, axis=1), axis=1), axis=0)
+                self.m_update = tf.contrib.layers.optimize_loss(
+                    self.enc_mask_loss, self.global_step, self.hps.gen_lr,
+                    'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
+                pred = tf.where(tf.less(tf.fill(tf.shape(self.enc_copy_mask), 0.5), self.enc_copy_mask),
+                                tf.ones_like(self.enc_copy_mask), tf.zeros_like(self.enc_copy_mask))
+                self.accuracy = tf.count_nonzero(
+                    tf.cast(tf.equal(pred, self.enc_mask_target), tf.int32) * self.enc_padding_mask
+                ) / tf.reduce_sum(self.enc_padding_mask)
+
+            enc_copy_mask = tf.where(tf.less(0.5, tf.stop_gradient(self.enc_copy_mask)),
+                                     tf.ones_like(self.enc_copy_mask), tf.zeros_like(self.enc_copy_mask))
+            # ---------------------------------
+
             with tf.variable_scope('decoder') as decoder_scope:
                 self.attn_dists, self.p_gens, self.coverage, \
-                    final_dists, self._dec_out_state = self._add_decoder(emb_dec_inputs, self.dec_in_state)
+                    final_dists, self._dec_out_state = self._add_decoder(
+                        emb_dec_inputs, self.dec_in_state, enc_copy_mask)
                 decoder_scope.reuse_variables()
 
                 eval_attn_dists, _, eval_coverage, eval_final_dists, _ \
@@ -444,7 +473,7 @@ class PointerGenerator(object):
 
         return decoder_scope
 
-    def _add_decoder(self, emb_dec_inputs, dec_in_state):
+    def _add_decoder(self, emb_dec_inputs, dec_in_state, enc_copy_mask):
         """
         input:
             emb_dec_inputs, the input of the cell
@@ -466,8 +495,8 @@ class PointerGenerator(object):
         # coverage is for decoding in beam_search and gan training
 
         outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
-            emb_dec_inputs, dec_in_state, self.enc_states, self.enc_padding_mask, cell,
-            initial_state_attention=(len(emb_dec_inputs) == 1),
+            emb_dec_inputs, dec_in_state, self.enc_states, self.enc_padding_mask,
+            enc_copy_mask, cell, initial_state_attention=(len(emb_dec_inputs) == 1),
             use_coverage=self.hps.coverage, prev_coverage=prev_coverage)
 
         # Add the output projection to obtain the vocabulary distribution
@@ -510,6 +539,19 @@ class PointerGenerator(object):
         t1 = time.time()
         print(colored('Time to build graph: %s seconds' % (t1 - t0), "yellow"))
         return decoder_scope
+
+    def train_enc_copy_mask(self, sess, batch, update=True):
+        feed_dict = self._make_feed_dict(batch, just_enc=True)
+        feed_dict['enc_mask_target'] = batch.enc_mask_target
+
+        to_return = {
+            'loss': self.enc_mask_loss,
+            'accuracy': self.accuracy,
+            'global_step': self.global_step,
+        }
+        if update:
+            to_return['update'] = self.m_update
+        return sess.run(to_return, feed_dict)
 
     def run_one_batch(self, sess, batch, update=True, gan_eval=False):
         """Runs one training iteration. Returns a dictionary containing train

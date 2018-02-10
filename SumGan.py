@@ -140,7 +140,7 @@ tf.app.flags.DEFINE_float('rouge_reward_ratio', 0.0, 'The importance of rollout 
 
 FLAGS = tf.app.flags.FLAGS
 
-assert FLAGS.mode in ["pretrain_gen", "pretrain_dis", "train_gan", "decode", "test"]
+assert FLAGS.mode in ["pretrain_gen", "pretrain_dis", "train_gan", "decode", "pretrain_mask"]
 assert FLAGS.sample_rate >= 0 and FLAGS.sample_rate <= 0.5, "sample rate should be [0, 0.5]"
 
 if FLAGS.mode == "train_gan":
@@ -391,20 +391,22 @@ def main(argv):
         tf.get_collection_ref(tf.GraphKeys.BIASES)
     sess = tf.Session(config=utils.get_config())
     sess.run(tf.variables_initializer(all_variables))
-    if FLAGS.mode == "pretrain_gen":
+    if FLAGS.mode == ["pretrain_gen", 'pretrain_mask']:
         print("Restoring the generator model from the latest checkpoint...")
         var_list = [v for v in all_variables if "generator" in v.name]
-        gen_newly_added = []
+        gen_newly_added = ["MASK"]
         # add the newly added variables here
         for vn in gen_newly_added:
-            var_list = [v for v in var_list if vn not in v.name]
+            new_var_list = [v for v in var_list if vn not in v.name]
         gen_saver = tf.train.Saver(max_to_keep=3, var_list=var_list)
+        if gen_newly_added:
+            new_gen_saver = tf.train.Saver(max_to_keep=3, var_list=new_var_list)
         gen_val_saver = tf.train.Saver(max_to_keep=10, var_list=var_list)
         gen_dir = ensure_exists(join_path(FLAGS.model_dir, "generator"))
         # gen_dir = ensure_exists(FLAGS.model_dir)
         # temp_saver = tf.train.Saver(
         #     var_list=[v for v in all_variables if "generator" in v.name and "Adagrad" not in v.name])
-        ckpt_path = utils.load_ckpt(gen_saver, sess, gen_dir, mode="train")
+        ckpt_path = utils.load_ckpt(gen_saver if gen_newly_added else new_gen_saver, sess, gen_dir, mode="train")
         print('going to restore embeddings from checkpoint')
         if not ckpt_path:
             emb_path = join_path(FLAGS.model_dir, "generator", "init_embed")
@@ -469,6 +471,23 @@ def main(argv):
             dis_val_batch_size, single_pass=True,
             max_art_steps=hps_dis.max_enc_steps, max_abs_steps=hps_dis.max_dec_steps,
         )
+
+    if FLAGS.mode == "pretrain_mask":
+        print('Going to pretrain the mask')
+        m_count = 0
+        model_save_path = join_path(gen_dir, "model")
+        best_accuracy = 0
+        while True:
+            batch = gen_batcher_train.next_batch()
+            results = generator.train_enc_copy_mask(sess, batch)
+            if results['accuracy'] > best_accuracy:
+                best_accuracy = results['accuracy']
+            if m_count % 50:
+                print('The training loss is %s, and the accuracy is %s.' % (results['loss'], results['accuracy']))
+                if best_accuracy == results['accuracy']:
+                    gen_saver.save(sess, model_save_path, global_step=results['global_step'])
+                    print(colored("saved new ckpt to %s" % model_save_path, "green"))
+            m_count += 1
 
     if FLAGS.mode == "pretrain_gen":
         # get reload the

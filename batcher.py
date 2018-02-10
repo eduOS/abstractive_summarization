@@ -23,6 +23,7 @@ import random
 import Queue
 from random import shuffle
 from termcolor import colored
+from gen_utils import find_the_copy_mask
 from threading import Thread
 import time
 import numpy as np
@@ -75,6 +76,8 @@ class Example(object):
         abstract_words = abstract.split()  # list of strings
         # list of word ids; OOVs are represented by the id for UNK token
         self.abs_ids = [vocab.word2id(w) for w in abstract_words]
+
+        self.lcs_mask = find_the_copy_mask(self.enc_input, self.abs_ids)
 
         # Get the decoder input sequence and target sequence
         self.dec_input, _ = self.get_dec_inp_targ_seqs(
@@ -211,6 +214,7 @@ class Batch(object):
         self.enc_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
         self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
         self.enc_padding_mask = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.float32)
+        self.enc_mask_target = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
 
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):
@@ -218,6 +222,7 @@ class Batch(object):
             self.enc_lens[i] = ex.enc_len
             for j in range(ex.enc_len):
                 self.enc_padding_mask[i][j] = 1
+            self.enc_mask_target[i, :len(ex.lcs_mask)] = ex.lcs_mask[:]
 
         # For pointer-generator mode, need to store some extra info
         # Determine the max number of in-article OOVs in this batch
