@@ -22,6 +22,7 @@ from gen_utils import save_ckpt as gen_save_ckpt
 from gan_utils import save_ckpt as gan_save_ckpt
 from utils import print_dashboard
 from dis_utils import dump_chpt
+from tensorflow.python import debug as tf_debug
 import math
 from data import PAD_TOKEN
 from termcolor import colored
@@ -390,6 +391,8 @@ def main(argv):
         tf.get_collection_ref(tf.GraphKeys.WEIGHTS) + \
         tf.get_collection_ref(tf.GraphKeys.BIASES)
     sess = tf.Session(config=utils.get_config())
+    sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+    sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
     sess.run(tf.variables_initializer(all_variables))
     if FLAGS.mode == ["pretrain_gen", 'pretrain_mask']:
         print("Restoring the generator model from the latest checkpoint...")
