@@ -101,7 +101,11 @@ class Rollout(object):
 
         articles_extend = source_batch.enc_batch_extend_vocab
         articles = source_batch.enc_batch
+        article_lens = source_batch.enc_lens
         batch_size = int(articles_extend.shape[0])
+        emb_articles = sess.run(
+            self.generator.temp_embedded_seq,
+            feed_dict={self.generator.temp_batch: articles})
 
         k_rewards = []
 
@@ -137,44 +141,48 @@ class Rollout(object):
                         self.generator.temp_embedded_seq,
                         feed_dict={self.generator.temp_batch: rollout_samples})
 
-                    emb_articles = sess.run(
-                        self.generator.temp_embedded_seq,
-                        feed_dict={self.generator.temp_batch: articles})
-
                     if rouge_ratio != 1:
                         if given_num != 0:
                             feed = {
                                 discriminator.inputs: emb_rollout_samples,
-                                discriminator.conditions: emb_articles}
+                                discriminator.conditions: emb_articles,
+                                discriminator.condition_lens: article_lens}
                             ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
                             if ir == 0:
                                 dis_rewards.append(ypred_for_auc)
                             else:
-                                dis_rewards[given_num-1] = ypred_for_auc
+                                dis_rewards[given_num-1] += ypred_for_auc
 
                     if rouge_ratio:
                         rpred = rouge_l(strip_pads(rollout_samples_extend.tolist(), gen_vocab.word2id(STOP_DECODING)),
                                         strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), rs=rollout_samples_extend)
                         rouge_rewards[given_num] += np.array(rpred)
 
+                emb_samples = sess.run(
+                    self.generator.temp_embedded_seq,
+                    feed_dict={self.generator.temp_batch: samples})
+
                 if rouge_ratio != 1:
                     # the last token reward
                     feed = {
-                        discriminator.inputs: samples,
-                        discriminator.conditions: articles}
+                        discriminator.inputs: emb_samples,
+                        discriminator.conditions: emb_articles,
+                        discriminator.condition_lens: article_lens
+                    }
                     ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
-                    ypred = np.array([item[1] for item in ypred_for_auc])
                     if ir == 0:
-                        dis_rewards.append(ypred)
+                        dis_rewards.append(ypred_for_auc)
                     else:
-                        dis_rewards[self._gen_hps.max_dec_steps-1] += ypred
+                        dis_rewards[self._gen_hps.max_dec_steps-1] += ypred_for_auc
                 if rouge_ratio:
                     rpred = rouge_l(strip_pads(samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
                                     strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), rs=rollout_samples_extend)
                     rouge_rewards[self._gen_hps.max_dec_steps] += np.array(rpred)
 
-            rouge_rewards = np.transpose(rouge_rewards)
-            dis_rewards = np.transpose(np.array(dis_rewards))
+            if rouge_ratio:
+                rouge_rewards = np.transpose(rouge_rewards)
+            if rouge_ratio != 1:
+                dis_rewards = np.transpose(np.array(dis_rewards))
 
             if hps_gan.rollout_start == 0:
                 dis_rewards = dis_rewards[:, 1:]

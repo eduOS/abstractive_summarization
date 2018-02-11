@@ -610,7 +610,7 @@ def main(argv):
                 print('Going to train the discriminator.')
             for d_gan in range(gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
-                enc_states, dec_in_state, n_samples_extend, _ = decoder.mc_generate(
+                _, _, n_samples_extend, _ = decoder.mc_generate(
                     batch, s_num=hps_gan.sample_num)
                 assert np.array(n_samples_extend).shape == (hps_gan.sample_num,
                                                             hps_gen.batch_size,
@@ -628,7 +628,7 @@ def main(argv):
                         feed_dict={generator.temp_batch: batch.padded_abs_ids})
                     emb_conditions = sess.run(
                         generator.temp_embedded_seq,
-                        feed_dict={generator.temp_batch: batch.padded_enc_batch})
+                        feed_dict={generator.temp_batch: batch.enc_batch})
                     emb_samples = sess.run(
                         generator.temp_embedded_seq,
                         feed_dict={generator.temp_batch: samples})
@@ -685,9 +685,6 @@ def main(argv):
 
                 if ave_dis_acc > 0.8:
                     break
-
-            if i_gan > 0:
-                break
 
     # --------------- decoding samples ---------------
     elif FLAGS.mode == "decode":
