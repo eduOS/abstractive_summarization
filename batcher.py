@@ -214,6 +214,7 @@ class Batch(object):
         # Note: our enc_batch can have different length (second dimension) for
         # each batch because we use dynamic_rnn for the encoder.
         self.enc_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
+        self.padded_enc_batch = np.zeros((hps.batch_size, hps.max_enc_steps), dtype=np.int32)
         self.padded_abs_ids = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
         self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
         self.enc_padding_mask = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.float32)
@@ -223,6 +224,7 @@ class Batch(object):
             i_enc_input = ex.enc_input[:]
             i_abs_ids = ex.abs_ids[:]
             self.enc_batch[i, :] = i_enc_input
+            self.padded_enc_batch[i, :len(i_enc_input)] = i_enc_input
             self.padded_abs_ids[i, :len(i_abs_ids)] = i_abs_ids
             self.enc_lens[i] = ex.enc_len
             for j in range(ex.enc_len):

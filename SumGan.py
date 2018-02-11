@@ -628,7 +628,8 @@ def main(argv):
                         feed_dict={generator.temp_batch: batch.padded_abs_ids})
                     emb_conditions = sess.run(
                         generator.temp_embedded_seq,
-                        feed_dict={generator.temp_batch: batch.enc_batch})
+                        feed_dict={generator.temp_batch: batch.padded_enc_batch})
+                    # feed_dict={generator.temp_batch: batch.enc_batch})
                     emb_samples = sess.run(
                         generator.temp_embedded_seq,
                         feed_dict={generator.temp_batch: samples})
