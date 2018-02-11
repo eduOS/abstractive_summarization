@@ -249,7 +249,7 @@ class PointerGenerator(object):
             # Add the encoder.
             enc_outputs, fw_st, bw_st = add_encoder(
                 emb_enc_inputs, self.enc_lens,
-                hidden_dim=self.hps.hidden_dim, rand_unif_init_mag=hps.rand_unif_init_mag)
+                hidden_dim=self.hps.hidden_dim, rand_unif_init=self.rand_unif_init)
 
             self.enc_states = enc_outputs
             self.dec_in_state = reduce_states(

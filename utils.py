@@ -238,7 +238,7 @@ def red_print(message, color='red'):
     print(colored(message, color))
 
 
-def add_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init_mag=0.02, state_is_tuple=True):
+def add_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init=None, state_is_tuple=True):
     """Add a single-layer bidirectional LSTM encoder to the graph.
 
     Args:
@@ -256,7 +256,6 @@ def add_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init_mag=0.02, st
         Each are LSTMStateTuples of shape
         ([batch_size,hidden_dim],[batch_size,hidden_dim])
     """
-    rand_unif_init = tf.random_uniform_initializer(-rand_unif_init_mag, rand_unif_init_mag, seed=123)
     with tf.variable_scope('encoder'):
         cell_fw = tf.contrib.rnn.LSTMCell(
             hidden_dim, initializer=rand_unif_init, state_is_tuple=state_is_tuple)

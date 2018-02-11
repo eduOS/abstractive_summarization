@@ -7,8 +7,6 @@ import tensorflow as tf
 from tensorflow.python.client import timeline
 from utils import add_encoder
 from utils import reduce_states
-import math
-import sys
 import dis_utils
 
 
@@ -75,6 +73,7 @@ class Seq2ClassModel(object):
     self.conditions_splitted = tf.split(self.conditions, self.num_models)
     self.targets_splitted = tf.split(self.targets, self.num_models)
     self.condition_lens_splitted = tf.split(self.condition_lens, self.num_models)
+    self.rand_unif_init = tf.random_uniform_initializer(-self.hps.rand_unif_init_mag, self.hps.rand_unif_init_mag, seed=123)
 
   def build_graph(self):
     self._add_placeholders()
@@ -129,19 +128,6 @@ class Seq2ClassModel(object):
                                                               collections=[tf.GraphKeys.WEIGHTS],
                                                               trainable=True)
 
-    with tf.variable_scope("condition_encoder"):
-      _, fw_st, bw_st = add_encoder(
-          emb_conditions, condition_lens,
-          hidden_dim=self.hps.hidden_dim, rand_unif_init_mag=self.hps.rand_unif_init_mag)
-
-      condition_emb = reduce_states(
-          fw_st, bw_st, hidden_dim=self.hps.hidden_dim,
-          activation_fn=tf.tanh, trunc_norm_init_std=self.hps.trunc_norm_init_std)
-      condition_emb = tf.concat(values=[condition_emb.c, condition_emb.h], axis=1)
-      with tf.variable_scope("conduction_projection"):
-        condition_emb = tf.matmul(condition_emb, condition_weights)
-      # (batch_size, 2*hidden_dim)
-
     with tf.variable_scope("input_encoder"):
       cnn_emb_inputs = tf.expand_dims(emb_inputs, 1)
       cnn_outputs = dis_utils.CResCNN(
@@ -150,6 +136,19 @@ class Seq2ClassModel(object):
       cnn_outputs = tf.squeeze(cnn_outputs, [1])
       # would it be better if use reduce_sum ?
       input_emb = tf.reduce_max(cnn_outputs, axis=1)
+
+    with tf.variable_scope("condition_encoder"):
+      _, fw_st, bw_st = add_encoder(
+          emb_conditions, condition_lens,
+          hidden_dim=self.hps.hidden_dim, rand_unif_init=self.rand_unif_init)
+
+      condition_emb = reduce_states(
+          fw_st, bw_st, hidden_dim=self.hps.hidden_dim,
+          activation_fn=tf.tanh, trunc_norm_init_std=self.hps.trunc_norm_init_std)
+      condition_emb = tf.concat(values=[condition_emb.c, condition_emb.h], axis=1)
+      with tf.variable_scope("conduction_projection"):
+        condition_emb = tf.matmul(condition_emb, condition_weights)
+      # (batch_size, 2*hidden_dim)
 
     with tf.variable_scope("dis_loss"):
       # prob = tf.reduce_sum(tf.multiply(condition_emb, input_emb), axis=1) / (tf.norm(condition_emb, axis=1) * tf.norm(input_emb, axis=1))
