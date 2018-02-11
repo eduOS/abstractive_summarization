@@ -79,6 +79,8 @@ class Rollout(object):
                     tf.less(output_id, self._gen_hps.gen_vocab_size),
                     output_id, tf.constant(
                         [self.generator._vocab.word2id(data.UNKNOWN_TOKEN)] * self._gen_hps.batch_size))
+                # will tf.fill and tf.expand_dims be better to do this?
+                # https://stackoverflow.com/a/36189235/3552975
                 next_input_emb = tf.nn.embedding_lookup(self.g_embeddings, next_input_id_without_oovs)
                 return i+1, next_input_emb, new_state, rollout_sample_ar
 

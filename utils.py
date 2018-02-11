@@ -262,7 +262,7 @@ def add_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init=None, state_
         cell_bw = tf.contrib.rnn.LSTMCell(
             hidden_dim, initializer=rand_unif_init, state_is_tuple=state_is_tuple)
         (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
-            cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
+            cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len)
         # the sequence length of the encoder_inputs varies depending on the
         # batch, which will make the second dimension of the
         # encoder_outputs different in different batches
