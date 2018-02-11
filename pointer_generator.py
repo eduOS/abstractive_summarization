@@ -304,7 +304,7 @@ class PointerGenerator(object):
 
         _, _, _, mask_ar = tf.while_loop(
             cond, mask, (emb_enc_inputs, enc_states, 0, mask_ar))
-        mask = tf.transpose(tf.squeeze(mask_ar.stack()))
+        mask = tf.transpose(tf.squeeze(mask_ar.stack()), perm=[1, 0])
         return mask
 
     def _add_seq2seq(self):
