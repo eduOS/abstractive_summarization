@@ -53,7 +53,7 @@ class PointerGenerator(object):
             max_dec_steps = hps.max_dec_steps
 
         # -------- placeholders for training enc masker and beam search decoding
-        self.enc_mask_target = tf.placeholder(tf.int32, [batch_size, None], name='enc_maske_target')
+        self.enc_mask_target = tf.placeholder(tf.float32, [batch_size, None], name='enc_maske_target')
 
         # -------- placeholders for training generatror and beam search decoding
         # encoder part
@@ -303,7 +303,7 @@ class PointerGenerator(object):
             return inputs, states, i+1, mask_ar
 
         _, _, _, mask_ar = tf.while_loop(
-            cond, mask, (emb_enc_inputs, enc_states, 0, mask_ar))
+            cond, mask, (emb_enc_inputs, enc_states, tf.constant(0, dtype=tf.int32), mask_ar))
         mask = tf.transpose(tf.squeeze(mask_ar.stack()), perm=[1, 0])
         return mask
 
@@ -351,15 +351,13 @@ class PointerGenerator(object):
 
             # --------------------------------- MASK
             with tf.variable_scope("MASK"):
-                self.enc_copy_mask = tf.sigmoid(self._mask_enc_copy())
-                enc_mask_loss = tf.where(
-                    tf.equal(self.enc_mask_target, 1),
-                    - tf.log(self.enc_copy_mask),
-                    - tf.log(1-self.enc_copy_mask)
-                )
+                logits = self._mask_enc_copy()
+                costs = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.enc_mask_target, logits=logits)
+
                 self.enc_mask_loss = tf.reduce_mean(
-                    tf.reduce_sum(enc_mask_loss * self.enc_padding_mask /
+                    tf.reduce_sum(costs * self.enc_padding_mask /
                                   tf.reduce_sum(self.enc_padding_mask, axis=1), axis=1), axis=0)
+                self.m_update = tf.train.AdamOptimizer(self.hps.gen_lr).minimize(self.enc_mask_loss)
                 self.m_update = tf.contrib.layers.optimize_loss(
                     self.enc_mask_loss, self.global_step, self.hps.gen_lr,
                     'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
@@ -542,7 +540,7 @@ class PointerGenerator(object):
 
     def train_enc_copy_mask(self, sess, batch, update=True):
         feed_dict = self._make_feed_dict(batch, just_enc=True)
-        feed_dict['enc_mask_target'] = batch.enc_mask_target
+        feed_dict[self.enc_mask_target] = batch.enc_mask_target
 
         to_return = {
             'loss': self.enc_mask_loss,
