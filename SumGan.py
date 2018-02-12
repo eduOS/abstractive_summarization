@@ -23,6 +23,7 @@ from gan_utils import save_ckpt as gan_save_ckpt
 from utils import print_dashboard
 from dis_utils import dump_chpt
 from tensorflow.python import debug as tf_debug
+from codecs import open
 import math
 from data import PAD_TOKEN
 from termcolor import colored
@@ -31,6 +32,7 @@ from res_discriminator import Seq2ClassModel
 from data import Vocab
 STOP_DECODING = '[STOP]'
 epsilon = sys.float_info.epsilon
+np.set_printoptions(threshold=np.inf)
 
 # tf.logging.set_verbosity(tf.logging.ERROR)
 tf.app.flags.DEFINE_string(
@@ -391,13 +393,14 @@ def main(argv):
         tf.get_collection_ref(tf.GraphKeys.WEIGHTS) + \
         tf.get_collection_ref(tf.GraphKeys.BIASES)
     sess = tf.Session(config=utils.get_config())
-    sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-    sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
+    # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+    # sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
     sess.run(tf.variables_initializer(all_variables))
-    if FLAGS.mode == ["pretrain_gen", 'pretrain_mask']:
+    if FLAGS.mode in ["pretrain_gen", 'pretrain_mask']:
         print("Restoring the generator model from the latest checkpoint...")
         var_list = [v for v in all_variables if "generator" in v.name]
-        gen_newly_added = ["MASK"]
+        # gen_newly_added = ["MASK"]
+        gen_newly_added = []
         # add the newly added variables here
         for vn in gen_newly_added:
             new_var_list = [v for v in var_list if vn not in v.name]
@@ -409,7 +412,7 @@ def main(argv):
         # gen_dir = ensure_exists(FLAGS.model_dir)
         # temp_saver = tf.train.Saver(
         #     var_list=[v for v in all_variables if "generator" in v.name and "Adagrad" not in v.name])
-        ckpt_path = utils.load_ckpt(gen_saver if gen_newly_added else new_gen_saver, sess, gen_dir, mode="train")
+        ckpt_path = utils.load_ckpt(new_gen_saver if gen_newly_added else gen_saver, sess, gen_dir, mode="train")
         print('going to restore embeddings from checkpoint')
         if not ckpt_path:
             emb_path = join_path(FLAGS.model_dir, "generator", "init_embed")
@@ -476,6 +479,7 @@ def main(argv):
         )
 
     if FLAGS.mode == "pretrain_mask":
+        my_writer = open("log.log", 'w', "utf-8")
         print('Going to pretrain the mask')
         m_count = 0
         model_save_path = join_path(gen_dir, "model")
@@ -483,13 +487,27 @@ def main(argv):
         while True:
             batch = gen_batcher_train.next_batch()
             results = generator.train_enc_copy_mask(sess, batch)
-            if results['accuracy'] > best_accuracy:
-                best_accuracy = results['accuracy']
-            if m_count % 50:
+            if m_count % 50 == 0:
                 print('The training loss is %s, and the accuracy is %s.' % (results['loss'], results['accuracy']))
-                if best_accuracy == results['accuracy']:
+                if best_accuracy < results['accuracy']:
                     gen_saver.save(sess, model_save_path, global_step=results['global_step'])
                     print(colored("saved new ckpt to %s" % model_save_path, "green"))
+                    best_accuracy = results['accuracy']
+                _results = generator.test_enc_copy_mask(sess, batch)
+                stacked = np.stack([batch.enc_mask_target, _results["copy_mask"]], 2)
+                for i_s in np.transpose(stacked, [0, 2, 1]):
+                    my_writer.write(" ".join([str(int(i)) for i in i_s[0].tolist()]))
+                    my_writer.write('\n')
+                    my_writer.write(" ".join([str(int(i)) for i in i_s[1].tolist()]))
+                    my_writer.write('\n\n')
+                    my_writer.write('\n')
+            elif results['accuracy'] > best_accuracy:
+                best_accuracy = results['accuracy']
+
+            if results['accuracy'] > 0.95:
+                my_writer.close()
+                break
+
             m_count += 1
 
     if FLAGS.mode == "pretrain_gen":

@@ -297,13 +297,14 @@ class PointerGenerator(object):
         def cond(_e, _s, i, _m):
             return i < dynamic_enc_steps
 
-        def mask(inputs, states, i, mask_ar):
-            mask_ar.write(i, linear([inputs[i]] + [states[i]], 1, True))
-            tf.get_variable_scope().reuse_variables()
+        def mask_fn(inputs, states, i, mask_ar):
+            mask_ar = mask_ar.write(i, linear([inputs[i]] + [states[i]], 1, True))
+            if i == tf.constant(0, dtype=tf.int32):
+                tf.get_variable_scope().reuse_variables()
             return inputs, states, i+1, mask_ar
 
         _, _, _, mask_ar = tf.while_loop(
-            cond, mask, (emb_enc_inputs, enc_states, tf.constant(0, dtype=tf.int32), mask_ar))
+            cond, mask_fn, (emb_enc_inputs, enc_states, tf.constant(0, dtype=tf.int32), mask_ar))
         mask = tf.transpose(tf.squeeze(mask_ar.stack()), perm=[1, 0])
         return mask
 
@@ -352,37 +353,36 @@ class PointerGenerator(object):
             # --------------------------------- MASK
             with tf.variable_scope("MASK"):
                 logits = self._mask_enc_copy()
+                enc_copy_mask = tf.sigmoid(logits)
                 costs = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.enc_mask_target, logits=logits)
+                ave_costs = tf.reduce_sum(costs * self.enc_padding_mask, axis=1) / tf.reduce_sum(self.enc_padding_mask, axis=1)
+                self.enc_mask_loss = tf.reduce_mean(ave_costs)
+                # all_variables = tf.get_collection_ref(tf.GraphKeys.GLOBAL_VARIABLES)
+                self.m_update = tf.train.AdamOptimizer(self.hps.gen_lr).minimize(
+                    self.enc_mask_loss, global_step=self.global_step)
+                # , var_list=[av for av in all_variables if 'MASK' in av.name])
+                pred = tf.where(tf.less(tf.fill(tf.shape(enc_copy_mask), 0.5), enc_copy_mask),
+                                tf.ones_like(enc_copy_mask), tf.zeros_like(enc_copy_mask))
+                self.m_accuracy = tf.cast(tf.count_nonzero(
+                    tf.cast(tf.equal(pred, self.enc_mask_target), tf.int32) * tf.cast(self.enc_padding_mask, tf.int32)
+                ), tf.float32) / tf.reduce_sum(self.enc_padding_mask)
 
-                self.enc_mask_loss = tf.reduce_mean(
-                    tf.reduce_sum(costs * self.enc_padding_mask /
-                                  tf.reduce_sum(self.enc_padding_mask, axis=1), axis=1), axis=0)
-                self.m_update = tf.train.AdamOptimizer(self.hps.gen_lr).minimize(self.enc_mask_loss)
-                self.m_update = tf.contrib.layers.optimize_loss(
-                    self.enc_mask_loss, self.global_step, self.hps.gen_lr,
-                    'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
-                pred = tf.where(tf.less(tf.fill(tf.shape(self.enc_copy_mask), 0.5), self.enc_copy_mask),
-                                tf.ones_like(self.enc_copy_mask), tf.zeros_like(self.enc_copy_mask))
-                self.accuracy = tf.count_nonzero(
-                    tf.cast(tf.equal(pred, self.enc_mask_target), tf.int32) * self.enc_padding_mask
-                ) / tf.reduce_sum(self.enc_padding_mask)
-
-            enc_copy_mask = tf.where(tf.less(0.5, tf.stop_gradient(self.enc_copy_mask)),
-                                     tf.ones_like(self.enc_copy_mask), tf.zeros_like(self.enc_copy_mask))
+            self.enc_copy_mask = tf.where(tf.less(0.5, tf.stop_gradient(enc_copy_mask)),
+                                          tf.ones_like(enc_copy_mask), tf.zeros_like(enc_copy_mask))
             # ---------------------------------
 
             with tf.variable_scope('decoder') as decoder_scope:
                 self.attn_dists, self.p_gens, self.coverage, \
                     final_dists, self._dec_out_state = self._add_decoder(
-                        emb_dec_inputs, self.dec_in_state, enc_copy_mask)
+                        emb_dec_inputs, self.dec_in_state, self.enc_copy_mask)
                 decoder_scope.reuse_variables()
 
                 eval_attn_dists, _, eval_coverage, eval_final_dists, _ \
-                    = self._add_decoder(emb_eval_dec_inputs, self.dec_in_state)
+                    = self._add_decoder(emb_eval_dec_inputs, self.dec_in_state, self.enc_copy_mask)
 
                 k_sample_final_dists_ls = []
                 for emb_samples in k_emb_samples_ls:
-                    _, _, _, sample_final_dists, _ = self._add_decoder(emb_samples, self.dec_in_state)
+                    _, _, _, sample_final_dists, _ = self._add_decoder(emb_samples, self.dec_in_state, self.enc_copy_mask)
                     k_sample_final_dists_ls.append(sample_final_dists)
 
             def get_loss(final_dists, target_batch, padding_mask, rewards=None):
@@ -544,12 +544,29 @@ class PointerGenerator(object):
 
         to_return = {
             'loss': self.enc_mask_loss,
-            'accuracy': self.accuracy,
+            'accuracy': self.m_accuracy,
             'global_step': self.global_step,
         }
+
         if update:
             to_return['update'] = self.m_update
-        return sess.run(to_return, feed_dict)
+        results = sess.run(to_return, feed_dict)
+
+        return results
+
+    def test_enc_copy_mask(self, sess, batch):
+        feed_dict = self._make_feed_dict(batch, just_enc=True)
+        feed_dict[self.enc_mask_target] = batch.enc_mask_target
+
+        to_return = {
+            'copy_mask': self.enc_copy_mask,
+            'loss': self.enc_mask_loss,
+            'accuracy': self.m_accuracy,
+        }
+
+        results = sess.run(to_return, feed_dict)
+
+        return results
 
     def run_one_batch(self, sess, batch, update=True, gan_eval=False):
         """Runs one training iteration. Returns a dictionary containing train
