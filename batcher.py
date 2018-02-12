@@ -212,17 +212,24 @@ class Batch(object):
         # Note: our enc_batch can have different length (second dimension) for
         # each batch because we use dynamic_rnn for the encoder.
         self.enc_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
+        self.enc_batch_f = np.zeros((hps.batch_size, self.hps.max_enc_steps), dtype=np.int32)
         self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
         self.enc_padding_mask = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.float32)
+        self.enc_padding_mask_f = np.zeros((hps.batch_size, self.hps.max_enc_steps), dtype=np.float32)
         self.enc_mask_target = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
+        self.enc_mask_target_f = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
 
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):
-            self.enc_batch[i, :] = ex.enc_input[:]
+            i_enc_input = ex.enc_input[:]
+            self.enc_batch[i, :] = i_enc_input
+            self.enc_batch_f[i, :len(i_enc_input)] = i_enc_input
             self.enc_lens[i] = ex.enc_len
             for j in range(ex.enc_len):
                 self.enc_padding_mask[i][j] = 1
+                self.enc_padding_mask_f[i][j] = 1
             self.enc_mask_target[i, :len(ex.lcs_mask)] = ex.lcs_mask[:]
+            self.enc_mask_target_f[i, :len(ex.lcs_mask)] = ex.lcs_mask[:]
 
         # For pointer-generator mode, need to store some extra info
         # Determine the max number of in-article OOVs in this batch

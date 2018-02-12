@@ -53,7 +53,7 @@ class PointerGenerator(object):
             max_dec_steps = hps.max_dec_steps
 
         # -------- placeholders for training enc masker and beam search decoding
-        self.enc_mask_target = tf.placeholder(tf.int32, [batch_size, None], name='enc_maske_target')
+        self.enc_mask_target = tf.placeholder(tf.float32, [batch_size, None], name='enc_maske_target')
 
         # -------- placeholders for training generatror and beam search decoding
         # encoder part
@@ -146,7 +146,7 @@ class PointerGenerator(object):
             cell_bw = tf.contrib.rnn.LSTMCell(
                 self.hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
             (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
-                cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
+                cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len)
             # the sequence length of the encoder_inputs varies depending on the
             # batch, which will make the second dimension of the
             # encoder_outputs different in different batches
@@ -292,19 +292,21 @@ class PointerGenerator(object):
         dynamic_enc_steps = tf.shape(self.enc_states)[1]
         enc_states = tf.transpose(tf.stop_gradient(self.enc_states), perm=[1, 0, 2])
         emb_enc_inputs = tf.transpose(tf.stop_gradient(self.emb_enc_inputs), perm=[1, 0, 2])
+        # emb_enc_inputs = tf.transpose(self.emb_enc_inputs, perm=[1, 0, 2])
         mask_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
 
         def cond(_e, _s, i, _m):
             return i < dynamic_enc_steps
 
-        def mask(inputs, states, i, mask_ar):
-            mask_ar.write(i, linear([inputs[i]] + [states[i]], 1, True))
+        def mask_fn(inputs, states, i, mask_ar):
+            mask_ar.write(i, tf.squeeze(linear([inputs[i], states[i]], 1, True)))
             tf.get_variable_scope().reuse_variables()
             return inputs, states, i+1, mask_ar
 
         _, _, _, mask_ar = tf.while_loop(
-            cond, mask, (emb_enc_inputs, enc_states, 0, mask_ar))
-        mask = tf.transpose(tf.squeeze(mask_ar.stack()), perm=[1, 0])
+            cond, mask_fn, (emb_enc_inputs, enc_states, tf.constant(0, dtype=tf.int32), mask_ar))
+        # if the max length is a tensor 0 also should be a tensor
+        mask = tf.transpose(mask_ar.stack(), perm=[1, 0])
         return mask
 
     def _add_seq2seq(self):
@@ -351,18 +353,13 @@ class PointerGenerator(object):
 
             # --------------------------------- MASK
             with tf.variable_scope("MASK"):
-                self.enc_copy_mask = tf.sigmoid(self._mask_enc_copy())
-                enc_mask_loss = tf.where(
-                    tf.equal(self.enc_mask_target, 1),
-                    - tf.log(self.enc_copy_mask),
-                    - tf.log(1-self.enc_copy_mask)
-                )
+                logits = self._mask_enc_copy()
+                costs = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.enc_mask_target, logits=logits)
+
                 self.enc_mask_loss = tf.reduce_mean(
-                    tf.reduce_sum(enc_mask_loss * self.enc_padding_mask /
+                    tf.reduce_sum(costs * self.enc_padding_mask /
                                   tf.reduce_sum(self.enc_padding_mask, axis=1), axis=1), axis=0)
-                self.m_update = tf.contrib.layers.optimize_loss(
-                    self.enc_mask_loss, self.global_step, self.hps.gen_lr,
-                    'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
+                self.m_update = tf.train.AdamOptimizer(self.hps.gen_lr).minimize(self.enc_mask_loss)
                 pred = tf.where(tf.less(tf.fill(tf.shape(self.enc_copy_mask), 0.5), self.enc_copy_mask),
                                 tf.ones_like(self.enc_copy_mask), tf.zeros_like(self.enc_copy_mask))
                 self.accuracy = tf.count_nonzero(
@@ -541,8 +538,11 @@ class PointerGenerator(object):
         return decoder_scope
 
     def train_enc_copy_mask(self, sess, batch, update=True):
-        feed_dict = self._make_feed_dict(batch, just_enc=True)
-        feed_dict['enc_mask_target'] = batch.enc_mask_target
+        feed_dict = {}
+        feed_dict[self.enc_batch] = batch.enc_batch_f
+        feed_dict[self.enc_lens] = batch.enc_lens
+        feed_dict[self.enc_padding_mask] = batch.enc_padding_mask_f
+        feed_dict['enc_mask_target'] = batch.enc_mask_target_f
 
         to_return = {
             'loss': self.enc_mask_loss,
