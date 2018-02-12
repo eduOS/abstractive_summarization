@@ -53,13 +53,13 @@ class PointerGenerator(object):
             max_dec_steps = hps.max_dec_steps
 
         # -------- placeholders for training enc masker and beam search decoding
-        self.enc_mask_target = tf.placeholder(tf.float32, [batch_size, None], name='enc_maske_target')
+        self.enc_mask_target = tf.placeholder(tf.float32, [batch_size, self.hps.max_dec_steps], name='enc_maske_target')
 
         # -------- placeholders for training generatror and beam search decoding
         # encoder part
-        self.enc_batch = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch')
+        self.enc_batch = tf.placeholder(tf.int32, [batch_size, self.hps.max_dec_steps], name='enc_batch')
         self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
-        self.enc_padding_mask = tf.placeholder(tf.float32, [batch_size, None], name='enc_padding_mask')
+        self.enc_padding_mask = tf.placeholder(tf.float32, [batch_size, self.hps.max_dec_steps], name='enc_padding_mask')
         self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch_extend_vocab')
         self.max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
 
@@ -289,7 +289,7 @@ class PointerGenerator(object):
             return final_dists
 
     def _mask_enc_copy(self):
-        dynamic_enc_steps = tf.shape(self.enc_states)[1]
+        dynamic_enc_steps = self.hps.max_dec_steps
         enc_states = tf.transpose(tf.stop_gradient(self.enc_states), perm=[1, 0, 2])
         emb_enc_inputs = tf.transpose(tf.stop_gradient(self.emb_enc_inputs), perm=[1, 0, 2])
         # emb_enc_inputs = tf.transpose(self.emb_enc_inputs, perm=[1, 0, 2])
@@ -304,7 +304,7 @@ class PointerGenerator(object):
             return inputs, states, i+1, mask_ar
 
         _, _, _, mask_ar = tf.while_loop(
-            cond, mask_fn, (emb_enc_inputs, enc_states, tf.constant(0, dtype=tf.int32), mask_ar))
+            cond, mask_fn, (emb_enc_inputs, enc_states, 0, mask_ar))
         # if the max length is a tensor 0 also should be a tensor
         mask = tf.transpose(mask_ar.stack(), perm=[1, 0])
         return mask
@@ -542,7 +542,7 @@ class PointerGenerator(object):
         feed_dict[self.enc_batch] = batch.enc_batch_f
         feed_dict[self.enc_lens] = batch.enc_lens
         feed_dict[self.enc_padding_mask] = batch.enc_padding_mask_f
-        feed_dict['enc_mask_target'] = batch.enc_mask_target_f
+        feed_dict[self.enc_mask_target] = batch.enc_mask_target_f
 
         to_return = {
             'loss': self.enc_mask_loss,
