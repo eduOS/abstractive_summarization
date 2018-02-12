@@ -59,7 +59,7 @@ tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_integer("num_models", 3, "Size of each model layer. The actural size is doubled.")
 
 # Training parameters
-tf.app.flags.DEFINE_float("dis_lr", 0.0005, "Learning rate.")
+tf.app.flags.DEFINE_float("dis_lr", 0.0001, "Learning rate.")
 tf.app.flags.DEFINE_float("lr_decay_factor", 0.5, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("dis_max_gradient", 2.0, "Clip gradients to this norm.")
 # TODO: how much thould this be?
@@ -109,7 +109,7 @@ tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of gene
 tf.app.flags.DEFINE_integer('gen_vocab_size', 5000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
-tf.app.flags.DEFINE_float('gen_lr', 0.0003, 'learning rate')
+tf.app.flags.DEFINE_float('gen_lr', 0.0001, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
 tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
@@ -628,8 +628,8 @@ def main(argv):
                         feed_dict={generator.temp_batch: batch.padded_abs_ids})
                     emb_conditions = sess.run(
                         generator.temp_embedded_seq,
-                        feed_dict={generator.temp_batch: batch.padded_enc_batch})
-                    # feed_dict={generator.temp_batch: batch.enc_batch})
+                        feed_dict={generator.temp_batch: batch.enc_batch})
+                    # feed_dict={generator.temp_batch: batch.padded_enc_batch})
                     emb_samples = sess.run(
                         generator.temp_embedded_seq,
                         feed_dict={generator.temp_batch: samples})
@@ -675,7 +675,7 @@ def main(argv):
                             break
 
                 ave_dis_acc = sum(dis_accuracies) / len(dis_accuracies)
-                if gan_dis_iter % 50 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
+                if d_gan % 50 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
                     if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:
                         dis_best_loss = sum(dis_losses) / len(dis_losses)
                         checkpoint_path = ensure_exists(join_path(hps_dis.model_dir, "discriminator")) + "/model.ckpt"
