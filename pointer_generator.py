@@ -450,16 +450,6 @@ class PointerGenerator(object):
                       ):
         feed_dict = self._make_feed_dict(batch, gan_eval=gan_eval, gan=True)
 
-        # this can be combined with evaluation method
-        # print('----------------------')
-        # print('samples')
-        # print(samples)
-        # print('sample_targets')
-        # print(sample_targets)
-        # print('sample_padding_mask')
-        # print(sample_padding_mask)
-        # print('rewards')
-        # print(rewards)
         feed_dict.update({
             # for the decoder
             self.k_samples: samples,

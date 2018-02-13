@@ -90,6 +90,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 # error
 1. a list of float cannot be joined
 2. two list cannot be updated by += but if the right side is a numpy it is ok
+3. tensorarray should asigned to itself after writing
 
 # tips 
   immediate rewards should be given more importance, discount or impatience

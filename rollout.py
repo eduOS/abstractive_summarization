@@ -89,8 +89,8 @@ class Rollout(object):
                 body=recurrence_rollout,
                 loop_vars=(i, next_input, new_state, self.rollout_sample_ar))
 
-        self.rollout_sample_ar = self.rollout_sample_ar.stack()  # seq_length x batch_size
-        self.rollout_sample_ar = tf.transpose(self.rollout_sample_ar, perm=[1, 0])
+        self.rollout_sample = self.rollout_sample_ar.stack()  # seq_length x batch_size
+        self.rollout_sample = tf.transpose(self.rollout_sample, perm=[1, 0])
         # self.rollout_sample_ar = tf.stop_gradient(self.rollout_sample_ar)
         # batch_size x seq_length
 
@@ -100,6 +100,7 @@ class Rollout(object):
         # changed to [batch_size, hidden_dim] for the attention_decoder
         rollout_num = hps_gan.rollout_num
         rouge_ratio = hps_gan.rouge_reward_ratio
+        dis_ratio = hps_gan.dis_reward_ratio
 
         articles_extend = source_batch.enc_batch_extend_vocab
         articles = source_batch.enc_batch
@@ -132,18 +133,18 @@ class Rollout(object):
 
                     # the unique feature for the pointer gen is the
                     # enc_batch_extend_vocab and the max_art_oovs
-                    rollout_samples_extend = sess.run(self.rollout_sample_ar, feed_dict)
+                    rollout_samples_extend = sess.run(self.rollout_sample, feed_dict)
                     rollout_samples = np.where(
                         np.less(samples, self._gen_hps.gen_vocab_size),
                         rollout_samples_extend, np.array(
                             [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * self._gen_hps.max_dec_steps
                              ] * self._gen_hps.batch_size))
                     # how about multiple generators for one discriminator?
-                    emb_rollout_samples = sess.run(
-                        self.generator.temp_embedded_seq,
-                        feed_dict={self.generator.temp_batch: rollout_samples})
+                    if dis_ratio:
+                        emb_rollout_samples = sess.run(
+                            self.generator.temp_embedded_seq,
+                            feed_dict={self.generator.temp_batch: rollout_samples})
 
-                    if rouge_ratio != 1:
                         if given_num != 0:
                             feed = {
                                 discriminator.inputs: emb_rollout_samples,
@@ -160,11 +161,11 @@ class Rollout(object):
                                         strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), rs=rollout_samples_extend)
                         rouge_rewards[given_num] += np.array(rpred)
 
-                emb_samples = sess.run(
-                    self.generator.temp_embedded_seq,
-                    feed_dict={self.generator.temp_batch: samples})
+                if dis_ratio:
+                    emb_samples = sess.run(
+                        self.generator.temp_embedded_seq,
+                        feed_dict={self.generator.temp_batch: samples})
 
-                if rouge_ratio != 1:
                     # the last token reward
                     feed = {
                         discriminator.inputs: emb_samples,
@@ -183,14 +184,10 @@ class Rollout(object):
 
             if rouge_ratio:
                 rouge_rewards = np.transpose(rouge_rewards)
-            if rouge_ratio != 1:
-                dis_rewards = np.transpose(np.array(dis_rewards))
-
-            if hps_gan.rollout_start == 0:
-                dis_rewards = dis_rewards[:, 1:]
-
-            if rouge_ratio != 0:
                 rouge_rewards = rouge_rewards[:, 1:] - rouge_rewards[:, :-1]
+
+            if dis_ratio:
+                dis_rewards = np.transpose(np.array(dis_rewards))
 
             if rouge_ratio == 1:
                 rewards = rouge_rewards
@@ -200,15 +197,6 @@ class Rollout(object):
                 rewards = (1 - rouge_ratio)*dis_rewards + rouge_ratio*rouge_rewards
 
             average_rewards = rewards / (1.0 * rollout_num)
-            # print('enc_states')
-            # print(enc_states)
-            # print('dec_in_state')
-            # print(dec_in_state)
-            # print('samples')
-            # print(samples)
-            # print('average_rewards')
-            # print(average_rewards)
             k_rewards.append(average_rewards)
-            # batch_size x seq_length
 
         return k_rewards

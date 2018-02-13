@@ -67,7 +67,7 @@ class Seq2ClassModel(object):
     self.inputs = tf.placeholder(tf.float32, shape=[self.batch_size, self.max_dec_steps, self.layer_size], name="inputs")
     self.conditions = tf.placeholder(tf.float32, shape=[self.batch_size, None, self.layer_size], name="conditions")
     self.condition_lens = tf.placeholder(tf.int32, [self.batch_size], name='condition_lens')
-    self.targets = tf.placeholder(tf.int32, shape=[self.batch_size], name="targets")
+    self.targets = tf.placeholder(tf.float32, shape=[self.batch_size], name="targets")
 
     self.inputs_splitted = tf.split(self.inputs, self.num_models)
     self.conditions_splitted = tf.split(self.conditions, self.num_models)
@@ -156,10 +156,10 @@ class Seq2ClassModel(object):
       # normalized_input_emb = tf.nn.l2_normalize(input_emb, dim=1)
       dot_product = tf.reduce_sum(tf.multiply(input_emb, condition_emb), axis=1)
       # loss = tf.reduce_mean(tf.where(tf.equal(targets, 1), -tf.log(prob), -tf.log(1-prob)))
-      loss = tf.nn.sigmoid_cross_entropy_with_logits(dot_product)
+      loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=dot_product, labels=targets)
       prob = tf.sigmoid(dot_product)
       pred = tf.where(tf.less(tf.fill(tf.shape(prob), 0.5), prob),
-                      tf.fill(tf.shape(prob), 1), tf.fill(tf.shape(prob), 0))
+                      tf.fill(tf.shape(prob), 1.0), tf.fill(tf.shape(prob), 0.0))
       accuracy = tf.count_nonzero(tf.equal(pred, targets)) / tf.cast(tf.shape(pred)[0], tf.int64)
     return prob, loss, accuracy
 
