@@ -278,8 +278,7 @@ class PointerGenerator(object):
                     indices = tf.stack((batch_nums, targets), axis=1)
                     gold_probs = tf.gather_nd(dist, indices)
                     losses = -tf.log(gold_probs) * padding_mask[:, dec_step]
-                    rewards = tf.cond(rewards is not None, losses * rewards[:, dec_step], losses)
-                    loss_per_step.append(rewards)
+                    loss_per_step.append(losses * rewards[:, dec_step] if rewards is not None else losses)
                 return loss_per_step
 
             # Calculate the loss
@@ -327,7 +326,7 @@ class PointerGenerator(object):
             self._ran_id = tf.multinomial(tf.log(self.final_dists), 1)
 
         # for the loss
-        loss_to_minimize = tf.cond(self.hps.coverage, self._total_loss, self._loss)
+        loss_to_minimize = self._total_loss if self.hps.coverage else self._loss
         trainable_variables = tf.trainable_variables()
         gradients = tf.gradients(
             loss_to_minimize, trainable_variables,
@@ -374,7 +373,7 @@ class PointerGenerator(object):
         # In decode mode, we run attention_decoder one step at a time and so
         # need to pass in the previous step's coverage vector each time
         # a placeholder, why not a variable?
-        prev_coverage = tf.cond(self.hps.coverage and self.hps.mode in ["train_gan", "decode"], self.prev_coverage, None)
+        prev_coverage = self.prev_coverage if self.hps.coverage and self.hps.mode in ["train_gan", "decode"] else None
         # coverage is for decoding in beam_search and gan training
 
         outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
