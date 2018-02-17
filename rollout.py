@@ -145,16 +145,15 @@ class Rollout(object):
                             self.generator.temp_embedded_seq,
                             feed_dict={self.generator.temp_batch: rollout_samples})
 
-                        if given_num != 0:
-                            feed = {
-                                discriminator.inputs: emb_rollout_samples,
-                                discriminator.conditions: emb_articles,
-                                discriminator.condition_lens: article_lens}
-                            ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
-                            if ir == 0:
-                                dis_rewards.append(ypred_for_auc)
-                            else:
-                                dis_rewards[given_num-1] += ypred_for_auc
+                        feed = {
+                            discriminator.inputs: emb_rollout_samples,
+                            discriminator.conditions: emb_articles,
+                            discriminator.condition_lens: article_lens}
+                        ypred_for_auc = sess.run(discriminator.dis_ypred_for_auc, feed)
+                        if ir == 0:
+                            dis_rewards.append(ypred_for_auc)
+                        else:
+                            dis_rewards[given_num-1] += ypred_for_auc
 
                     if rouge_ratio:
                         rpred = rouge_l(strip_pads(rollout_samples_extend.tolist(), gen_vocab.word2id(STOP_DECODING)),
@@ -188,6 +187,7 @@ class Rollout(object):
 
             if dis_ratio:
                 dis_rewards = np.transpose(np.array(dis_rewards))
+                dis_rewards = dis_rewards[:, 1:] - dis_rewards[:, :-1]
 
             if rouge_ratio == 1:
                 rewards = rouge_rewards
