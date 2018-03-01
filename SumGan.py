@@ -399,8 +399,8 @@ def main(argv):
     if FLAGS.mode in ["pretrain_gen", 'pretrain_mask']:
         print("Restoring the generator model from the latest checkpoint...")
         var_list = [v for v in all_variables if "generator" in v.name]
-        # gen_newly_added = ["MASK"]
-        gen_newly_added = []
+        gen_newly_added = ["MASK"]
+        # gen_newly_added = []
         # add the newly added variables here
         for vn in gen_newly_added:
             new_var_list = [v for v in var_list if vn not in v.name]
@@ -687,7 +687,7 @@ def main(argv):
                                     results["loss"].item(), 0.00, 0.00, 0.00)
                     print("Average training accuracy: \t%.4f" % ave_dis_acc)
 
-                if ave_dis_acc > 0.9:
+                if ave_dis_acc > 0.98:
                     break
 
     # --------------- decoding samples ---------------

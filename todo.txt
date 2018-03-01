@@ -57,6 +57,11 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 45. add the learning rate update
 46. add the checkpoint modification
 47. the content can be used to train a value iteration for the reward, if can be found in the content the reward is higher
+48. add a mask to the copy mechanism
+https://arxiv.org/pdf/1502.03509.pdf
+The hard attention is what I need: http://arxiv.org/abs/1502.03044
+49. the beam is too simple, symantic beam search should be implemented
+50. pagerank rate for each sentence embedding while reading a passage, a kind of hard attention
 
 # problems
 1. cannot end
@@ -88,6 +93,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
   change to charater based 
 13. tf.identity
   1 dimension to 0d
+
 
 # error
 1. a list of float cannot be joined

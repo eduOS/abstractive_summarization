@@ -289,6 +289,9 @@ class PointerGenerator(object):
             return final_dists
 
     def _mask_enc_copy(self):
+        state_c = tf.stop_gradient(self.dec_in_state.c)
+        state_h = tf.stop_gradient(self.dec_in_state.h)
+        hidden_dim = state_c.get_shape()[1].value
         dynamic_enc_steps = tf.shape(self.enc_states)[1]
         enc_states = tf.transpose(tf.stop_gradient(self.enc_states), perm=[1, 0, 2])
         emb_enc_inputs = tf.transpose(tf.stop_gradient(self.emb_enc_inputs), perm=[1, 0, 2])
@@ -298,7 +301,9 @@ class PointerGenerator(object):
             return i < dynamic_enc_steps
 
         def mask_fn(inputs, states, i, mask_ar):
-            mask_ar = mask_ar.write(i, linear([inputs[i]] + [states[i]], 1, True))
+            _inputs = linear([state_c, state_h, inputs[i]], hidden_dim, True, scope="linear_inputs")
+            _states = linear([state_c, state_h, states[i]], hidden_dim, True, scope="linear_states")
+            mask_ar = mask_ar.write(i, linear([_inputs, _states], 1, True, scope="linear_mask"))
             if i == tf.constant(0, dtype=tf.int32):
                 tf.get_variable_scope().reuse_variables()
             return inputs, states, i+1, mask_ar
