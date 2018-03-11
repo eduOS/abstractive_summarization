@@ -254,7 +254,10 @@ class PointerGenerator(object):
             self.enc_states = enc_outputs
             self.dec_in_state = reduce_states(
                 fw_st, bw_st, hidden_dim=self.hps.hidden_dim,
-                activation_fn=tf.tanh, trunc_norm_init_std=hps.trunc_norm_init_std)
+                activation_fn=tf.nn.relu, trunc_norm_init_std=hps.trunc_norm_init_std)
+
+            self.fw_st = fw_st
+            self.bw_st = bw_st
 
             with tf.variable_scope('decoder') as decoder_scope:
                 self.attn_dists, self.p_gens, self.coverage, \
@@ -432,7 +435,11 @@ class PointerGenerator(object):
 
         to_return = {
             'global_step': self.global_step,
+            'fw_st': self.fw_st,
+            'bw_st': self.bw_st,
+            'dec_in_state': self.dec_in_state,
         }
+
         if gan_eval:
             to_return['loss'] = self._eval_loss
         else:

@@ -180,6 +180,13 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
             return None
 
         results = model.run_one_batch(sess, batch)
+        if counter % 1000 == 0:
+            print('fw_st')
+            print(results['fw_st'])
+            print('bw_st')
+            print(results['bw_st'])
+            print('dec_in_state')
+            print(results['dec_in_state'])
         counter += 1
         global_step = results['global_step']
         # print('seconds for training step: %.3f', t1-t0)
@@ -397,8 +404,6 @@ def main(argv):
         tf.get_collection_ref(tf.GraphKeys.WEIGHTS) + \
         tf.get_collection_ref(tf.GraphKeys.BIASES)
     sess = tf.Session(config=utils.get_config())
-    sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-    sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
     sess.run(tf.variables_initializer(all_variables))
     if FLAGS.mode == "pretrain_gen":
         print("Restoring the generator model from the latest checkpoint...")

@@ -274,7 +274,7 @@ def add_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init=None, state_
     return encoder_outputs, fw_st, bw_st
 
 
-def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_init_std=1e-4):
+def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.nn.relu, trunc_norm_init_std=1e-4):
     """Add to the graph a linear layer to reduce the encoder's final FW and
     BW state into a single initial state for the decoder. This is needed
     because the encoder is bidirectional but the decoder is not.
