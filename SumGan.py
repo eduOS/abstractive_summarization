@@ -397,8 +397,8 @@ def main(argv):
         tf.get_collection_ref(tf.GraphKeys.WEIGHTS) + \
         tf.get_collection_ref(tf.GraphKeys.BIASES)
     sess = tf.Session(config=utils.get_config())
-    sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-    sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
+    # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+    # sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
     sess.run(tf.variables_initializer(all_variables))
     if FLAGS.mode == "pretrain_gen":
         print("Restoring the generator model from the latest checkpoint...")
@@ -418,8 +418,8 @@ def main(argv):
         if not ckpt_path:
             emb_path = join_path(FLAGS.model_dir, "generator", "init_embed")
             ckpt_state = tf.train.get_checkpoint_state(emb_path)
-            ckpt = ckpt_state.model_checkpoint_path
-            if ckpt:
+            if ckpt_state:
+                ckpt = ckpt_state.model_checkpoint_path
                 generator.saver.restore(sess, ckpt)
                 print(colored("successfully restored embeddings form %s" % emb_path, 'green'))
             else:
