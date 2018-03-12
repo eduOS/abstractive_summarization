@@ -314,7 +314,7 @@ def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.nn.relu, trunc_norm
         # new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
         new_c = activation_fn(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
         new_h = activation_fn(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
-        return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
+        return tf.contrib.rnn.LSTMStateTuple(new_c, new_h), w_reduce_c, w_reduce_h  # Return new cell and state
 
 
 def sattolo_cycle(items):

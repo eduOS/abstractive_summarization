@@ -252,7 +252,7 @@ class PointerGenerator(object):
                 hidden_dim=self.hps.hidden_dim, rand_unif_init=self.rand_unif_init)
 
             self.enc_states = enc_outputs
-            self.dec_in_state = reduce_states(
+            self.dec_in_state, self.wc, self.wh = reduce_states(
                 fw_st, bw_st, hidden_dim=self.hps.hidden_dim,
                 activation_fn=tf.nn.relu, trunc_norm_init_std=hps.trunc_norm_init_std)
 
@@ -438,6 +438,8 @@ class PointerGenerator(object):
             'fw_st': self.fw_st,
             'bw_st': self.bw_st,
             'dec_in_state': self.dec_in_state,
+            'wc': self.wc,
+            'wh': self.wh,
         }
 
         if gan_eval:

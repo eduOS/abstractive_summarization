@@ -187,6 +187,10 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
             print(results['bw_st'])
             print('dec_in_state')
             print(results['dec_in_state'])
+            print('wc')
+            print(results['wc'])
+            print('wh')
+            print(results['wh'])
         counter += 1
         global_step = results['global_step']
         # print('seconds for training step: %.3f', t1-t0)
@@ -423,8 +427,8 @@ def main(argv):
         if not ckpt_path:
             emb_path = join_path(FLAGS.model_dir, "generator", "init_embed")
             ckpt_state = tf.train.get_checkpoint_state(emb_path)
-            ckpt = ckpt_state.model_checkpoint_path
-            if ckpt:
+            if ckpt_state:
+                ckpt = ckpt_state.model_checkpoint_path
                 generator.saver.restore(sess, ckpt)
                 print(colored("successfully restored embeddings form %s" % emb_path, 'green'))
             else:
