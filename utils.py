@@ -287,6 +287,7 @@ def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_in
         state: LSTMStateTuple with hidden_dim units.
     """
     trunc_norm_init = tf.truncated_normal_initializer(stddev=trunc_norm_init_std)
+    alpha = 0.01
 
     with tf.variable_scope('reduce_final_st'):
 
@@ -310,10 +311,12 @@ def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_in
         # Concatenation of fw and bw state
         old_h = tf.concat(axis=1, values=[fw_st.h, bw_st.h])
         # [batch_size * beam_size, hidden_dim]
-        # new_c = tf.nn.relu(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
-        # new_h = tf.nn.relu(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
-        new_c = activation_fn(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
-        new_h = activation_fn(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
+        _c = tf.matmul(old_c, w_reduce_c) + bias_reduce_c
+        _h = tf.matmul(old_h, w_reduce_h) + bias_reduce_h
+        new_c = tf.nn.relu(_c) - alpha * tf.nn.relu(-_c)
+        new_h = tf.nn.relu(_h) - alpha * tf.nn.relu(-_h)
+        # new_c = activation_fn(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
+        # new_h = activation_fn(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
         return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
 
 
