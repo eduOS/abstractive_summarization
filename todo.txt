@@ -58,7 +58,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 46. add the checkpoint modification
 47. the content can be used to train a value iteration for the reward, if can be found in the content the reward is higher
 48. substitue the MCMC with the stocastic MCMC: https://arxiv.org/pdf/1706.05439.pdf
-49. add the dropout mechenism to the network
+49. add the dropout mechenism or maxout better to the network
 
 # problems
 1. cannot end
