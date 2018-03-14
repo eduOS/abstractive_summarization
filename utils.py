@@ -156,71 +156,6 @@ def linear(args, output_size, bias, bias_start=0.0, scope=None):
     return res + bias_term
 
 
-def linear3d(args, output_size, bias, bias_start=0.0, scope=None):
-    """Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
-
-    Args:
-      args: a 3D or 4D Tensor or a list of 3D or 4D, batch x n, Tensors.
-      the second dimension of the 4D should be 1
-      output_size: int, second dimension of W[i].
-      bias: boolean, whether to add a bias term or not.
-      bias_start: starting value to initialize the bias; 0 by default.
-      scope: VariableScope for the created subgraph; defaults to "Linear".
-
-    Returns:
-      A 3D or 4D Tensor with shape [batch x output_size x emb_dim] equal to
-      sum_i(args[i] * W[i]), where W[i]s are newly created matrices.
-
-    Raises:
-      ValueError: if some of the arguments has unspecified or wrong shape.
-    """
-    if args is None or (isinstance(args, (list, tuple)) and not args):
-        raise ValueError("`args` must be specified")
-    if not isinstance(args, (list, tuple)):
-        args = [args]
-    flag_4d = len(args[0].get_shape().as_list()) == 4
-    if flag_4d and args[0].get_shape()[1].value == 1:
-        args = [tf.squeeze(arg, 1) for arg in args]
-    elif flag_4d:
-        raise ValueError("The second dimension of 4D should be 1.")
-
-    emb_dim = args[0].get_shape().as_list()[-1]
-
-    # Calculate the total size of arguments on dimension 1.
-    total_arg_size = 0
-    shapes = [a.get_shape().as_list() for a in args]
-    for n, shape in enumerate(shapes):
-        if shape[2] != emb_dim:
-            raise ValueError("The last dimension should be the same: %s(the first) but %s(the %sth)"
-                             % (str(emb_dim), str(shape[2]), n))
-        if len(shape) != 3:
-            raise ValueError("Linear is expecting 3D arguments: %s" % str(shapes))
-        if not shape[1]:
-            raise ValueError("Linear expects shape[1] of arguments: %s" % str(shapes))
-        else:
-            total_arg_size += shape[1]
-
-    # Now the computation.
-    with tf.variable_scope(scope or "Linear"):
-        matrix = tf.get_variable("Matrix", [output_size, total_arg_size])
-        if len(args) > 1:
-            args = tf.concat(axis=1, values=args)
-
-        args = tf.unstack(args, axis=0)
-        res = [tf.matmul(matrix, arg) for arg in args]
-        res = tf.stack(args, axis=0)
-        if not bias:
-            return res
-        bias_term = tf.get_variable("Bias", [output_size, emb_dim], initializer=tf.constant_initializer(bias_start))
-
-    if flag_4d:
-        output = tf.expand_dims(res + bias_term, 1)
-    else:
-        output = res + bias_term
-
-    return output
-
-
 def variable_names_from_dir(chpt_dir, name_filter=""):
     ckpt = tf.train.get_checkpoint_state(chpt_dir)
     if ckpt:
@@ -238,7 +173,8 @@ def red_print(message, color='red'):
     print(colored(message, color))
 
 
-def add_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init=None, state_is_tuple=True):
+def add_encoder(encoder_inputs, seq_len, hidden_dim,
+                rand_unif_init=None, state_is_tuple=True):
     """Add a single-layer bidirectional LSTM encoder to the graph.
 
     Args:
@@ -318,6 +254,32 @@ def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_in
         # new_c = activation_fn(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
         # new_h = activation_fn(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
         return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
+
+
+def selective_fn(encoder_outputs, dec_in_state):
+    enc_outputs = tf.transpose(encoder_outputs, perm=[1, 0, 2])
+    dynamic_enc_steps = tf.shape(enc_outputs)[0]
+    output_dim = encoder_outputs.get_shape()[-1]
+    sele_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
+
+    with tf.variable_scope('selective'):
+
+        def cond(_e, i, _m):
+            return i < dynamic_enc_steps
+
+        def mask_fn(inputs, i, sele_ar):
+            sGate = tf.sigmoid(
+                linear(inputs[i], output_dim, True, scope="w") +
+                linear([dec_in_state.h, dec_in_state.c], output_dim, True, scope="u"))
+            sele_ar = sele_ar.write(i, inputs[i] * sGate)
+            if i == tf.constant(0, dtype=tf.int32):
+                tf.get_variable_scope().reuse_variables()
+            return inputs, i+1, sele_ar
+
+        _, _, sele_ar = tf.while_loop(
+            cond, mask_fn, (enc_outputs, tf.constant(0, dtype=tf.int32), sele_ar))
+        new_enc_outputs = tf.transpose(tf.squeeze(sele_ar.stack()), perm=[1, 0])
+    return new_enc_outputs
 
 
 def sattolo_cycle(items):
