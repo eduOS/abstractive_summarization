@@ -222,7 +222,8 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
             input_size = inp.get_shape().with_rank(2)[1]
             if input_size.value is None:
                 raise ValueError("Could not infer input size from input: %s" % inp.name)
-            x = linear([inp] + [context_vector], input_size, True)
+            x_2 = linear([inp] + [context_vector], input_size * 2, True)
+            x = tf.contrib.layers.maxout(x_2, input_size)
             # is this the same in either mode?
             # only for the training, while decoding is is the beam search
 
@@ -243,7 +244,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
 
             # Calculate p_gen
             with tf.variable_scope('calculate_pgen'):
-                p_gen = linear([context_vector, state.c, state.h, x], 1, True)
+                p_gen = linear([context_vector, state.c, state.h, x], 2, True)
                 # a scalar
                 p_gen = tf.sigmoid(p_gen)
                 p_gens.append(p_gen)
@@ -252,7 +253,8 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
             # vector, and pass them through a linear layer
             # This is V[s_t, h*_t] + b in the paper
             with variable_scope.variable_scope("AttnOutputProjection"):
-                output = linear([cell_output] + [context_vector], cell.output_size, True)
+                output_2 = linear([cell_output] + [context_vector], cell.output_size * 2, True)
+                output = tf.contrib.layers.maxout(output_2, cell.output_size)
             outputs.append(output)
 
         # If using coverage, reshape it
