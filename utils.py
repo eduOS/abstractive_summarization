@@ -3,6 +3,12 @@
 from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
+from tensorflow.python.framework import ops
+from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import gen_array_ops
+
+from tensorflow.python.layers import base
+
 import os
 from termcolor import colored
 from tensorflow.python import pywrap_tensorflow
@@ -271,14 +277,15 @@ def selective_fn(encoder_outputs, dec_in_state):
             sGate = tf.sigmoid(
                 linear(inputs[i], output_dim, True, scope="w") +
                 linear([dec_in_state.h, dec_in_state.c], output_dim, True, scope="u"))
-            sele_ar = sele_ar.write(i, inputs[i] * sGate)
+            _h = inputs[i] * sGate
+            sele_ar = sele_ar.write(i, _h)
             if i == tf.constant(0, dtype=tf.int32):
                 tf.get_variable_scope().reuse_variables()
             return inputs, i+1, sele_ar
 
         _, _, sele_ar = tf.while_loop(
             cond, mask_fn, (enc_outputs, tf.constant(0, dtype=tf.int32), sele_ar))
-        new_enc_outputs = tf.transpose(tf.squeeze(sele_ar.stack()), perm=[1, 0])
+        new_enc_outputs = tf.transpose(sele_ar.stack(), perm=[1, 0, 2])
     return new_enc_outputs
 
 
@@ -288,3 +295,76 @@ def sattolo_cycle(items):
         i = i - 1
         j = randrange(i)  # 0 <= j <= i-1
         items[j], items[i] = items[i], items[j]
+
+
+def maxout(inputs, num_units, axis=-1, name=None):
+  """Adds a maxout op from https://arxiv.org/abs/1302.4389
+  "Maxout Networks" Ian J. Goodfellow, David Warde-Farley, Mehdi Mirza, Aaron
+  Courville,
+   Yoshua Bengio
+   Usually the operation is performed in the filter/channel dimension. This can
+   also be
+   used after fully-connected layers to reduce number of features.
+   Arguments:
+   inputs: Tensor input
+   num_units: Specifies how many features will remain after maxout in the `axis`
+     dimension
+         (usually channel). This must be multiple of number of `axis`.
+   axis: The dimension where max pooling will be performed. Default is the
+   last dimension.
+   name: Optional scope for name_scope.
+   Returns:
+    A `Tensor` representing the results of the pooling operation.
+   Raises:
+    ValueError: if num_units is not multiple of number of features.
+  """
+  return MaxOut(num_units=num_units, axis=axis, name=name)(inputs)
+
+
+class MaxOut(base.Layer):
+  """Adds a maxout op from https://arxiv.org/abs/1302.4389
+  "Maxout Networks" Ian J. Goodfellow, David Warde-Farley, Mehdi Mirza, Aaron
+  Courville, Yoshua
+  Bengio
+  Usually the operation is performed in the filter/channel dimension. This can
+  also be
+  used after fully-connected layers to reduce number of features.
+  Arguments:
+    inputs: Tensor input
+    num_units: Specifies how many features will remain after maxout in the
+      `axis` dimension
+         (usually channel).
+    This must be multiple of number of `axis`.
+    axis: The dimension where max pooling will be performed. Default is the
+    last dimension.
+    name: Optional scope for name_scope.
+  Returns:
+    A `Tensor` representing the results of the pooling operation.
+  Raises:
+    ValueError: if num_units is not multiple of number of features.
+  """
+
+  def __init__(self, num_units, axis=-1, name=None, **kwargs):
+    super(MaxOut, self).__init__(name=name, trainable=False, **kwargs)
+    self.axis = axis
+    self.num_units = num_units
+
+  def call(self, inputs):
+    inputs = ops.convert_to_tensor(inputs)
+    shape = inputs.get_shape().as_list()
+    num_channels = shape[self.axis]
+    if num_channels % self.num_units:
+      raise ValueError('number of features({}) is not '
+                       'a multiple of num_units({})'.format(
+                           num_channels, self.num_units))
+    shape[self.axis] = -1
+    shape += [num_channels // self.num_units]
+
+    # Dealing with batches with arbitrary sizes
+    for i in range(len(shape)):
+      if shape[i] is None:
+        shape[i] = gen_array_ops.shape(inputs)[i]
+    outputs = math_ops.reduce_max(
+        gen_array_ops.reshape(inputs, shape), -1, keep_dims=False)
+
+    return outputs
