@@ -44,6 +44,7 @@
 33. rollout weights decay
 34. the beam search is too slow thus a multithread function should be added
 35. it seems that using two dictionaries is less efficient in using the reward
+  the embedding from the encoder is put to the discriminator directly
 36. what should the validation of the generator be in processing the gan, cross entropy or rouge etc.?
 37. initialize the variables in the graph but cannot be loaded from the checkpoint
 38. update the validation dataset with the improvement of the quality of the generated sample
@@ -60,6 +61,8 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 48. substitue the MCMC with the stocastic MCMC: https://arxiv.org/pdf/1706.05439.pdf
 49. add the dropout mechenism or maxout better to the network, Selective Encoding for Abstractive Sentence Summarization
 50. the unknown can be not transformed to token and be passed to the next step
+51. create perturbation samples by deleting some sentences
+52. hierarchical attention copy mechanism
 
 # problems
 1. cannot end
