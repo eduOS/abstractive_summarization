@@ -18,6 +18,23 @@ from random import randrange
 import time
 import numpy as np
 import data
+import re
+
+
+    ["②", "①", "⑤", "⑥", "⑦", "⑧", "③", "④"]
+
+def is_delimiter(char, next_char=None):
+    DELIMITERS = ["，", "。", "：", ":", "∶", "？", "；", "！", "…",
+                  "—", "?", ";", "!", "|", ".", "．"]
+    if char in DELIMITERS or re.match(r'(\d+\.|\.\.+)', char):
+        return True
+
+    if not next_char:
+        return False
+
+    if char in ['～', '~'] and re.match("[^\d]", next_char[0]):
+        return True
+    return False
 
 
 def ensure_exists(dire):

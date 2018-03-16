@@ -34,6 +34,7 @@ from collections import defaultdict as dd
 from cntk.tokenizer import text2charlist
 from codecs import open
 from utils import red_assert, red_print
+from utils import is_delimiter
 
 
 def fopen(filename, mode='r'):
@@ -72,7 +73,26 @@ class Example(object):
         # store the length after truncation but before padding
         self.enc_len = len(article_words)
         # list of word ids; OOVs are represented by the id for UNK token
-        self.enc_input = [vocab.word2id(w) for w in article_words]
+        segments = []
+        segment = []
+        for n, char in enumerate(article_words):
+            if n != len(article_words) - 1:
+                if is_delimiter(char, article_words[n+1]) and segment:
+                    segments.append(segment)
+                    segments.append([char])
+                    segment = []
+                else:
+                    segment.append(char)
+            else:
+                if is_delimiter(char) and segment:
+                    segments.append(segment)
+                    segments.append([char])
+                    segment = []
+                else:
+                    segment.append(char)
+                    segments.append(segment)
+
+        self.enc_input = [[vocab.word2id(w) for w in seg] for seg in segments]
 
         # Process the abstract
         abstract_words = abstract.split()  # list of strings
@@ -680,3 +700,7 @@ class DisBatcher:
         self._count += 1
 
         return source, positive, negative
+
+
+
+
