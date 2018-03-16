@@ -51,7 +51,7 @@ def my_lcs(string, sub):
     return lengths[len(string)][len(sub)]
 
 
-def rouge_l(samples, references, beta=1.2, rs=None):
+def rouge_l(samples, references, beta=1.2):
     """
     samples: list of list,
     references: list of list

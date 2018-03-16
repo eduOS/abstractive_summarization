@@ -63,6 +63,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 50. the unknown can be not transformed to token and be passed to the next step
 51. create perturbation samples by deleting some sentences
 52. hierarchical attention copy mechanism
+53. read-gain mechanism to encode each char in the content and find the span for the copy mechanism
 
 # problems
 1. cannot end

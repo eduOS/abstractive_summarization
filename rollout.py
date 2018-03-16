@@ -157,7 +157,7 @@ class Rollout(object):
 
                     if rouge_ratio:
                         rpred = rouge_l(strip_pads(rollout_samples_extend.tolist(), gen_vocab.word2id(STOP_DECODING)),
-                                        strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), rs=rollout_samples_extend)
+                                        strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), beta=0.5)
                         rouge_rewards[given_num] += np.array(rpred)
 
                 if dis_ratio:
@@ -178,7 +178,7 @@ class Rollout(object):
                         dis_rewards[self._gen_hps.max_dec_steps-1] += ypred_for_auc
                 if rouge_ratio:
                     rpred = rouge_l(strip_pads(samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
-                                    strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), rs=rollout_samples_extend)
+                                    strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), beta=0.5)
                     rouge_rewards[self._gen_hps.max_dec_steps] += np.array(rpred)
 
             if rouge_ratio:
