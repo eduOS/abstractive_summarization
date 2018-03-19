@@ -257,6 +257,7 @@ class PointerGenerator(object):
                 fw_st, bw_st, hidden_dim=self.hps.hidden_dim,
                 activation_fn=tf.tanh, trunc_norm_init_std=hps.trunc_norm_init_std)
 
+            # selective encoding: http://arxiv.org/abs/1704.07073
             self.enc_states = selective_fn(self.enc_states, self.dec_in_state)
 
             with tf.variable_scope('decoder') as decoder_scope:

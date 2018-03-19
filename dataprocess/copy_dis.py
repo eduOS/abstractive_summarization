@@ -36,12 +36,15 @@ new_r = []
 
 for _n, (_c, _r) in enumerate(zip(contents, references)):
     _c_l = re.sub(r'[—②①⑤⑥⑧③④。：:∶？；！…?;!|.．～~]', "\n", _c).split("\n")
-    __r = _r.split(" ")
+    __r = _r.strip().split(" ")
     n_cl = []
     for cl in _c_l:
         for r in __r:
-            if r in cl:
-                cl = re.sub(r"(" + r + r")", r"\x1b[31m\1\x1b[0m", cl)
+            if r and r in cl:
+                try:
+                    cl = re.sub(r"(" + r + r")", r"_\1_", cl)
+                except:
+                    pass
         n_cl.append(cl)
 
     _c = "\n".join(n_cl)
@@ -50,6 +53,8 @@ for _n, (_c, _r) in enumerate(zip(contents, references)):
 
 for _c, _r in zip(new_c, new_r):
     print(_r)
+    print("----------------")
     print(_c)
     print("\n")
-    input("press enter to continue")
+    print("\n")
+    a = raw_input("press enter to continue")

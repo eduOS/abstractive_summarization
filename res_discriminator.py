@@ -130,7 +130,7 @@ class Seq2ClassModel(object):
 
     with tf.variable_scope("input_encoder"):
       cnn_emb_inputs = tf.expand_dims(emb_inputs, 1)
-      cnn_outputs = dis_utils.CResCNN(
+      cnn_outputs = dis_utils.ResCNN(
           cnn_emb_inputs, self.conv_layers, self.kernel_size, self.pool_size,
           pool_layers=self.pool_layers, activation_fn=tf.nn.relu, scope="cnn")
       cnn_outputs = tf.squeeze(cnn_outputs, [1])

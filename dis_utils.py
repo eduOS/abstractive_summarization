@@ -104,13 +104,13 @@ def params_decay(decay):
 
 
 # ResCNN
-def CResCNN(inputs, conv_layers, kernel_size, pool_size, pool_layers=1,
-            decay=0.99999, activation_fn=tf.nn.relu, reuse=None, scope=None):
+def ResCNN(inputs, conv_layers, kernel_size, pool_size, pool_layers=1,
+           decay=0.99999, activation_fn=tf.nn.relu, reuse=None, scope=None):
     """ a convolutaional neural net with conv2d and max_pool layers
 
     """
 
-    with tf.variable_scope(scope, "CResCNN", [inputs], reuse=reuse):
+    with tf.variable_scope(scope, "ResCNN", [inputs], reuse=reuse):
         if not pool_size:
             pool_layers = 0
         outputs = inputs
