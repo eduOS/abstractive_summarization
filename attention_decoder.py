@@ -119,14 +119,14 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
                 c.append(tf.squeeze(c_i))
 
         # (batch_size, 3, hidden_num) dot (batch_size, 3, hidden_dim)
-        scaled_features = tf.multiply(
+        weighted_local_features = tf.multiply(
             tf.stack(local_features, axis=1),
             tf.tile(tf.expand_dims(tf.nn.softmax(tf.stack(c, axis=1)), 2), [1, 1, hidden_dim])
         )
 
-        global_attention = tf.reduce_sum(scaled_features, axis=1)
-        global_attention = linear(global_attention, attention_vec_size, True, scope="global_attention")
-        global_attention = tf.expand_dims(tf.expand_dims(global_attention, 1), 1)
+        global_feature = linear(tf.reduce_sum(weighted_local_features, axis=1),
+                                attention_vec_size, True, scope="global_feature")
+        global_feature = tf.expand_dims(tf.expand_dims(global_feature, 1), 1)
 
         # Get the weight vectors v and w_c (w_c is for coverage)
         v = variable_scope.get_variable("v", [attention_vec_size])
@@ -180,7 +180,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
                     # shape (batch_size,attn_length)
                     e = math_ops.reduce_sum(
                         v * math_ops.tanh(
-                            global_attention +
+                            global_feature +
                             decoder_features +
                             coverage_features), [2, 3])
 
@@ -197,7 +197,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
                 else:
                     # Calculate v^T tanh(W_h h_i + W_s s_t + b_attn)
                     e = math_ops.reduce_sum(
-                        v * math_ops.tanh(global_attention + decoder_features),
+                        v * math_ops.tanh(global_feature + decoder_features),
                         [2, 3])  # calculate e
 
                     # Take softmax of e to get the attention distribution
