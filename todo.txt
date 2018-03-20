@@ -4,7 +4,7 @@
 4. the loss of the gan training [check]
 5. seperate rollout parameters from those of generator add a gan mode, delete any mode in the graph but keep those which are outside of it [check]
 6. review the code from the beginning to the end carefully
-7. coverage
+7. make the coverage work
 8. the machenism to decide when to stop decoding while rolling out
 9. add modes outside the graph and delete them inside it [check]
 10. add the eval to the training to early stop the training according to two rules by chengyu
@@ -133,9 +133,12 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 
 
 # experiments
-Leaky relu in reduce_state
-  The average rouge_1 is 0.301144260442
-  The average rouge_2 is 0.188608969758
-  The average rouge_l is 0.27767116521
+Leaky relu in reduce_state:
+  The average rouge_1 is 0.308239391886
+  The average rouge_2 is 0.193852374149
+  The average rouge_l is 0.283870910598
 
-
+Selective encoding: 
+  The average rouge_1 is 0.3156018304
+  The average rouge_2 is 0.199779098326
+  The average rouge_l is 0.290672398488

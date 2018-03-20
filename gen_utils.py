@@ -10,6 +10,8 @@ import utils
 from os.path import join as join_path
 from termcolor import colored
 from tensorflow.python import pywrap_tensorflow
+from utils import linear
+from dis_utils import convolution2d
 
 
 def convert_to_coverage_model():
@@ -112,3 +114,39 @@ def save_ckpt(sess, model, best_loss, model_dir, model_saver,
         print("Model is saved to" + colored(" %s", 'yellow') % model_save_path)
 
     return eval_loss, best_loss
+
+
+def get_local_global_features(inputs, local_attention_layers, attention_vec_size, conv_layers=3, kernel_size=3, pool_size=3,
+                              decay=0.99999, activation_fn=tf.nn.relu, reuse=None, scope=None):
+    """ a convolutaional neural net with conv2d and max_pool layers
+
+    """
+
+    local_attentions = []
+    with tf.variable_scope(scope, "ResCNN", [inputs], reuse=reuse):
+        outputs = inputs
+        # residual layers
+        for j in range(local_attention_layers):
+           if j > 0:
+               pool_shape = [1, 1] + [pool_size] + [1]
+               inputs = tf.nn.max_pool(outputs, pool_shape, pool_shape, padding='SAME')
+               outputs = inputs
+               # why not tf.identity()
+           with tf.variable_scope("layer{0}".format(j)):
+               for i in range(conv_layers):
+                   outputs = convolution2d(
+                       activation_fn(outputs), kernel_size, decay=decay, activation_fn=activation_fn)
+               attention_outputs = tf.reduce_max(outputs, axis=1)
+               attention_outputs = tf.squeeze(attention_outputs, [1])
+               # attention_outputs = linear(attention_outputs, attention_vec_size, True)
+               local_attentions.append(attention_outputs)
+
+        with tf.variable_scope("final_layer"):
+            for i in range(conv_layers):
+                outputs = convolution2d(
+                    activation_fn(outputs), kernel_size, decay=decay, activation_fn=activation_fn)
+            # global_attention = linear(attention_outputs, attention_vec_size, True, scope="global_attention")
+            attention_outputs = tf.reduce_max(outputs, axis=1)
+            global_attention = tf.squeeze(attention_outputs, [1])
+
+    return local_attentions, global_attention

@@ -27,7 +27,7 @@ from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import math_ops
 from utils import linear
 from utils import maxout
-import dis_utils
+from gen_utils import get_local_global_features
 
 # Note: this function is based on tf.contrib.legacy_seq2seq_attention_decoder,
 # which is now outdated.
@@ -37,8 +37,8 @@ import dis_utils
 
 
 def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding_mask,
-                      cell, initial_state_attention=False,
-                      use_coverage=False, prev_coverage=None):
+                      cell, initial_state_attention=False, use_coverage=False,
+                      prev_coverage=None, local_attention_layers=3):
     """
     Args:
       decoder_inputs: A list of 2D Tensors [batch_size x input_size].
@@ -104,21 +104,29 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
         #          1,             1,            attn_size,   attention_vec_size
         # Output:  batch,         in_hight,     in_width,    out_channels
         #          batch_size,    attn_len,     1,           attention_vec_size
-        W_h = variable_scope.get_variable("W_h", [1, 1, attn_size, attention_vec_size])
-        # shape (batch_size,attn_length,1,attention_vec_size)
-        # why add transfer this to the same shape of the input?
-        local_encoder_features = nn_ops.conv2d(encoder_states, W_h, [1, 1, 1, 1], "SAME")
-        # this is just to create a tensor of this shape
 
         # Get the global attention: https://openreview.net/pdf?id=HyzbhfWRW
-        cnn_outputs = dis_utils.ResCNN(
-            local_encoder_features, 2, 3, 2, 2, activation_fn=tf.nn.relu, scope="global_attention")
-        cnn_outputs = tf.squeeze(cnn_outputs, [1])
-        # would it be better if use reduce_sum ?
-        global_encoder_features = tf.reduce_max(cnn_outputs, axis=1)
-        global_encoder_features = linear(global_encoder_features, attention_vec_size, True)
-        # reshape to (batch_size, 1, 1, attention_vec_size)
-        global_encoder_features = tf.expand_dims(tf.expand_dims(global_encoder_features, 1), 1)
+        local_features, global_feature = get_local_global_features(
+            encoder_states, local_attention_layers, attention_vec_size)
+        hidden_dim = global_feature.get_shape().as_list()[-1]
+
+        with variable_scope.variable_scope("combined_attention"):
+            c = []
+            for n, lf in enumerate(local_features):
+                if n > 0:
+                    variable_scope.get_variable_scope().reuse_variables()
+                c_i = linear(lf + global_feature, 1, True, scope="u")
+                c.append(tf.squeeze(c_i))
+
+        # (batch_size, 3, hidden_num) dot (batch_size, 3, hidden_dim)
+        scaled_features = tf.multiply(
+            tf.stack(local_features, axis=1),
+            tf.tile(tf.expand_dims(tf.nn.softmax(tf.stack(c, axis=1)), 2), [1, 1, hidden_dim])
+        )
+
+        global_attention = tf.reduce_sum(scaled_features, axis=1)
+        global_attention = linear(global_attention, attention_vec_size, True, scope="global_attention")
+        global_attention = tf.expand_dims(tf.expand_dims(global_attention, 1), 1)
 
         # Get the weight vectors v and w_c (w_c is for coverage)
         v = variable_scope.get_variable("v", [attention_vec_size])
@@ -172,13 +180,11 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
                     # shape (batch_size,attn_length)
                     e = math_ops.reduce_sum(
                         v * math_ops.tanh(
-                            local_encoder_features +
-                            global_encoder_features +
+                            global_attention +
                             decoder_features +
                             coverage_features), [2, 3])
 
                     # (batch_size, attn_length, 1, attention_vec_size)
-                    # (batch_size, 1,           1, attention_vec_size)
                     # (batch_size, 1,           1, attention_vec_size)
                     # (batch_size, attn_length, 1, attention_vec_size)
 
@@ -191,7 +197,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
                 else:
                     # Calculate v^T tanh(W_h h_i + W_s s_t + b_attn)
                     e = math_ops.reduce_sum(
-                        v * math_ops.tanh(local_encoder_features + global_encoder_features + decoder_features),
+                        v * math_ops.tanh(global_attention + decoder_features),
                         [2, 3])  # calculate e
 
                     # Take softmax of e to get the attention distribution
@@ -258,10 +264,10 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
 
             # Calculate p_gen
             with tf.variable_scope('calculate_pgen'):
-                p_gen = linear([context_vector, state.c, state.h, x], 2, True)
+                p_gen = linear([context_vector, state.c, state.h, x], 1, True)
                 # a scalar
-                p_gen = maxout(p_gen, 1)
-                p_gen = tf.reshape(p_gen, 1)
+                # p_gen = maxout(p_gen, 1)
+                # p_gen = tf.reshape(p_gen, 1)
                 p_gen = tf.sigmoid(p_gen)
                 p_gens.append(p_gen)
 
