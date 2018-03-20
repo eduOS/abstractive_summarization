@@ -156,7 +156,7 @@ class Seq2ClassModel(object):
       # normalized_input_emb = tf.nn.l2_normalize(input_emb, dim=1)
       dot_product = tf.reduce_sum(tf.multiply(input_emb, condition_emb), axis=1)
       # loss = tf.reduce_mean(tf.where(tf.equal(targets, 1), -tf.log(prob), -tf.log(1-prob)))
-      loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=dot_product, labels=targets)
+      loss = tf.nn.weighted_cross_entropy_with_logits(logits=dot_product, labels=targets, pos_weight=2)
       prob = tf.sigmoid(dot_product)
       pred = tf.where(tf.less(tf.fill(tf.shape(prob), 0.5), prob),
                       tf.fill(tf.shape(prob), 1.0), tf.fill(tf.shape(prob), 0.0))
