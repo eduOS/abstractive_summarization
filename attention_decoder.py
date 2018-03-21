@@ -28,6 +28,7 @@ from tensorflow.python.ops import math_ops
 from utils import linear
 from utils import maxout
 from gen_utils import get_local_global_features
+from utils import global_selective_fn
 
 # Note: this function is based on tf.contrib.legacy_seq2seq_attention_decoder,
 # which is now outdated.
@@ -96,15 +97,6 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
         # We set it to be equal to the size of the encoder states.
         attention_vec_size = attn_size
 
-        # Get the weight matrix W_h and apply it to each encoder state to get
-        # (W_h h_i), the encoder features
-        # Input:   batch,         in_hight,     in_width,    in_channels
-        #          batch_size,    attn_len,     1,           attn_size
-        # Filter:  filter_height, filter_width, in_channels, out_channels
-        #          1,             1,            attn_size,   attention_vec_size
-        # Output:  batch,         in_hight,     in_width,    out_channels
-        #          batch_size,    attn_len,     1,           attention_vec_size
-
         # Get the global attention: https://openreview.net/pdf?id=HyzbhfWRW
         local_features, global_feature = get_local_global_features(
             encoder_states, local_attention_layers, attention_vec_size)
@@ -126,7 +118,24 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
 
         global_feature = linear(tf.reduce_sum(weighted_local_features, axis=1),
                                 attention_vec_size, True, scope="global_feature")
-        global_feature = tf.expand_dims(tf.expand_dims(global_feature, 1), 1)
+
+        # Get the weight matrix W_h and apply it to each encoder state to get
+        # (W_h h_i), the encoder features
+        # Input:   batch,         in_hight,     in_width,    in_channels
+        #          batch_size,    attn_len,     1,           attn_size
+        # Filter:  filter_height, filter_width, in_channels, out_channels
+        #          1,             1,            attn_size,   attention_vec_size
+        # Output:  batch,         in_hight,     in_width,    out_channels
+        #          batch_size,    attn_len,     1,           attention_vec_size
+
+        # add the global feature to the encoder state forming the new encoder
+        # state
+        encoder_states = global_selective_fn(tf.squeeze(encoder_states, [2]), global_feature)
+        encoder_states = tf.expand_dims(encoder_states, axis=2)
+
+        W_h = variable_scope.get_variable("W_h", [1, 1, attn_size, attention_vec_size])
+        encoder_features = nn_ops.conv2d(encoder_states, W_h, [1, 1, 1, 1], "SAME")
+        #  shape (batch_size, attn_length, 1, attention_vec_size)
 
         # Get the weight vectors v and w_c (w_c is for coverage)
         v = variable_scope.get_variable("v", [attention_vec_size])
@@ -180,10 +189,11 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
                     # shape (batch_size,attn_length)
                     e = math_ops.reduce_sum(
                         v * math_ops.tanh(
-                            global_feature +
+                            encoder_features +
                             decoder_features +
                             coverage_features), [2, 3])
 
+                    # (batch_size, 1,           1, attention_vec_size)
                     # (batch_size, attn_length, 1, attention_vec_size)
                     # (batch_size, 1,           1, attention_vec_size)
                     # (batch_size, attn_length, 1, attention_vec_size)
@@ -197,7 +207,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
                 else:
                     # Calculate v^T tanh(W_h h_i + W_s s_t + b_attn)
                     e = math_ops.reduce_sum(
-                        v * math_ops.tanh(global_feature + decoder_features),
+                        v * math_ops.tanh(encoder_features + decoder_features),
                         [2, 3])  # calculate e
 
                     # Take softmax of e to get the attention distribution

@@ -370,3 +370,28 @@ class MaxOut(base.Layer):
         return outputs
 
 
+def global_selective_fn(encoder_outputs, global_feature):
+    enc_outputs = tf.transpose(encoder_outputs, perm=[1, 0, 2])
+    dynamic_enc_steps = tf.shape(enc_outputs)[0]
+    output_dim = encoder_outputs.get_shape()[-1]
+    sele_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
+
+    with tf.variable_scope('selective'):
+
+        def cond(_e, i, _m):
+            return i < dynamic_enc_steps
+
+        def mask_fn(inputs, i, sele_ar):
+            sGate = tf.sigmoid(
+                linear(inputs[i], output_dim, True, scope="w") +
+                linear(global_feature, output_dim, True, scope="u"))
+            _h = inputs[i] * sGate
+            sele_ar = sele_ar.write(i, _h)
+            if i == tf.constant(0, dtype=tf.int32):
+                tf.get_variable_scope().reuse_variables()
+            return inputs, i+1, sele_ar
+
+        _, _, sele_ar = tf.while_loop(
+            cond, mask_fn, (enc_outputs, tf.constant(0, dtype=tf.int32), sele_ar))
+        new_enc_outputs = tf.transpose(sele_ar.stack(), perm=[1, 0, 2])
+    return new_enc_outputs
