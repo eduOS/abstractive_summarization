@@ -40,7 +40,7 @@
 30. decode the not pointer generator option in the graph
 31. separate the discriminator graph and the generator graph but load them together in order to train then separately [check]
 32. train my own vocabulary for the discriminator
-  already get a pretrained one
+  already get a pretrained one, the char embedding is directly input to the discriminator from the generator
 33. rollout weights decay
 34. the beam search is too slow thus a multithread function should be added
 35. it seems that using two dictionaries is less efficient in using the reward
@@ -56,7 +56,7 @@
 44. vocab acumulative probability to choose the vocab_size
 https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-python
 45. add the learning rate update
-46. add the checkpoint modification
+46. add the checkpoint modification: a particular variable loader for the trained graph is created
 47. the content can be used to train a value iteration for the reward, if can be found in the content the reward is higher
 48. substitue the MCMC with the stocastic MCMC: https://arxiv.org/pdf/1706.05439.pdf
 49. add the dropout mechenism or maxout better to the network, Selective Encoding for Abstractive Sentence Summarization
@@ -65,7 +65,10 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 52. hierarchical attention copy mechanism
 53. read-gain mechanism to encode each char in the content and find the span for the copy mechanism
 54. the loss of the discriminator should be scaled by the ratio of the positive and negative samples
-  since the amount of the negative samples is twice as that of the positive ones, the loss of the negative should be multiplied by 1/2
+  since the amount of the negative samples is twice as that of the positive ones, the loss of the negative should be halved
+55. multiple attentions each for different part of the content
+56. submodularity with DNN, especially attention
+
 
 # problems
 1. cannot end
