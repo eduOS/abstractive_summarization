@@ -428,15 +428,24 @@ class GenBatcher(object):
                 # what is the vocab here? the extended vocab?
                 # place the Example in the example queue.
                 oov_len = len(example.article_oovs)
-                total_len = len(example.enc_input_extend_vocab)
-                if oov_len > total_len / 3:
-                    self._log_writer.write("article oovs %s, total length of the article %s" % (oov_len, total_len))
+                enc_len = len(example.enc_input_extend_vocab)
+                abs_len = len(example.abs_ids_extend_vocab)
+                if oov_len > enc_len / 3:
+                    self._log_writer.write("article oovs %s, total length of the article %s" % (oov_len, enc_len))
                     self._log_writer.write("\n")
                     self._log_writer.write(example.original_article)
                     self._log_writer.write("\n")
                     self._log_writer.write(example.original_abstract)
                     self._log_writer.write("\n")
                     self._log_writer.write(" ".join(example.article_oovs))
+                    self._log_writer.write("\n")
+                    self._log_writer.write("\n")
+                elif enc_len < 2 * abs_len:
+                    self._log_writer.write("total length of abstract %s, total length of the article %s" % (enc_len, abs_len))
+                    self._log_writer.write("\n")
+                    self._log_writer.write(example.original_article)
+                    self._log_writer.write("\n")
+                    self._log_writer.write(example.original_abstract)
                     self._log_writer.write("\n")
                     self._log_writer.write("\n")
                 else:
