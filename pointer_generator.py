@@ -397,7 +397,23 @@ class PointerGenerator(object):
             # softmax. Each entry on the list corresponds to one decoder
             # step
             for i, output in enumerate(outputs):
-                vocab_scores.append(tf.nn.xw_plus_b(output, w, v))
+
+                # create the mask to mask out the scores of the ids which can be
+                # find in encoder batch
+                batch_size = output.shape[0]
+                batch_nums = tf.range(0, limit=batch_size)
+                batch_nums = tf.expand_dims(batch_nums, 1)
+                attn_len = tf.shape(self.enc_batch_extend_vocab)[1]
+                batch_nums = tf.tile(batch_nums, [1, attn_len])
+                indices = tf.stack((batch_nums, self.enc_batch_extend_vocab), axis=2)
+                indices = tf.where(tf.less(indices, vsize), indices, tf.zeros_like(indices))
+                shape = [batch_size, vsize]
+                _mask = tf.where(
+                    tf.equal(tf.scatter_nd(indices, tf.ones_like(indices), shape), 0),
+                    tf.ones_like(indices),
+                    tf.zeros_like(indices))
+
+                vocab_scores.append(tf.nn.xw_plus_b(output, w, v) * _mask)
                 # apply the linear layer
 
             # The vocabulary distributions. List length max_dec_steps of
