@@ -70,6 +70,11 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 56. submodularity with DNN, especially attention
 57. add the sentence number to each word while embedding: http://arxiv.org/abs/1611.02344
 58. mask out the scores of ids from the vocab dis which can be copied from the encoder: http://arxiv.org/abs/1603.06393
+59. equip the model to decide which sentence would be more important, position embedding: https://s3.amazonaws.com/fairseq/papers/convolutional-sequence-to-sequence-learning.pdf
+60. dialation cnn for encoder or decoder
+61. position embedding
+62. multi-layers attention
+63. dropout: embedding
 
 # problems
 1. cannot end
