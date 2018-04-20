@@ -6,7 +6,6 @@ from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 from tensorflow.python.client import timeline
 from utils import add_encoder
-from utils import reduce_states
 import dis_utils
 
 
@@ -138,13 +137,10 @@ class Seq2ClassModel(object):
       input_emb = tf.reduce_max(cnn_outputs, axis=1)
 
     with tf.variable_scope("condition_encoder"):
-      _, fw_st, bw_st = add_encoder(
+      _, condition_emb = add_encoder(
           emb_conditions, condition_lens,
           hidden_dim=self.hps.hidden_dim, rand_unif_init=self.rand_unif_init)
 
-      condition_emb = reduce_states(
-          fw_st, bw_st, hidden_dim=self.hps.hidden_dim,
-          activation_fn=tf.tanh, trunc_norm_init_std=self.hps.trunc_norm_init_std)
       condition_emb = tf.concat(values=[condition_emb.c, condition_emb.h], axis=1)
       with tf.variable_scope("conduction_projection"):
         condition_emb = tf.matmul(condition_emb, condition_weights)

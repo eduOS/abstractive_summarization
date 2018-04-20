@@ -12,6 +12,8 @@ from tensorflow.python.layers import base
 import os
 from termcolor import colored
 from tensorflow.python import pywrap_tensorflow
+from tensorflow.python.framework import tensor_shape
+from tensorflow.python.ops import array_ops
 import datetime
 import tensorflow as tf
 from random import randrange
@@ -202,7 +204,9 @@ def red_print(message, color='red'):
 
 
 def add_encoder(encoder_inputs, seq_len, hidden_dim,
-                rand_unif_init=None, state_is_tuple=True):
+                rand_unif_init=None, state_is_tuple=True,
+                trunc_norm_init_std=1e-4,
+                ):
     """Add a single-layer bidirectional LSTM encoder to the graph.
 
     Args:
@@ -235,7 +239,87 @@ def add_encoder(encoder_inputs, seq_len, hidden_dim,
         encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
         # encoder_outputs: [batch_size * beam_size, max_time, output_size*2]
         # fw_st & bw_st: [batch_size * beam_size, num_hidden]
-    return encoder_outputs, fw_st, bw_st
+    dec_in_state = reduce_states(
+        fw_st, bw_st, hidden_dim=hidden_dim,
+        activation_fn=tf.tanh, trunc_norm_init_std=trunc_norm_init_std)
+    return encoder_outputs, dec_in_state
+
+
+def add_conv_encoder(inputs, seq_len, mode,
+                     keep_prob=0.9,
+                     cnn_layers=4,
+                     nhids_list=[256, 256, 256, 256],
+                     kwidths_list=[3, 3, 3, 3]):
+    embed_size = inputs.get_shape().as_list()[-1]
+
+    #  Apply dropout to embeddings
+    inputs = tf.contrib.layers.dropout(
+        inputs=inputs,
+        keep_prob=keep_prob,
+        is_training=mode)
+
+    with tf.variable_scope("encoder_cnn"):
+        next_layer = inputs
+        if cnn_layers > 0:
+            # mapping emb dim to hid dim
+            next_layer = linear_mapping_weightnorm(next_layer, nhids_list[0], dropout=keep_prob, var_scope_name="linear_mapping_before_cnn")
+            next_layer = conv_encoder_stack(next_layer, nhids_list, kwidths_list, {'src': keep_prob, 'hid': keep_prob}, mode=mode)
+
+            next_layer = linear_mapping_weightnorm(next_layer, embed_size, var_scope_name="linear_mapping_after_cnn")
+            #  The encoder stack will receive gradients *twice* for each attention pass: dot product and weighted sum.
+            #  cnn = nn.GradMultiply(cnn, 1 / (2 * nattn))
+        cnn_c_output = (next_layer + inputs) * tf.sqrt(0.5)
+    final_state = tf.reduce_mean(cnn_c_output, 1)
+    return cnn_c_output, final_state
+    # return next_layer, final_state, cnn_c_output
+
+
+def conv_encoder_stack(inputs, nhids_list, kwidths_list, dropout_dict, mode):
+    next_layer = inputs
+    for layer_idx in range(len(nhids_list)):
+        nin = nhids_list[layer_idx] if layer_idx == 0 else nhids_list[layer_idx-1]
+        nout = nhids_list[layer_idx]
+        if nin != nout:
+            # mapping for res add
+            res_inputs = linear_mapping_weightnorm(next_layer, nout, dropout=dropout_dict['src'], var_scope_name="linear_mapping_cnn_" + str(layer_idx))
+        else:
+            res_inputs = next_layer
+        # dropout before input to conv
+        next_layer = tf.contrib.layers.dropout(
+            inputs=next_layer,
+            keep_prob=dropout_dict['hid'],
+            is_training=mode == tf.contrib.learn.ModeKeys.TRAIN)
+
+        next_layer = conv1d_weightnorm(inputs=next_layer, layer_idx=layer_idx, out_dim=nout*2, kernel_size=kwidths_list[layer_idx], padding="SAME", dropout=dropout_dict['hid'], var_scope_name="conv_layer_"+str(layer_idx))
+        next_layer = gated_linear_units(next_layer)
+        next_layer = (next_layer + res_inputs) * tf.sqrt(0.5)
+    return next_layer
+
+
+def gated_linear_units(inputs):
+    input_shape = inputs.get_shape().as_list()
+    assert len(input_shape) == 3
+    input_pass = inputs[:, :, 0:int(input_shape[2]/2)]
+    input_gate = inputs[:, :, int(input_shape[2]/2):]
+    input_gate = tf.sigmoid(input_gate)
+    return tf.multiply(input_pass, input_gate)
+
+
+def conv1d_weightnorm(inputs, layer_idx, out_dim, kernel_size, padding="SAME", dropout=1.0,  var_scope_name="conv_layer"):
+    #  padding should take attention
+
+    with tf.variable_scope("conv_layer_"+str(layer_idx)):
+        in_dim = int(inputs.get_shape()[-1])
+        V = tf.get_variable('V', shape=[kernel_size, in_dim, out_dim], dtype=tf.float32, initializer=tf.random_normal_initializer(mean=0, stddev=tf.sqrt(4.0*dropout/(kernel_size*in_dim))), trainable=True)
+        V_norm = tf.norm(V.initialized_value(), axis=[0, 1])
+        # V shape is M*N*k,  V_norm shape is k
+        g = tf.get_variable('g', dtype=tf.float32, initializer=V_norm, trainable=True)
+        b = tf.get_variable('b', shape=[out_dim], dtype=tf.float32, initializer=tf.zeros_initializer(), trainable=True)
+
+        # use weight normalization (Salimans & Kingma, 2016)
+        W = tf.reshape(g, [1, 1, out_dim])*tf.nn.l2_normalize(V, [0, 1])
+        inputs = tf.nn.bias_add(tf.nn.conv1d(value=inputs, filters=W, stride=1, padding=padding), b)
+        return inputs
 
 
 def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_init_std=1e-4):
@@ -284,10 +368,10 @@ def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_in
         return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
 
 
-def selective_fn(encoder_outputs, dec_in_state):
-    enc_outputs = tf.transpose(encoder_outputs, perm=[1, 0, 2])
-    dynamic_enc_steps = tf.shape(enc_outputs)[0]
-    output_dim = encoder_outputs.get_shape()[-1]
+def selective_fn(encoder_states, dec_in_state):
+    enc_states = tf.transpose(encoder_states, perm=[1, 0, 2])
+    dynamic_enc_steps = tf.shape(enc_states)[0]
+    output_dim = encoder_states.get_shape()[-1]
     sele_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
 
     with tf.variable_scope('selective'):
@@ -417,3 +501,140 @@ def global_selective_fn(encoder_outputs, global_feature):
             cond, mask_fn, (enc_outputs, tf.constant(0, dtype=tf.int32), sele_ar))
         new_enc_outputs = tf.transpose(sele_ar.stack(), perm=[1, 0, 2])
     return new_enc_outputs
+
+
+def conv_block(input_embed, enc_states, attention_states, vocab_size,
+               cnn_layers=4, nout_embed=256,
+               nhids_list=[256, 256, 256, 256],
+               kwidths_list=[3, 3, 3, 3],
+               embedding_dropout_keep_prob=0.9,
+               nhid_dropout_keep_prob=0.9,
+               out_dropout_keep_prob=0.9,
+               is_training=True):
+    with tf.variable_scope("decoder_cnn"):
+        next_layer = input_embed
+        if cnn_layers > 0:
+
+            # mapping emb dim to hid dim
+            next_layer = linear_mapping_weightnorm(
+                next_layer, nhids_list[0], dropout=embedding_dropout_keep_prob,
+                var_scope_name="linear_mapping_before_cnn")
+
+            next_layer, att_out, att_score = conv_decoder_stack(
+                input_embed, enc_states, attention_states, next_layer,
+                nhids_list, kwidths_list, {'src': embedding_dropout_keep_prob, 'hid': nhid_dropout_keep_prob}, is_training=is_training)
+
+    with tf.variable_scope("softmax"):
+        if is_training:
+            next_layer = linear_mapping_weightnorm(next_layer, nout_embed, var_scope_name="linear_mapping_after_cnn")
+        else:
+            # for refer it takes only the last one
+            next_layer = linear_mapping_weightnorm(next_layer[:, -1:, :], nout_embed, var_scope_name="linear_mapping_after_cnn")
+        next_layer = tf.contrib.layers.dropout(
+            inputs=next_layer,
+            keep_prob=out_dropout_keep_prob,
+            is_training=is_training)
+
+        # next_layer = linear_mapping_weightnorm(
+        #     next_layer, vocab_size,
+        #     in_dim=nout_embed,
+        #     dropout=out_dropout_keep_prob,
+        #     var_scope_name="logits_before_softmax")
+
+    return next_layer, att_out, att_score
+
+
+def conv_decoder_stack(target_embed, enc_states, attention_states, inputs, nhids_list, kwidths_list, dropout_dict, is_training):
+    next_layer = inputs
+    att_outs = []
+    att_scores = []
+
+    for layer_idx in range(len(nhids_list)):
+        nin = nhids_list[layer_idx] if layer_idx == 0 else nhids_list[layer_idx-1]
+        nout = nhids_list[layer_idx]
+        if nin != nout:
+            # mapping for res add
+            res_inputs = linear_mapping_weightnorm(next_layer, nout, dropout=dropout_dict['hid'], var_scope_name="linear_mapping_cnn_" + str(layer_idx))
+        else:
+            res_inputs = next_layer
+        # dropout before input to conv
+        next_layer = tf.contrib.layers.dropout(
+            inputs=next_layer,
+            keep_prob=dropout_dict['hid'],
+            is_training=is_training)
+        # special process here, first padd then conv, because tf does not suport padding other than SAME and VALID
+        next_layer = tf.pad(next_layer, [[0, 0], [kwidths_list[layer_idx]-1, kwidths_list[layer_idx]-1], [0, 0]], "CONSTANT")
+
+        next_layer = conv1d_weightnorm(inputs=next_layer, layer_idx=layer_idx, out_dim=nout*2, kernel_size=kwidths_list[layer_idx], padding="VALID", dropout=dropout_dict['hid'], var_scope_name="conv_layer_"+str(layer_idx))
+        layer_shape = next_layer.get_shape().as_list()
+        assert len(layer_shape) == 3
+        # to avoid using future information
+        next_layer = next_layer[:, 0:-kwidths_list[layer_idx]+1, :]
+
+        next_layer = gated_linear_units(next_layer)
+
+        # add attention
+        # decoder output -->linear mapping to embed, + target embed,  query decoder output a, softmax --> scores, scores*encoder_output_c-->output,  output--> linear mapping to nhid+  decoder_output -->
+        att_out, att_score = make_attention(target_embed, enc_states, attention_states, next_layer, layer_idx)
+        att_outs.append(att_out)
+        att_scores.append(att_score)
+        # att_out += linear_mapping_weightnorm(_att_out, _att_out.get_shape().as_list()[-1], "linear_mapping_att_out_"+str(layer_idx))
+        next_layer = (next_layer + att_out) * tf.sqrt(0.5)
+
+        # add res connections
+        next_layer += (next_layer + res_inputs) * tf.sqrt(0.5)
+        # why they are not accumulated in a list?
+
+    # this remains a problem on how to combine the outs and scores in different
+    # layers
+    matrix_outs = tf.get_variable("Matrix_outs", [nout * len(nhids_list), nout])
+    matrix_scores = tf.get_variable("Matrix_scores", [len(nhids_list), 1])
+    att_out = tf.matmul(tf.concat(axis=-1, values=att_outs), matrix_outs)
+    att_score = tf.squeeze(tf.matmul(tf.concat(axis=-1, values=att_scores), matrix_scores))
+    att_score = tf.nn.softmax(att_score)
+    return next_layer, att_out, att_score
+
+
+def make_attention(target_embed, encoder_outputs, attention_states, decoder_hidden, layer_idx):
+    # this is the so called dot product attention
+    with tf.variable_scope("attention_layer_" + str(layer_idx)):
+        embed_size = target_embed.get_shape().as_list()[-1]
+        # k
+        dec_hidden_proj = linear_mapping_weightnorm(decoder_hidden, embed_size, var_scope_name="linear_mapping_att_query")
+        # M*N1*k1 --> M*N1*k
+        dec_rep = (dec_hidden_proj + target_embed) * tf.sqrt(0.5)
+
+        att_score = tf.matmul(dec_rep, encoder_outputs, transpose_b=True)
+        # M*N1*K  ** M*N2*K  --> M*N1*N2
+        att_score = tf.nn.softmax(att_score)
+
+        length = tf.cast(tf.shape(attention_states), tf.float32)
+        att_out = tf.matmul(att_score, attention_states) * length[1] * tf.sqrt(1.0/length[1])
+        # M*N1*N2  ** M*N2*K   --> M*N1*k
+
+        att_out = linear_mapping_weightnorm(att_out, decoder_hidden.get_shape().as_list()[-1], var_scope_name="linear_mapping_att_out")
+    return att_out, att_score
+
+
+def transpose_batch_time(x):
+    """
+    Transpose the batch and time dimensions of a Tensor.
+    Retains as much of the static shape information as possible.
+    Args:
+        x: A tensor of rank 2 or higher.
+    Returns:
+        x transposed along the first two dimensions.
+    Raises:
+        ValueError: if `x` is rank 1 or lower.
+    """
+    x_static_shape = x.get_shape()
+    if x_static_shape.ndims is not None and x_static_shape.ndims < 2:
+        raise ValueError(
+            "Expected input tensor %s to have rank at least 2, but saw shape: %s" %
+            (x, x_static_shape))
+    x_rank = array_ops.rank(x)
+    x_t = array_ops.transpose(
+        x, array_ops.concat(([1, 0], math_ops.range(2, x_rank)), axis=0))
+    x_t.set_shape(
+        tensor_shape.TensorShape(
+            [x_static_shape[1].value, x_static_shape[0].value]).concatenate(x_static_shape[2:]))

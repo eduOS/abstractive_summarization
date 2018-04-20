@@ -25,10 +25,10 @@ import time
 import numpy as np
 import tensorflow as tf
 from termcolor import colored
-from attention_decoder import attention_decoder
+from attention_decoder import lstm_attention_decoder
+from attention_decoder import conv_attention_decoder
 from utils import add_encoder
-from utils import reduce_states
-from utils import selective_fn
+from utils import linear_mapping_weightnorm
 from codecs import open
 from six.moves import xrange
 
@@ -231,7 +231,7 @@ class PointerGenerator(object):
                 self.embeddings = tf.get_variable(
                     'embeddings', [self._vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
                 self.saver = tf.train.Saver({"embeddings": self.embeddings})
-                emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
+                self._emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
                 self.temp_embedded_seq = tf.nn.embedding_lookup(self.embeddings, self.temp_batch)
                 # for gen training(mode is pretrain_gen) and
                 # beam searching(mode is decode or train_gan)
@@ -247,30 +247,35 @@ class PointerGenerator(object):
                     for samples in k_samples_ls
                 ]
 
-            # Add the encoder.
-            enc_outputs, fw_st, bw_st = add_encoder(
-                emb_enc_inputs, self.enc_lens,
-                hidden_dim=self.hps.hidden_dim, rand_unif_init=self.rand_unif_init)
+            # Add the LSTM Encoder.
+            enc_states, dec_in_state = add_encoder(
+                self._emb_enc_inputs, self.enc_lens,
+                hidden_dim=hps.hidden_dim,
+                rand_unif_init=self.rand_unif_init,
+                trunc_norm_init_std=hps.trunc_norm_init_std)
 
-            self.enc_states = enc_outputs
-            self.dec_in_state = reduce_states(
-                fw_st, bw_st, hidden_dim=self.hps.hidden_dim,
-                activation_fn=tf.tanh, trunc_norm_init_std=hps.trunc_norm_init_std)
+            # Add the conv Encoder
+            # enc_states, dec_in_state = add_conv_encoder(
+            #     self._emb_enc_inputs, self.enc_lens, mode=hps.mode in ["pretrain_gen", "train_gan"])
+            # hps.hidden_dim vs 300
+
+            self.enc_states, self.dec_in_state = enc_states, dec_in_state
 
             # selective encoding: http://arxiv.org/abs/1704.07073
             # self.enc_states = selective_fn(self.enc_states, self.dec_in_state)
 
             with tf.variable_scope('decoder') as decoder_scope:
-                self.attn_dists, self.p_gens, self.coverage, \
-                    final_dists, self._dec_out_state = self._add_decoder(emb_dec_inputs, self.dec_in_state)
+                decoder_fn = getattr(self, "_" + hps.decoder)
+                self.attn_dists, self.p_gens, final_dists, \
+                    self.coverage, self._dec_out_state = decoder_fn(emb_dec_inputs, self.dec_in_state)
                 decoder_scope.reuse_variables()
 
-                eval_attn_dists, _, eval_coverage, eval_final_dists, _ \
-                    = self._add_decoder(emb_eval_dec_inputs, self.dec_in_state)
+                eval_attn_dists, _, eval_final_dists, eval_coverage, _ \
+                    = decoder_fn(emb_eval_dec_inputs, self.dec_in_state)
 
                 k_sample_final_dists_ls = []
                 for emb_samples in k_emb_samples_ls:
-                    _, _, _, sample_final_dists, _ = self._add_decoder(emb_samples, self.dec_in_state)
+                    _, _, sample_final_dists, _, _ = decoder_fn(emb_samples, self.dec_in_state)
                     k_sample_final_dists_ls.append(sample_final_dists)
 
             def get_loss(final_dists, target_batch, padding_mask, rewards=None):
@@ -359,7 +364,7 @@ class PointerGenerator(object):
 
         return decoder_scope
 
-    def _add_decoder(self, emb_dec_inputs, dec_in_state):
+    def _lstm_decoder(self, emb_dec_inputs, dec_in_state):
         """
         input:
             emb_dec_inputs, the input of the cell
@@ -380,7 +385,7 @@ class PointerGenerator(object):
         prev_coverage = self.prev_coverage if self.hps.coverage and self.hps.mode in ["train_gan", "decode"] else None
         # coverage is for decoding in beam_search and gan training
 
-        outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
+        outputs, p_gens, attn_dists, out_state, coverage = lstm_attention_decoder(
             emb_dec_inputs, dec_in_state, self.enc_states, self.enc_padding_mask, cell,
             initial_state_attention=(len(emb_dec_inputs) == 1),
             use_coverage=self.hps.coverage, prev_coverage=prev_coverage)
@@ -427,7 +432,64 @@ class PointerGenerator(object):
         # For pointer-generator model, calc final distribution from copy
         # distribution and vocabulary distribution, then take log
         final_dists = self._calc_final_dist(p_gens, vocab_dists, attn_dists)
-        return attn_dists, p_gens, coverage, final_dists, out_state
+        return attn_dists, p_gens, final_dists, coverage, out_state
+
+    def _conv_decoder(self, emb_dec_inputs, enc_final_state):
+        vsize = self.hps.gen_vocab_size
+        is_training = self.hps.mode in ["pretrian_gen", "train_gan"]
+        emb_enc_dim = self._emb_enc_inputs.get_shape().as_list()[-1]
+        attention_states = linear_mapping_weightnorm(self.enc_states, emb_enc_dim) + self._emb_enc_inputs
+        # outputs, out_state, attn_dists, p_gens, coverage
+        outputs, p_gens, attn_dists, _, _ = conv_attention_decoder(
+            emb_dec_inputs, self.enc_states,
+            attention_states, vsize, is_training)
+
+        outputs = tf.unstack(outputs, axis=1)
+
+        # Add the output projection to obtain the vocabulary distribution
+        with tf.variable_scope('output_projection'):
+            w = tf.get_variable(
+                'w', [self.hps.hidden_dim, vsize],
+                dtype=tf.float32, initializer=self.trunc_norm_init)
+            w_t = tf.transpose(w)  # NOQA
+            v = tf.get_variable('v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
+            vocab_scores = []
+            # vocab_scores is the vocabulary distribution before applying
+            # softmax. Each entry on the list corresponds to one decoder
+            # step
+            for i, output in enumerate(outputs):
+
+                # create the mask to mask out the scores of the ids which can be
+                # find in encoder batch
+                batch_size = output.shape[0]
+                batch_nums = tf.range(0, limit=batch_size)
+                batch_nums = tf.expand_dims(batch_nums, 1)
+                attn_len = tf.shape(self.enc_batch_extend_vocab)[1]
+                batch_nums = tf.tile(batch_nums, [1, attn_len])
+                indices = tf.stack((batch_nums, self.enc_batch_extend_vocab), axis=2)
+                indices = tf.where(tf.less(indices, vsize), indices, tf.zeros_like(indices))
+                shape = [batch_size, vsize]
+                _mask = tf.where(
+                    tf.equal(tf.scatter_nd(indices, tf.ones_like(indices), shape), 0),
+                    tf.ones_like(indices),
+                    tf.zeros_like(indices))
+
+                vocab_scores.append(tf.nn.xw_plus_b(output, w, v) * _mask)
+                # apply the linear layer
+
+            # The vocabulary distributions. List length max_dec_steps of
+            # (batch_size, vsize) arrays. The words are in the order they
+            # appear in the vocabulary file.
+            vocab_dists = [tf.nn.softmax(s) for s in vocab_scores]
+            # if not FLAGS.pointer_gen:  # calculate loss from log_dists
+            #     self.vocab_scores = vocab_scores
+            # is the oov included
+
+        # For pointer-generator model, calc final distribution from copy
+        # distribution and vocabulary distribution, then take log
+        final_dists = self._calc_final_dist(p_gens, vocab_dists, attn_dists)
+
+        return attn_dists, p_gens, final_dists, None, None
 
     def build_graph(self):
         """Add the placeholders, model, global step, train_op and summaries to
@@ -534,7 +596,7 @@ class PointerGenerator(object):
             the embedded input
         """
         # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
-        _, _, _, final_dists, new_states = self._add_decoder(emb_dec_inputs, dec_in_state)
+        _, _, _, final_dists, new_states = self._rnn_decoder(emb_dec_inputs, dec_in_state)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         # final_dists_sliced = tf.slice(final_dists[0], [0, 0], [-1, self._vocab.size()])
         final_dists = final_dists[0]

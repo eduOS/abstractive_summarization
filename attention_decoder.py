@@ -25,10 +25,14 @@ from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import math_ops
+from gen_utils import get_local_global_features
+from utils import linear_mapping_weightnorm
+from utils import transpose_batch_time
+from utils import global_selective_fn
+from utils import conv_block
 from utils import linear
 from utils import maxout
-from gen_utils import get_local_global_features
-from utils import global_selective_fn
+
 
 # Note: this function is based on tf.contrib.legacy_seq2seq_attention_decoder,
 # which is now outdated.
@@ -37,9 +41,9 @@ from utils import global_selective_fn
 # https://www.tensorflow.org/api_guides/python/contrib.seq2seq#Attention
 
 
-def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding_mask,
-                      cell, initial_state_attention=False, use_coverage=False,
-                      prev_coverage=None, local_attention_layers=3):
+def lstm_attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding_mask,
+                           cell, initial_state_attention=False, use_coverage=False,
+                           prev_coverage=None, local_attention_layers=3):
     """
     Args:
       decoder_inputs: A list of 2D Tensors [batch_size x input_size].
@@ -294,4 +298,19 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
         if coverage is not None:
             coverage = array_ops.reshape(coverage, [batch_size, -1])
 
-        return outputs, state, attn_dists, p_gens, coverage
+        return outputs, p_gens, attn_dists, state, coverage
+
+
+def conv_attention_decoder(emb_dec_inputs, enc_states, attention_states, vocab_size, is_training,
+                           embedding_dropout_keep_prob=0.9):
+
+    # Apply dropout to embeddings
+    inputs = tf.contrib.layers.dropout(
+        inputs=emb_dec_inputs,
+        keep_prob=embedding_dropout_keep_prob,
+        is_training=is_training)
+
+    outputs, att_out, attn_dists = conv_block(inputs, enc_states, attention_states, vocab_size, True)
+    p_gens = linear_mapping_weightnorm(tf.concat(axis=-1, values=[outputs, att_out]), 1, "p_gens")
+
+    return outputs, p_gens, attn_dists, None, None
