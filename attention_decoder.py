@@ -27,7 +27,6 @@ from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import math_ops
 from gen_utils import get_local_global_features
 from utils import linear_mapping_weightnorm
-from utils import transpose_batch_time
 from utils import global_selective_fn
 from utils import conv_block
 from utils import linear
@@ -302,8 +301,9 @@ def lstm_attention_decoder(decoder_inputs, initial_state, encoder_states, enc_pa
 
 
 def conv_attention_decoder(emb_dec_inputs, enc_states, attention_states, vocab_size, is_training,
-                           embedding_dropout_keep_prob=0.9):
+                           embedding_dropout_keep_prob=0.9, out_dropout_keep_prob=0.9):
 
+    input_shape = emb_dec_inputs.get_shape().as_list()    # static shape. may has None
     # Apply dropout to embeddings
     inputs = tf.contrib.layers.dropout(
         inputs=emb_dec_inputs,
@@ -311,6 +311,9 @@ def conv_attention_decoder(emb_dec_inputs, enc_states, attention_states, vocab_s
         is_training=is_training)
 
     outputs, att_out, attn_dists = conv_block(inputs, enc_states, attention_states, vocab_size, True)
-    p_gens = linear_mapping_weightnorm(tf.concat(axis=-1, values=[outputs, att_out]), 1, "p_gens")
+    p_gens = linear_mapping_weightnorm(tf.concat(axis=-1, values=[outputs, att_out]), 1, 0.9, "p_gens")
+    logits = linear_mapping_weightnorm(outputs, vocab_size, dropout=out_dropout_keep_prob, var_scope_name="logits_before_softmax")
+    p_gens = tf.reshape(p_gens, [-1, input_shape[1], 1])
+    logits = tf.reshape(logits, [-1, input_shape[1], vocab_size])
 
-    return outputs, p_gens, attn_dists, None, None
+    return logits, p_gens, attn_dists, None, None

@@ -570,7 +570,6 @@ def conv_decoder_stack(target_embed, enc_states, attention_states, inputs, nhids
         assert len(layer_shape) == 3
         # to avoid using future information
         next_layer = next_layer[:, 0:-kwidths_list[layer_idx]+1, :]
-
         next_layer = gated_linear_units(next_layer)
 
         # add attention
@@ -587,12 +586,32 @@ def conv_decoder_stack(target_embed, enc_states, attention_states, inputs, nhids
 
     # this remains a problem on how to combine the outs and scores in different
     # layers
-    matrix_outs = tf.get_variable("Matrix_outs", [nout * len(nhids_list), nout])
-    matrix_scores = tf.get_variable("Matrix_scores", [len(nhids_list), 1])
-    att_out = tf.matmul(tf.concat(axis=-1, values=att_outs), matrix_outs)
-    att_score = tf.squeeze(tf.matmul(tf.concat(axis=-1, values=att_scores), matrix_scores))
+    # matrix_outs = tf.get_variable("Matrix_outs", [nout * len(nhids_list), nout])
+    # matrix_scores = tf.get_variable("Matrix_scores", [len(nhids_list), 1])
+    att_out = linear_mapping_stupid(tf.concat(axis=-1, values=att_outs), nout, "matrix_outs")
+    scores = tf.stack(axis=-1, values=att_scores)
+    att_score = tf.reduce_mean(scores, axis=-1)
     att_score = tf.nn.softmax(att_score)
     return next_layer, att_out, att_score
+
+
+def linear_mapping_stupid(inputs, out_dim, in_dim=None, dropout=1.0, var_scope_name="linear_mapping"):
+  with tf.variable_scope(var_scope_name):
+    # print('name', tf.get_variable_scope().name)
+    input_shape_tensor = tf.shape(inputs)   # dynamic shape, no None
+    input_shape = inputs.get_shape().as_list()    # static shape. may has None
+    # print('input_shape', input_shape)
+    assert len(input_shape) == 3
+    inputs = tf.reshape(inputs, [-1, input_shape_tensor[-1]])
+
+    linear_mapping_w = tf.get_variable("linear_mapping_w", [input_shape[-1], out_dim], initializer=tf.random_normal_initializer(mean=0, stddev=tf.sqrt(dropout*1.0/input_shape[-1])))
+    linear_mapping_b = tf.get_variable("linear_mapping_b", [out_dim], initializer=tf.zeros_initializer())
+
+    output = tf.matmul(inputs, linear_mapping_w) + linear_mapping_b
+    # print('xxxxx_params', input_shape, out_dim)
+    # output = tf.reshape(output, [input_shape[0], -1, out_dim])
+    output = tf.reshape(output, [input_shape_tensor[0], -1, out_dim])
+  return output
 
 
 def make_attention(target_embed, encoder_outputs, attention_states, decoder_hidden, layer_idx):
@@ -603,8 +622,9 @@ def make_attention(target_embed, encoder_outputs, attention_states, decoder_hidd
         dec_hidden_proj = linear_mapping_weightnorm(decoder_hidden, embed_size, var_scope_name="linear_mapping_att_query")
         # M*N1*k1 --> M*N1*k
         dec_rep = (dec_hidden_proj + target_embed) * tf.sqrt(0.5)
+        enc_output_proj = linear_mapping_weightnorm(encoder_outputs, embed_size, var_scope_name="linear_mapping_enc_output")
 
-        att_score = tf.matmul(dec_rep, encoder_outputs, transpose_b=True)
+        att_score = tf.matmul(dec_rep, enc_output_proj, transpose_b=True)
         # M*N1*K  ** M*N2*K  --> M*N1*N2
         att_score = tf.nn.softmax(att_score)
 
@@ -638,3 +658,4 @@ def transpose_batch_time(x):
     x_t.set_shape(
         tensor_shape.TensorShape(
             [x_static_shape[1].value, x_static_shape[0].value]).concatenate(x_static_shape[2:]))
+    return x_t
