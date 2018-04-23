@@ -27,7 +27,8 @@ import tensorflow as tf
 from termcolor import colored
 from attention_decoder import lstm_attention_decoder
 from attention_decoder import conv_attention_decoder
-from utils import add_encoder
+from utils import lstm_encoder
+from utils import conv_encoder
 from utils import linear_mapping_weightnorm
 from codecs import open
 from six.moves import xrange
@@ -247,17 +248,16 @@ class PointerGenerator(object):
                     for samples in k_samples_ls
                 ]
 
-            # Add the LSTM Encoder.
-            enc_states, dec_in_state = add_encoder(
-                self._emb_enc_inputs, self.enc_lens,
-                hidden_dim=hps.hidden_dim,
-                rand_unif_init=self.rand_unif_init,
-                trunc_norm_init_std=hps.trunc_norm_init_std)
+            def execute_function(function_name, inputs, seq_len, is_training, hidden_dim, rand_unif_init):
+                return {
+                    'lstm_encoder': lambda: lstm_encoder(inputs, seq_len, hidden_dim, rand_unif_init),
+                    'conv_encoder': lambda: conv_encoder(inputs, seq_len, is_training),
+                }[function_name]()
 
-            # Add the conv Encoder
-            # enc_states, dec_in_state = add_conv_encoder(
-            #     self._emb_enc_inputs, self.enc_lens, mode=hps.mode in ["pretrain_gen", "train_gan"])
-            # hps.hidden_dim vs 300
+            enc_states, dec_in_state = execute_function(
+                hps.encoder, self._emb_enc_inputs,
+                self.enc_lens, hps.mode in ["pretrain_gen", "train_gan"],
+                hps.hidden_dim, self.rand_unif_init)
 
             self.enc_states, self.dec_in_state = enc_states, dec_in_state
 

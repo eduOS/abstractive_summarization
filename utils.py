@@ -203,10 +203,10 @@ def red_print(message, color='red'):
     print(colored(message, color))
 
 
-def add_encoder(encoder_inputs, seq_len, hidden_dim,
-                rand_unif_init=None, state_is_tuple=True,
-                trunc_norm_init_std=1e-4,
-                ):
+def lstm_encoder(encoder_inputs, seq_len, hidden_dim,
+                 rand_unif_init=None, state_is_tuple=True,
+                 trunc_norm_init_std=1e-4,
+                 ):
     """Add a single-layer bidirectional LSTM encoder to the graph.
 
     Args:
@@ -245,25 +245,25 @@ def add_encoder(encoder_inputs, seq_len, hidden_dim,
     return encoder_outputs, dec_in_state
 
 
-def add_conv_encoder(inputs, seq_len, mode,
-                     keep_prob=0.9,
-                     cnn_layers=4,
-                     nhids_list=[256, 256, 256, 256],
-                     kwidths_list=[3, 3, 3, 3]):
+def conv_encoder(inputs, seq_len, is_training,
+                 keep_prob=0.9,
+                 cnn_layers=4,
+                 nhids_list=[256, 256, 256, 256],
+                 kwidths_list=[3, 3, 3, 3]):
     embed_size = inputs.get_shape().as_list()[-1]
 
     #  Apply dropout to embeddings
     inputs = tf.contrib.layers.dropout(
         inputs=inputs,
         keep_prob=keep_prob,
-        is_training=mode)
+        is_training=is_training)
 
     with tf.variable_scope("encoder_cnn"):
         next_layer = inputs
         if cnn_layers > 0:
             # mapping emb dim to hid dim
             next_layer = linear_mapping_weightnorm(next_layer, nhids_list[0], dropout=keep_prob, var_scope_name="linear_mapping_before_cnn")
-            next_layer = conv_encoder_stack(next_layer, nhids_list, kwidths_list, {'src': keep_prob, 'hid': keep_prob}, mode=mode)
+            next_layer = conv_encoder_stack(next_layer, nhids_list, kwidths_list, {'src': keep_prob, 'hid': keep_prob}, is_training=is_training)
 
             next_layer = linear_mapping_weightnorm(next_layer, embed_size, var_scope_name="linear_mapping_after_cnn")
             #  The encoder stack will receive gradients *twice* for each attention pass: dot product and weighted sum.
@@ -274,7 +274,7 @@ def add_conv_encoder(inputs, seq_len, mode,
     # return next_layer, final_state, cnn_c_output
 
 
-def conv_encoder_stack(inputs, nhids_list, kwidths_list, dropout_dict, mode):
+def conv_encoder_stack(inputs, nhids_list, kwidths_list, dropout_dict, is_training):
     next_layer = inputs
     for layer_idx in range(len(nhids_list)):
         nin = nhids_list[layer_idx] if layer_idx == 0 else nhids_list[layer_idx-1]
@@ -288,7 +288,7 @@ def conv_encoder_stack(inputs, nhids_list, kwidths_list, dropout_dict, mode):
         next_layer = tf.contrib.layers.dropout(
             inputs=next_layer,
             keep_prob=dropout_dict['hid'],
-            is_training=mode == tf.contrib.learn.ModeKeys.TRAIN)
+            is_training=is_training)
 
         next_layer = conv1d_weightnorm(inputs=next_layer, layer_idx=layer_idx, out_dim=nout*2, kernel_size=kwidths_list[layer_idx], padding="SAME", dropout=dropout_dict['hid'], var_scope_name="conv_layer_"+str(layer_idx))
         next_layer = gated_linear_units(next_layer)
