@@ -75,6 +75,9 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 61. position embedding [may not be effective]
 62. multi-layers attention
 63. dropout: embedding
+64. rnn encoder -> cnn decoder [check]
+    cnn encoder -> rnn decoder
+    cnn encoder -> cnn decoder
 
 # problems
 1. cannot end

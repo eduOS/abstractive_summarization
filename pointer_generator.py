@@ -28,10 +28,12 @@ from termcolor import colored
 from attention_decoder import lstm_attention_decoder
 from attention_decoder import conv_attention_decoder
 from utils import lstm_encoder
+from utils import linear
 from utils import conv_encoder
 from utils import linear_mapping_weightnorm
 from codecs import open
 from six.moves import xrange
+from tensorflow.contrib.rnn import LSTMStateTuple
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -248,13 +250,13 @@ class PointerGenerator(object):
                     for samples in k_samples_ls
                 ]
 
-            def execute_function(function_name, inputs, seq_len, is_training, hidden_dim, rand_unif_init):
+            def execute_encoder_fn(function_name, inputs, seq_len, is_training, hidden_dim, rand_unif_init):
                 return {
                     'lstm_encoder': lambda: lstm_encoder(inputs, seq_len, hidden_dim, rand_unif_init),
                     'conv_encoder': lambda: conv_encoder(inputs, seq_len, is_training),
                 }[function_name]()
 
-            enc_states, dec_in_state = execute_function(
+            enc_states, dec_in_state = execute_encoder_fn(
                 hps.encoder, self._emb_enc_inputs,
                 self.enc_lens, hps.mode in ["pretrain_gen", "train_gan"],
                 hps.hidden_dim, self.rand_unif_init)
@@ -392,6 +394,11 @@ class PointerGenerator(object):
             output log distribution
             new state
         """
+        if type(dec_in_state) != LSTMStateTuple:
+            dec_in_state = LSTMStateTuple(
+                linear(dec_in_state, self.hps.hidden_dim, bias=True, scope="lstmstatetuple_c"),
+                linear(dec_in_state, self.hps.hidden_dim, bias=True, scope="lstmstatetuple_h")
+            )
         vsize = self._vocab.size()  # size of the vocabulary
         # batch_size = tf.shape(emb_dec_inputs[0])[0]
         # Add the decoder.

@@ -313,6 +313,7 @@ def conv_attention_decoder(emb_dec_inputs, enc_states, attention_states, vocab_s
     outputs, att_out, attn_dists = conv_block(inputs, enc_states, attention_states, vocab_size, True)
     p_gens = linear_mapping_weightnorm(tf.concat(axis=-1, values=[outputs, att_out]), 1, 0.9, "p_gens")
     logits = linear_mapping_weightnorm(outputs, vocab_size, dropout=out_dropout_keep_prob, var_scope_name="logits_before_softmax")
+    # reshape for the length to unstack
     p_gens = tf.reshape(p_gens, [-1, input_shape[1], 1])
     logits = tf.reshape(logits, [-1, input_shape[1], vocab_size])
 

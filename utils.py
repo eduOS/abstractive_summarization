@@ -269,9 +269,11 @@ def conv_encoder(inputs, seq_len, is_training,
             #  The encoder stack will receive gradients *twice* for each attention pass: dot product and weighted sum.
             #  cnn = nn.GradMultiply(cnn, 1 / (2 * nattn))
         cnn_c_output = (next_layer + inputs) * tf.sqrt(0.5)
+
+        attention_keys = next_layer
+        attention_values = cnn_c_output
     final_state = tf.reduce_mean(cnn_c_output, 1)
-    return cnn_c_output, final_state
-    # return next_layer, final_state, cnn_c_output
+    return attention_values, final_state
 
 
 def conv_encoder_stack(inputs, nhids_list, kwidths_list, dropout_dict, is_training):
@@ -616,20 +618,22 @@ def linear_mapping_stupid(inputs, out_dim, in_dim=None, dropout=1.0, var_scope_n
 
 def make_attention(target_embed, encoder_outputs, attention_states, decoder_hidden, layer_idx):
     # this is the so called dot product attention
+    attention_keys = encoder_outputs
+    attention_values = attention_states
     with tf.variable_scope("attention_layer_" + str(layer_idx)):
         embed_size = target_embed.get_shape().as_list()[-1]
         # k
         dec_hidden_proj = linear_mapping_weightnorm(decoder_hidden, embed_size, var_scope_name="linear_mapping_att_query")
         # M*N1*k1 --> M*N1*k
         dec_rep = (dec_hidden_proj + target_embed) * tf.sqrt(0.5)
-        enc_output_proj = linear_mapping_weightnorm(encoder_outputs, embed_size, var_scope_name="linear_mapping_enc_output")
+        attention_key_proj = linear_mapping_weightnorm(attention_keys, embed_size, var_scope_name="linear_mapping_enc_output")
 
-        att_score = tf.matmul(dec_rep, enc_output_proj, transpose_b=True)
+        att_score = tf.matmul(dec_rep, attention_key_proj, transpose_b=True)
         # M*N1*K  ** M*N2*K  --> M*N1*N2
         att_score = tf.nn.softmax(att_score)
 
-        length = tf.cast(tf.shape(attention_states), tf.float32)
-        att_out = tf.matmul(att_score, attention_states) * length[1] * tf.sqrt(1.0/length[1])
+        length = tf.cast(tf.shape(attention_values), tf.float32)
+        att_out = tf.matmul(att_score, attention_values) * length[1] * tf.sqrt(1.0/length[1])
         # M*N1*N2  ** M*N2*K   --> M*N1*k
 
         att_out = linear_mapping_weightnorm(att_out, decoder_hidden.get_shape().as_list()[-1], var_scope_name="linear_mapping_att_out")
