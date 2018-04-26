@@ -257,15 +257,12 @@ class PointerGenerator(object):
                     for samples in k_samples_ls
                 ]
 
-            attention_keys, dec_in_state = execute_encoder_fn(
+            attentions_keys, dec_in_state = execute_encoder_fn(
                 hps.encoder, self._emb_enc_inputs,
                 self.enc_lens, hps.mode in ["pretrain_gen", "train_gan"],
                 hps.hidden_dim, self.rand_unif_init)
 
-            self.attention_keys, self.dec_in_state = attention_keys, dec_in_state
-            self.attention_values = linear_mapping_weightnorm(
-                self.attention_keys, self._emb_enc_inputs.get_shape()[-1].value, var_scope_name="attention_key2value"
-            ) + self._emb_enc_inputs
+            self.attentions_keys, self.dec_in_state = attentions_keys, dec_in_state
 
             # selective encoding: http://arxiv.org/abs/1704.07073
             # self.attention_keys = selective_fn(self.attention_keys, self.dec_in_state)
@@ -418,7 +415,7 @@ class PointerGenerator(object):
         # coverage is for decoding in beam_search and gan training
 
         outputs, p_gens, attn_dists, out_state, coverage = lstm_attention_decoder(
-            emb_dec_inputs, self.enc_padding_mask, self.attention_keys, self.dec_in_state, cell,
+            emb_dec_inputs, self.enc_padding_mask, self.attentions_keys, self.dec_in_state, cell,
             initial_state_attention=(len(emb_dec_inputs) == 1),
             use_coverage=self.hps.coverage, prev_coverage=prev_coverage)
 
@@ -456,12 +453,8 @@ class PointerGenerator(object):
         emb_dec_inputs = tf.stack(emb_dec_inputs, axis=1)
         vsize = self.hps.gen_vocab_size
         is_training = self.hps.mode in ["pretrain_gen", "train_gan"]
-        # emb_enc_dim = self._emb_enc_inputs.get_shape().as_list()[-1]
-        # attention_states = linear_mapping_weightnorm(self.attention_keys, emb_enc_dim) + self._emb_enc_inputs
-        # outputs, out_state, attn_dists, p_gens, coverage
         logits, p_gens, attn_dists, _, _ = conv_attention_decoder(
-            emb_dec_inputs, self.enc_padding_mask, self.attention_keys,
-            self.attention_values, vsize, is_training)
+            self._emb_enc_inputs, self.enc_padding_mask, emb_dec_inputs, self.attentions_keys, vsize, is_training)
 
         vocab_dists = tf.unstack(tf.nn.softmax(logits), axis=1)
         p_gens = tf.unstack(tf.sigmoid(p_gens), axis=1)

@@ -39,8 +39,8 @@ from utils import maxout
 # attention mechanism using the new seq2seq library for tensorflow 1.0:
 # https://www.tensorflow.org/api_guides/python/contrib.seq2seq#Attention
 
-def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attention_keys, attention_values,
-                           initial_state, cell, initial_state_attention=False, use_coverage=False,
+def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attentions_keys, initial_state,
+                           cell, initial_state_attention=False, use_coverage=False,
                            prev_coverage=None, local_attention_layers=3):
     # can this be applied to beam repetitive batch?
     with variable_scope.variable_scope("attention_decoder"):
@@ -227,20 +227,27 @@ def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attention_keys, att
         return outputs, p_gens, attn_dists, state, coverage
 
 
-def conv_attention_decoder(emb_dec_inputs, enc_padding_mask, attention_keys, attention_values,
+def conv_attention_decoder(emb_enc_inputs, enc_padding_mask, emb_dec_inputs, attentions_keys,
                            vocab_size, is_training, cnn_layers=4, nout_embed=256,
                            nhids_list=[256, 256, 256, 256], kwidths_list=[3, 3, 3, 3],
-                           embedding_dropout_keep_prob=0.9, nhid_dropout_keep_prob=0.9, out_dropout_keep_prob=0.9):
+                           embedding_dropout_keep_prob=0.9, nhid_dropout_keep_prob=0.9,
+                           out_dropout_keep_prob=0.9):
+    """
+    attentions_keys:
+        a four dimensional tensor: (attention heads number, batch size, enc_length, hidden_dim)
 
+    """
+
+    enc_inputs = emb_enc_inputs
     input_shape = emb_dec_inputs.get_shape().as_list()    # static shape. may has None
     # Apply dropout to embeddings
-    inputs = tf.contrib.layers.dropout(
+    dec_labels = tf.contrib.layers.dropout(
         inputs=emb_dec_inputs,
         keep_prob=embedding_dropout_keep_prob,
         is_training=is_training)
 
     with tf.variable_scope("decoder_cnn"):
-        next_layer = inputs
+        next_layer = dec_labels
         if cnn_layers > 0:
 
             # mapping emb dim to hid dim
@@ -249,8 +256,11 @@ def conv_attention_decoder(emb_dec_inputs, enc_padding_mask, attention_keys, att
                 var_scope_name="linear_mapping_before_cnn")
 
             next_layer, att_out, attn_dists = conv_decoder_stack(
-                inputs, attention_keys, attention_values, next_layer, enc_padding_mask,
-                nhids_list, kwidths_list, {'src': embedding_dropout_keep_prob, 'hid': nhid_dropout_keep_prob}, is_training=is_training)
+                enc_inputs, dec_labels, attentions_keys, next_layer, enc_padding_mask,
+                nhids_list, kwidths_list, is_training=is_training, dropout_dict={
+                    'src': embedding_dropout_keep_prob,
+                    'hid': nhid_dropout_keep_prob
+                })
 
     with tf.variable_scope("softmax"):
         if is_training:
