@@ -264,6 +264,7 @@ def main(argv):
     hparam_gen = [
         'mode',
         'model_dir',
+        'encoder',
         'decoder',
         'adagrad_init_acc',
         'steps_per_checkpoint',

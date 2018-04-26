@@ -11,6 +11,7 @@ from os.path import join as join_path
 from termcolor import colored
 from tensorflow.python import pywrap_tensorflow
 from utils import linear
+from tensorflow.python.ops import variable_scope
 from dis_utils import convolution2d
 
 
@@ -150,3 +151,62 @@ def get_local_global_features(inputs, local_attention_layers, attention_vec_size
             global_attention = tf.squeeze(attention_outputs, [1])
 
     return local_attentions, global_attention
+
+
+def global_selective_fn(encoder_outputs, global_feature):
+    enc_outputs = tf.transpose(encoder_outputs, perm=[1, 0, 2])
+    dynamic_enc_steps = tf.shape(enc_outputs)[0]
+    output_dim = encoder_outputs.get_shape()[-1]
+    sele_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
+
+    with tf.variable_scope('selective'):
+
+        def cond(_e, i, _m):
+            return i < dynamic_enc_steps
+
+        def mask_fn(inputs, i, sele_ar):
+            sGate = tf.sigmoid(
+                linear(inputs[i], output_dim, True, scope="w") +
+                linear(global_feature, output_dim, True, scope="u"))
+            _h = inputs[i] * sGate
+            sele_ar = sele_ar.write(i, _h)
+            if i == tf.constant(0, dtype=tf.int32):
+                tf.get_variable_scope().reuse_variables()
+            return inputs, i+1, sele_ar
+
+        _, _, sele_ar = tf.while_loop(
+            cond, mask_fn, (enc_outputs, tf.constant(0, dtype=tf.int32), sele_ar))
+        new_enc_outputs = tf.transpose(sele_ar.stack(), perm=[1, 0, 2])
+    return new_enc_outputs
+
+
+def global_attention(encoder_states, local_attention_layers, attention_vec_size):
+    # Get the global attention: https://openreview.net/pdf?id=HyzbhfWRW
+
+    local_features, global_feature = get_local_global_features(
+        encoder_states, local_attention_layers, attention_vec_size)
+    hidden_dim = global_feature.get_shape().as_list()[-1]
+
+    with variable_scope.variable_scope("combined_attention"):
+        c = []
+        for n, lf in enumerate(local_features):
+            if n > 0:
+                variable_scope.get_variable_scope().reuse_variables()
+            c_i = linear(lf + global_feature, 1, True, scope="u")
+            c.append(tf.squeeze(c_i))
+
+    # (batch_size, 3, hidden_num) dot (batch_size, 3, hidden_dim)
+    weighted_local_features = tf.multiply(
+        tf.stack(local_features, axis=1),
+        tf.tile(tf.expand_dims(tf.nn.softmax(tf.stack(c, axis=1)), 2), [1, 1, hidden_dim])
+    )
+
+    global_feature = linear(tf.reduce_sum(weighted_local_features, axis=1),
+                            attention_vec_size, True, scope="global_feature")
+
+    # add the global feature to the encoder state forming the new encoder
+    # state
+    encoder_states = global_selective_fn(tf.squeeze(encoder_states, [2]), global_feature)
+    # global selective function should be improved
+    encoder_states = tf.expand_dims(encoder_states, axis=2)
+    return encoder_states

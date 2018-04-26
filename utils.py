@@ -239,15 +239,16 @@ def lstm_encoder(encoder_inputs, seq_len, hidden_dim,
         encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
         # encoder_outputs: [batch_size * beam_size, max_time, output_size*2]
         # fw_st & bw_st: [batch_size * beam_size, num_hidden]
+
     dec_in_state = reduce_states(
         fw_st, bw_st, hidden_dim=hidden_dim,
         activation_fn=tf.tanh, trunc_norm_init_std=trunc_norm_init_std)
-    return encoder_outputs, dec_in_state
+    attention_keys = encoder_outputs
+    return attention_keys, dec_in_state
 
 
 def conv_encoder(inputs, seq_len, is_training,
-                 keep_prob=0.9,
-                 cnn_layers=4,
+                 keep_prob=0.9, cnn_layers=4,
                  nhids_list=[256, 256, 256, 256],
                  kwidths_list=[3, 3, 3, 3]):
     embed_size = inputs.get_shape().as_list()[-1]
@@ -271,9 +272,8 @@ def conv_encoder(inputs, seq_len, is_training,
         cnn_c_output = (next_layer + inputs) * tf.sqrt(0.5)
 
         attention_keys = next_layer
-        attention_values = cnn_c_output
     final_state = tf.reduce_mean(cnn_c_output, 1)
-    return attention_values, final_state
+    return attention_keys, final_state
 
 
 def conv_encoder_stack(inputs, nhids_list, kwidths_list, dropout_dict, is_training):
@@ -308,7 +308,7 @@ def gated_linear_units(inputs):
 
 
 def conv1d_weightnorm(inputs, layer_idx, out_dim, kernel_size, padding="SAME", dropout=1.0,  var_scope_name="conv_layer"):
-    #  padding should take attention
+    #  TODO: padding should take attention
 
     with tf.variable_scope("conv_layer_"+str(layer_idx)):
         in_dim = int(inputs.get_shape()[-1])
@@ -478,75 +478,8 @@ class MaxOut(base.Layer):
         return outputs
 
 
-def global_selective_fn(encoder_outputs, global_feature):
-    enc_outputs = tf.transpose(encoder_outputs, perm=[1, 0, 2])
-    dynamic_enc_steps = tf.shape(enc_outputs)[0]
-    output_dim = encoder_outputs.get_shape()[-1]
-    sele_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
-
-    with tf.variable_scope('selective'):
-
-        def cond(_e, i, _m):
-            return i < dynamic_enc_steps
-
-        def mask_fn(inputs, i, sele_ar):
-            sGate = tf.sigmoid(
-                linear(inputs[i], output_dim, True, scope="w") +
-                linear(global_feature, output_dim, True, scope="u"))
-            _h = inputs[i] * sGate
-            sele_ar = sele_ar.write(i, _h)
-            if i == tf.constant(0, dtype=tf.int32):
-                tf.get_variable_scope().reuse_variables()
-            return inputs, i+1, sele_ar
-
-        _, _, sele_ar = tf.while_loop(
-            cond, mask_fn, (enc_outputs, tf.constant(0, dtype=tf.int32), sele_ar))
-        new_enc_outputs = tf.transpose(sele_ar.stack(), perm=[1, 0, 2])
-    return new_enc_outputs
-
-
-def conv_block(input_embed, enc_states, attention_states, vocab_size,
-               cnn_layers=4, nout_embed=256,
-               nhids_list=[256, 256, 256, 256],
-               kwidths_list=[3, 3, 3, 3],
-               embedding_dropout_keep_prob=0.9,
-               nhid_dropout_keep_prob=0.9,
-               out_dropout_keep_prob=0.9,
-               is_training=True):
-    with tf.variable_scope("decoder_cnn"):
-        next_layer = input_embed
-        if cnn_layers > 0:
-
-            # mapping emb dim to hid dim
-            next_layer = linear_mapping_weightnorm(
-                next_layer, nhids_list[0], dropout=embedding_dropout_keep_prob,
-                var_scope_name="linear_mapping_before_cnn")
-
-            next_layer, att_out, att_score = conv_decoder_stack(
-                input_embed, enc_states, attention_states, next_layer,
-                nhids_list, kwidths_list, {'src': embedding_dropout_keep_prob, 'hid': nhid_dropout_keep_prob}, is_training=is_training)
-
-    with tf.variable_scope("softmax"):
-        if is_training:
-            next_layer = linear_mapping_weightnorm(next_layer, nout_embed, var_scope_name="linear_mapping_after_cnn")
-        else:
-            # for refer it takes only the last one
-            next_layer = linear_mapping_weightnorm(next_layer[:, -1:, :], nout_embed, var_scope_name="linear_mapping_after_cnn")
-        next_layer = tf.contrib.layers.dropout(
-            inputs=next_layer,
-            keep_prob=out_dropout_keep_prob,
-            is_training=is_training)
-
-        # next_layer = linear_mapping_weightnorm(
-        #     next_layer, vocab_size,
-        #     in_dim=nout_embed,
-        #     dropout=out_dropout_keep_prob,
-        #     var_scope_name="logits_before_softmax")
-
-    return next_layer, att_out, att_score
-
-
-def conv_decoder_stack(target_embed, enc_states, attention_states, inputs, nhids_list, kwidths_list, dropout_dict, is_training):
+def conv_decoder_stack(target_embed, attention_keys, attention_values, inputs, enc_padding_mask,
+                       nhids_list, kwidths_list, dropout_dict, is_training):
     next_layer = inputs
     att_outs = []
     att_scores = []
@@ -576,7 +509,7 @@ def conv_decoder_stack(target_embed, enc_states, attention_states, inputs, nhids
 
         # add attention
         # decoder output -->linear mapping to embed, + target embed,  query decoder output a, softmax --> scores, scores*encoder_output_c-->output,  output--> linear mapping to nhid+  decoder_output -->
-        att_out, att_score = make_attention(target_embed, enc_states, attention_states, next_layer, layer_idx)
+        att_out, att_score = make_attention(target_embed, attention_keys, attention_values, next_layer, layer_idx, enc_padding_mask)
         att_outs.append(att_out)
         att_scores.append(att_score)
         # att_out += linear_mapping_weightnorm(_att_out, _att_out.get_shape().as_list()[-1], "linear_mapping_att_out_"+str(layer_idx))
@@ -616,10 +549,10 @@ def linear_mapping_stupid(inputs, out_dim, in_dim=None, dropout=1.0, var_scope_n
   return output
 
 
-def make_attention(target_embed, encoder_outputs, attention_states, decoder_hidden, layer_idx):
+def make_attention(target_embed, attention_keys, attention_values, decoder_hidden, layer_idx, enc_padding_mask):
     # this is the so called dot product attention
-    attention_keys = encoder_outputs
-    attention_values = attention_states
+    # TODO: the tf.sqrt(0.5) should be replaced to make the attention scaled dot product attention
+    # enc_padding_mask: M*N2
     with tf.variable_scope("attention_layer_" + str(layer_idx)):
         embed_size = target_embed.get_shape().as_list()[-1]
         # k
@@ -629,6 +562,8 @@ def make_attention(target_embed, encoder_outputs, attention_states, decoder_hidd
         attention_key_proj = linear_mapping_weightnorm(attention_keys, embed_size, var_scope_name="linear_mapping_enc_output")
 
         att_score = tf.matmul(dec_rep, attention_key_proj, transpose_b=True)
+        enc_padding_mask = tf.tile(tf.expand_dims(enc_padding_mask, axis=1), [1, att_score.get_shape().as_list()[1], 1])
+        att_score *= enc_padding_mask
         # M*N1*K  ** M*N2*K  --> M*N1*N2
         att_score = tf.nn.softmax(att_score)
 

@@ -5,7 +5,7 @@ from __future__ import print_function
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 from tensorflow.python.client import timeline
-from utils import add_encoder
+from utils import lstm_encoder
 import dis_utils
 
 
@@ -137,7 +137,7 @@ class Seq2ClassModel(object):
       input_emb = tf.reduce_max(cnn_outputs, axis=1)
 
     with tf.variable_scope("condition_encoder"):
-      _, condition_emb = add_encoder(
+      _, condition_emb = lstm_encoder(
           emb_conditions, condition_lens,
           hidden_dim=self.hps.hidden_dim, rand_unif_init=self.rand_unif_init)
 

@@ -25,10 +25,10 @@ from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import math_ops
-from gen_utils import get_local_global_features
+# from gen_utils import get_local_global_features
 from utils import linear_mapping_weightnorm
-from utils import global_selective_fn
-from utils import conv_block
+# from utils import global_selective_fn
+from utils import conv_decoder_stack
 from utils import linear
 from utils import maxout
 
@@ -39,53 +39,16 @@ from utils import maxout
 # attention mechanism using the new seq2seq library for tensorflow 1.0:
 # https://www.tensorflow.org/api_guides/python/contrib.seq2seq#Attention
 
-
-def lstm_attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding_mask,
-                           cell, initial_state_attention=False, use_coverage=False,
+def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attention_keys, attention_values,
+                           initial_state, cell, initial_state_attention=False, use_coverage=False,
                            prev_coverage=None, local_attention_layers=3):
-    """
-    Args:
-      decoder_inputs: A list of 2D Tensors [batch_size x input_size].
-      initial_state: 2D Tensor [batch_size x cell.state_size].
-      encoder_states: 3D Tensor [batch_size x attn_length x attn_size].
-      cell: rnn_cell.RNNCell defining the cell function and size.
-      initial_state_attention:
-        Note that this attention decoder passes each decoder input through a
-        linear layer with the previous step's context vector to get a modified
-        version of the input. If initial_state_attention is False, on the first
-        decoder step the "previous context vector" is just a zero vector. If
-        initial_state_attention is True, we use initial_state to (re)calculate
-        the previous step's context vector. We set this to False for train/eval
-        mode (because we call attention_decoder once for all decoder steps) and
-        True for decode mode (because we call attention_decoder once for each
-        decoder step).
-      pointer_gen: boolean. If True, calculate the generation probability p_gen
-      for each decoder step.
-      use_coverage: boolean. If True, use coverage mechanism.
-      prev_coverage:
-        If not None, a tensor with shape (batch_size, attn_length). The previous
-        step's coverage vector. This is only not None in decode mode when using
-        coverage.
-        is coverage only for decoding?
-
-    Returns:
-      outputs: A list of the same length as decoder_inputs of 2D Tensors of
-        shape [batch_size x cell.output_size]. The output vectors.
-      state: The final state of the decoder. A tensor shape [batch_size x
-      cell.state_size].
-      attn_dists: A list containing tensors of shape (batch_size,attn_length).
-        The attention distributions for each decoder step.
-      p_gens: List of scalars. The values of p_gen for each decoder step. Empty
-      list if pointer_gen=False.
-      coverage: Coverage vector on the last step computed. None if
-      use_coverage=False.
-    """
     # can this be applied to beam repetitive batch?
     with variable_scope.variable_scope("attention_decoder"):
+        encoder_states = attention_keys
         # if this line fails, it's because the batch size isn't defined
-        batch_size = array_ops.shape(encoder_states)[0]
+        batch_size = array_ops.shape(decoder_inputs)[0]
         # if this line fails, it's because the attention length isn't defined
-        attn_size = encoder_states.get_shape()[2].value
+        attn_size = attention_keys.get_shape()[2].value
 
         # Reshape encoder_states (need to insert a dim)
         # now is shape (batch_size, attn_len, 1, attn_size)
@@ -99,42 +62,6 @@ def lstm_attention_decoder(decoder_inputs, initial_state, encoder_states, enc_pa
         # (W_s s_t).
         # We set it to be equal to the size of the encoder states.
         attention_vec_size = attn_size
-
-        # Get the global attention: https://openreview.net/pdf?id=HyzbhfWRW
-        local_features, global_feature = get_local_global_features(
-            encoder_states, local_attention_layers, attention_vec_size)
-        hidden_dim = global_feature.get_shape().as_list()[-1]
-
-        with variable_scope.variable_scope("combined_attention"):
-            c = []
-            for n, lf in enumerate(local_features):
-                if n > 0:
-                    variable_scope.get_variable_scope().reuse_variables()
-                c_i = linear(lf + global_feature, 1, True, scope="u")
-                c.append(tf.squeeze(c_i))
-
-        # (batch_size, 3, hidden_num) dot (batch_size, 3, hidden_dim)
-        weighted_local_features = tf.multiply(
-            tf.stack(local_features, axis=1),
-            tf.tile(tf.expand_dims(tf.nn.softmax(tf.stack(c, axis=1)), 2), [1, 1, hidden_dim])
-        )
-
-        global_feature = linear(tf.reduce_sum(weighted_local_features, axis=1),
-                                attention_vec_size, True, scope="global_feature")
-
-        # Get the weight matrix W_h and apply it to each encoder state to get
-        # (W_h h_i), the encoder features
-        # Input:   batch,         in_hight,     in_width,    in_channels
-        #          batch_size,    attn_len,     1,           attn_size
-        # Filter:  filter_height, filter_width, in_channels, out_channels
-        #          1,             1,            attn_size,   attention_vec_size
-        # Output:  batch,         in_hight,     in_width,    out_channels
-        #          batch_size,    attn_len,     1,           attention_vec_size
-
-        # add the global feature to the encoder state forming the new encoder
-        # state
-        encoder_states = global_selective_fn(tf.squeeze(encoder_states, [2]), global_feature)
-        encoder_states = tf.expand_dims(encoder_states, axis=2)
 
         W_h = variable_scope.get_variable("W_h", [1, 1, attn_size, attention_vec_size])
         encoder_features = nn_ops.conv2d(encoder_states, W_h, [1, 1, 1, 1], "SAME")
@@ -176,8 +103,8 @@ def lstm_attention_decoder(decoder_inputs, initial_state, encoder_states, enc_pa
 
                 def masked_attention(e):
                     """Take softmax of e then apply enc_padding_mask and re-normalize"""
+                    e *= enc_padding_mask  # apply mask
                     attn_dist = nn_ops.softmax(e)  # take softmax. shape (batch_size, attn_length)
-                    attn_dist *= enc_padding_mask  # apply mask
                     masked_sums = tf.reduce_sum(attn_dist, axis=1)  # shape (batch_size)
                     return attn_dist / tf.reshape(masked_sums, [-1, 1])  # re-normalize
 
@@ -300,8 +227,10 @@ def lstm_attention_decoder(decoder_inputs, initial_state, encoder_states, enc_pa
         return outputs, p_gens, attn_dists, state, coverage
 
 
-def conv_attention_decoder(emb_dec_inputs, enc_states, attention_states, vocab_size, is_training,
-                           embedding_dropout_keep_prob=0.9, out_dropout_keep_prob=0.9):
+def conv_attention_decoder(emb_dec_inputs, enc_padding_mask, attention_keys, attention_values,
+                           vocab_size, is_training, cnn_layers=4, nout_embed=256,
+                           nhids_list=[256, 256, 256, 256], kwidths_list=[3, 3, 3, 3],
+                           embedding_dropout_keep_prob=0.9, nhid_dropout_keep_prob=0.9, out_dropout_keep_prob=0.9):
 
     input_shape = emb_dec_inputs.get_shape().as_list()    # static shape. may has None
     # Apply dropout to embeddings
@@ -310,8 +239,32 @@ def conv_attention_decoder(emb_dec_inputs, enc_states, attention_states, vocab_s
         keep_prob=embedding_dropout_keep_prob,
         is_training=is_training)
 
-    outputs, att_out, attn_dists = conv_block(inputs, enc_states, attention_states, vocab_size, True)
-    p_gens = linear_mapping_weightnorm(tf.concat(axis=-1, values=[outputs, att_out]), 1, 0.9, "p_gens")
+    with tf.variable_scope("decoder_cnn"):
+        next_layer = inputs
+        if cnn_layers > 0:
+
+            # mapping emb dim to hid dim
+            next_layer = linear_mapping_weightnorm(
+                next_layer, nhids_list[0], dropout=embedding_dropout_keep_prob,
+                var_scope_name="linear_mapping_before_cnn")
+
+            next_layer, att_out, attn_dists = conv_decoder_stack(
+                inputs, attention_keys, attention_values, next_layer, enc_padding_mask,
+                nhids_list, kwidths_list, {'src': embedding_dropout_keep_prob, 'hid': nhid_dropout_keep_prob}, is_training=is_training)
+
+    with tf.variable_scope("softmax"):
+        if is_training:
+            next_layer = linear_mapping_weightnorm(next_layer, nout_embed, var_scope_name="linear_mapping_after_cnn")
+        else:
+            # for refer it takes only the last one
+            next_layer = linear_mapping_weightnorm(next_layer[:, -1:, :], nout_embed, var_scope_name="linear_mapping_after_cnn")
+        outputs = tf.contrib.layers.dropout(
+            inputs=next_layer,
+            keep_prob=out_dropout_keep_prob,
+            is_training=is_training)
+
+    # outputs, att_out, attn_dists = conv_block(inputs, enc_states, attention_states, vocab_size, True)
+    p_gens = linear_mapping_weightnorm(tf.concat(axis=-1, values=[outputs, att_out]), 1, 1, "p_gens")
     logits = linear_mapping_weightnorm(outputs, vocab_size, dropout=out_dropout_keep_prob, var_scope_name="logits_before_softmax")
     # reshape for the length to unstack
     p_gens = tf.reshape(p_gens, [-1, input_shape[1], 1])
