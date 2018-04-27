@@ -249,13 +249,12 @@ def conv_attention_decoder(emb_enc_inputs, enc_padding_mask, emb_dec_inputs, att
     with tf.variable_scope("decoder_cnn"):
         next_layer = dec_labels
         if cnn_layers > 0:
-
             # mapping emb dim to hid dim
             next_layer = linear_mapping_weightnorm(
                 next_layer, nhids_list[0], dropout=embedding_dropout_keep_prob,
                 var_scope_name="linear_mapping_before_cnn")
 
-            next_layer, att_out, attn_dists = conv_decoder_stack(
+            next_layer, att_out, attn_dist = conv_decoder_stack(
                 enc_inputs, dec_labels, attentions_keys, next_layer, enc_padding_mask,
                 nhids_list, kwidths_list, is_training=is_training, dropout_dict={
                     'src': embedding_dropout_keep_prob,
@@ -273,11 +272,11 @@ def conv_attention_decoder(emb_enc_inputs, enc_padding_mask, emb_dec_inputs, att
             keep_prob=out_dropout_keep_prob,
             is_training=is_training)
 
-    # outputs, att_out, attn_dists = conv_block(inputs, enc_states, attention_states, vocab_size, True)
+    # outputs, att_out, attn_dist = conv_block(inputs, enc_states, attention_states, vocab_size, True)
     p_gens = linear_mapping_weightnorm(tf.concat(axis=-1, values=[outputs, att_out]), 1, 1, "p_gens")
     logits = linear_mapping_weightnorm(outputs, vocab_size, dropout=out_dropout_keep_prob, var_scope_name="logits_before_softmax")
     # reshape for the length to unstack
     p_gens = tf.reshape(p_gens, [-1, input_shape[1], 1])
     logits = tf.reshape(logits, [-1, input_shape[1], vocab_size])
 
-    return logits, p_gens, attn_dists, None, None
+    return logits, p_gens, attn_dist, None, None

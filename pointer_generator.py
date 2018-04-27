@@ -30,7 +30,6 @@ from attention_decoder import conv_attention_decoder
 from utils import lstm_encoder
 from utils import linear
 from utils import conv_encoder
-from utils import linear_mapping_weightnorm
 from codecs import open
 from six.moves import xrange
 from tensorflow.contrib.rnn import LSTMStateTuple

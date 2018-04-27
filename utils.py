@@ -169,7 +169,9 @@ def linear_mapping_weightnorm(inputs, out_dim, dropout=1.0, var_scope_name="line
     input_shape = inputs.get_shape().as_list()    # static shape. may has None
     input_shape_tensor = tf.shape(inputs)
     #  use weight normalization (Salimans & Kingma, 2016)  w = g* v/2-norm(v)
-    V = tf.get_variable('V', shape=[int(input_shape[-1]), out_dim], dtype=tf.float32, initializer=tf.random_normal_initializer(mean=0, stddev=tf.sqrt(dropout*1.0/int(input_shape[-1]))), trainable=True)
+    V = tf.get_variable(
+        'V', shape=[int(input_shape[-1]), out_dim], dtype=tf.float32,
+        initializer=tf.random_normal_initializer(mean=0, stddev=tf.sqrt(dropout*1.0/int(input_shape[-1]))), trainable=True)
     V_norm = tf.norm(V.initialized_value(), axis=0)  # V shape is M*N,  V_norm shape is N
     g = tf.get_variable('g', dtype=tf.float32, initializer=V_norm, trainable=True)
     b = tf.get_variable('b', shape=[out_dim], dtype=tf.float32, initializer=tf.zeros_initializer(), trainable=True)   # weightnorm bias is init zero
@@ -177,7 +179,10 @@ def linear_mapping_weightnorm(inputs, out_dim, dropout=1.0, var_scope_name="line
     assert len(input_shape) == 3
     inputs = tf.reshape(inputs, [-1, input_shape[-1]])
     inputs = tf.matmul(inputs, V)
-    inputs = tf.reshape(inputs, [input_shape_tensor[0], -1, out_dim])
+    if input_shape[-2] is not None:
+        inputs = tf.reshape(inputs, [input_shape_tensor[0], input_shape[-2], out_dim])
+    else:
+        inputs = tf.reshape(inputs, [input_shape_tensor[0], -1, out_dim])
     # inputs = tf.matmul(inputs, V)    # x*v
 
     scaler = tf.div(g, tf.norm(V, axis=0))   # g/2-norm(v)
@@ -249,8 +254,8 @@ def lstm_encoder(encoder_inputs, seq_len, hidden_dim,
 
 def conv_encoder(inputs, seq_len, is_training,
                  keep_prob=0.9, cnn_layers=6,
-                 nhids_list=[256, 256, 256, 512, 512, 512],
-                 kwidths_list=[3, 3, 3, 5, 5, 5]):
+                 nhids_list=[256, 256, 256, 256, 256, 256],
+                 kwidths_list=[3, 3, 3, 3, 3, 3]):
     embed_size = inputs.get_shape().as_list()[-1]
 
     #  Apply dropout to embeddings
@@ -265,7 +270,6 @@ def conv_encoder(inputs, seq_len, is_training,
             # mapping emb dim to hid dim
             next_layer = linear_mapping_weightnorm(next_layer, nhids_list[0], dropout=keep_prob, var_scope_name="linear_mapping_before_cnn")
             attentions_keys, next_layer = conv_encoder_stack(next_layer, nhids_list, kwidths_list, {'src': keep_prob, 'hid': keep_prob}, is_training=is_training)
-
             next_layer = linear_mapping_weightnorm(next_layer, embed_size, var_scope_name="linear_mapping_after_cnn")
             #  The encoder stack will receive gradients *twice* for each attention pass: dot product and weighted sum.
             #  cnn = nn.GradMultiply(cnn, 1 / (2 * nattn))
@@ -483,7 +487,6 @@ class MaxOut(base.Layer):
 def conv_decoder_stack(enc_inputs, dec_labels, attentions_keys, inputs, enc_padding_mask,
                        nhids_list, kwidths_list, dropout_dict, is_training):
     next_layer = inputs
-    att_outs = []
 
     for layer_idx in range(len(nhids_list)):
         nin = nhids_list[layer_idx] if layer_idx == 0 else nhids_list[layer_idx-1]
@@ -510,8 +513,7 @@ def conv_decoder_stack(enc_inputs, dec_labels, attentions_keys, inputs, enc_padd
 
         # add attention
         # decoder output -->linear mapping to embed, + target embed,  query decoder output a, softmax --> scores, scores*encoder_output_c-->output,  output--> linear mapping to nhid+  decoder_output -->
-        att_out = multihead_attention(enc_inputs, dec_labels, attentions_keys, next_layer, layer_idx, enc_padding_mask)
-        att_outs.append(att_out)
+        att_out, attn_dist = multihead_attention(enc_inputs, dec_labels, attentions_keys, next_layer, layer_idx, enc_padding_mask)
         # att_out += linear_mapping_weightnorm(_att_out, _att_out.get_shape().as_list()[-1], "linear_mapping_att_out_"+str(layer_idx))
         next_layer = (next_layer + att_out) * tf.sqrt(0.5)
 
@@ -521,10 +523,7 @@ def conv_decoder_stack(enc_inputs, dec_labels, attentions_keys, inputs, enc_padd
 
     # this remains a problem on how to combine the outs and scores in different
     # layers
-    # matrix_outs = tf.get_variable("Matrix_outs", [nout * len(nhids_list), nout])
-    # matrix_scores = tf.get_variable("Matrix_scores", [len(nhids_list), 1])
-    att_out = linear_mapping_stupid(tf.concat(axis=-1, values=att_outs), nout, "matrix_outs")
-    return next_layer, att_out
+    return next_layer, att_out, attn_dist
 
 
 def linear_mapping_stupid(inputs, out_dim, in_dim=None, dropout=1.0, var_scope_name="linear_mapping"):
@@ -560,34 +559,41 @@ def multihead_attention(enc_inputs, dec_labels, attentions_keys, decoder_hidden,
     att_outs = []
     att_scores = []
     attentions_keys = tf.unstack(attentions_keys)
+    enc_padding_mask = tf.tile(tf.expand_dims(enc_padding_mask, axis=1),
+                               [1, decoder_hidden.get_shape().as_list()[1], 1])
+
     with tf.variable_scope("attention_layer_" + str(layer_idx)):
         embed_size = dec_labels.get_shape().as_list()[-1]
         for k, attention_keys in enumerate(attentions_keys):
             # k
-            dec_hidden_proj = linear_mapping_weightnorm(decoder_hidden, embed_size, var_scope_name="linear_mapping_att_query" + k)
+            dec_hidden_proj = linear_mapping_weightnorm(decoder_hidden, embed_size, var_scope_name="linear_mapping_att_query" + str(k))
             # M*N1*k1 --> M*N1*k
             att_query = (dec_hidden_proj + dec_labels) * tf.sqrt(0.5)
-            attention_key_proj = linear_mapping_weightnorm(attention_keys, embed_size, var_scope_name="linear_mapping_att_key" + k)
-
-            attention_value_proj = linear_mapping_weightnorm(enc_inputs, embed_size, var_scope_name="linear_mapping_att_value" + k)
+            attention_key_proj = linear_mapping_weightnorm(attention_keys, embed_size, var_scope_name="linear_mapping_att_key" + str(k))
+            attention_value_proj = linear_mapping_weightnorm(enc_inputs, embed_size, var_scope_name="linear_mapping_att_value" + str(k))
 
             att_score = tf.matmul(att_query, attention_key_proj, transpose_b=True)
             # M*N1*K  ** M*N2*K  --> M*N1*N2
-            enc_padding_mask = tf.tile(tf.expand_dims(enc_padding_mask, axis=1), [1, att_score.get_shape().as_list()[1], 1])
             att_score *= enc_padding_mask
+            att_scores.append(att_score)
             att_score = tf.nn.softmax(att_score)
 
             length = tf.cast(tf.shape(attention_value_proj), tf.float32)
             att_out = tf.matmul(att_score, attention_value_proj) * length[1] * tf.sqrt(1.0/length[1])
             # M*N1*N2  ** M*N2*K   --> M*N1*k
             att_outs.append(att_out)
-            att_scores.append(att_score)
 
         att_out = tf.concat(axis=-1, values=att_outs)
         att_out = linear_mapping_weightnorm(att_out, decoder_hidden.get_shape().as_list()[-1], var_scope_name="linear_mapping_att_out")
-        att_scores = tf.concat(axis=-1, values=att_scores)
-        att_score = linear_mapping_weightnorm(att_scores, 1, var_scope_name="linear_mapping_att_scores")
-        att_score = tf.squeeze(att_score)
+        _att_scores = tf.stack(axis=-1, values=att_scores)
+        SV = tf.get_variable(
+            'SV', shape=[int(_att_scores.get_shape().as_list()[-1]), 1], dtype=tf.float32, trainable=True)
+        _att_scores = tf.reshape(_att_scores, [-1, _att_scores.get_shape().as_list()[-1]])
+        att_score = tf.matmul(_att_scores, SV)
+        att_score = tf.reshape(
+            att_score,
+            [tf.shape(att_scores[0])[0], att_scores[0].get_shape().as_list()[1], tf.shape(att_scores[0])[-1]])
+        att_score = tf.nn.softmax(att_score)
     return att_out, att_score
 
 
