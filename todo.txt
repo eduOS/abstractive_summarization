@@ -60,6 +60,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 48. substitue the MCMC with the stocastic MCMC: https://arxiv.org/pdf/1706.05439.pdf
 49. add the dropout mechenism or maxout better to the network, Selective Encoding for Abstractive Sentence Summarization
 50. the unknown can be not transformed to token and be passed to the next step
+51. the attention mechanism and the copy mechanism should not share the same distribution
 
 # problems
 1. cannot end

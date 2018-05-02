@@ -28,7 +28,6 @@ from termcolor import colored
 from attention_decoder import attention_decoder
 from utils import add_encoder
 from utils import reduce_states
-from utils import selective_fn
 from codecs import open
 from six.moves import xrange
 
@@ -256,8 +255,6 @@ class PointerGenerator(object):
             self.dec_in_state = reduce_states(
                 fw_st, bw_st, hidden_dim=self.hps.hidden_dim,
                 activation_fn=tf.tanh, trunc_norm_init_std=hps.trunc_norm_init_std)
-
-            self.enc_states = selective_fn(self.enc_states, self.dec_in_state)
 
             with tf.variable_scope('decoder') as decoder_scope:
                 self.attn_dists, self.p_gens, self.coverage, \
