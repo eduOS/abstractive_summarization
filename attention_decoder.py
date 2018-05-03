@@ -205,10 +205,12 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
                 # Calculate the context vector from attn_dist and encoder_states
                 context_vector = math_ops.reduce_sum(
                     array_ops.reshape(attn_dist, [batch_size, -1, 1, 1]) * encoder_states, [1, 2])
+                copy_vector = math_ops.reduce_sum(
+                    array_ops.reshape(copy_dist, [batch_size, -1, 1, 1]) * encoder_states, [1, 2])
                 # shape (batch_size, attn_size).
                 context_vector = array_ops.reshape(context_vector, [-1, attn_size])
 
-            return context_vector, copy_dist, coverage
+            return context_vector, copy_vector, copy_dist, coverage
 
         outputs = []
         copy_dists = []
@@ -224,7 +226,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
             # can pass it through a linear layer with this step's input to get a
             # modified version of the input
             # in decode mode, this is what updates the coverage vector
-            context_vector, _, coverage = copy_attention(initial_state, coverage)
+            context_vector, _, _, coverage = copy_attention(initial_state, coverage)
         for i, inp in enumerate(decoder_inputs):
             # when should this terminate due to beam size
             if i > 0:
@@ -248,15 +250,15 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
                 # you need this because you've already run the initial
                 # attention(...) call
                 with variable_scope.variable_scope(variable_scope.get_variable_scope(), reuse=True):
-                    context_vector, copy_dist, _ = copy_attention(state, coverage)
+                    context_vector, copy_vector, copy_dist, _ = copy_attention(state, coverage)
                     # don't allow coverage to update
             else:
-                context_vector, copy_dist, coverage = copy_attention(state, coverage)
+                context_vector, copy_vector, copy_dist, coverage = copy_attention(state, coverage)
             copy_dists.append(copy_dist)
 
             # Calculate p_gen
             with tf.variable_scope('calculate_pgen'):
-                p_gen = linear([context_vector, state.c, state.h, x], 1, True)
+                p_gen = linear([copy_vector, state.c, state.h, x], 1, True)
                 # a scalar
                 p_gen = tf.sigmoid(p_gen)
                 p_gens.append(p_gen)
