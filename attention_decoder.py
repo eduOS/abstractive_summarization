@@ -89,6 +89,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
         # now is shape (batch_size, attn_len, 1, attn_size)
         # the length is one
         encoder_states = tf.expand_dims(encoder_states, axis=2)
+        copy_states = tf.expand_dims(encoder_states, axis=2)
 
         # To calculate attention, we calculate
         #   v^T tanh(W_h h_i + W_s s_t + b_attn)
@@ -110,10 +111,12 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
         # shape (batch_size,attn_length,1,attention_vec_size)
         # why add transfer this to the same shape of the input?
         encoder_features = nn_ops.conv2d(encoder_states, W_h, [1, 1, 1, 1], "SAME")
+        copy_features = nn_ops.conv2d(copy_states, W_h, [1, 1, 1, 1], "SAME")
         # this is just to create a tensor of this shape
 
         # Get the weight vectors v and w_c (w_c is for coverage)
         v = variable_scope.get_variable("v", [attention_vec_size])
+        vk = variable_scope.get_variable("vk", [attention_vec_size])
 
         if use_coverage:
             with variable_scope.variable_scope("coverage"):
@@ -184,9 +187,14 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
                         v * math_ops.tanh(encoder_features + decoder_features),
                         [2, 3])  # calculate e
 
+                    k = math_ops.reduce_sum(
+                        vk * math_ops.tanh(copy_features + decoder_features),
+                        [2, 3])  # calculate e
+
                     # Take softmax of e to get the attention distribution
                     # shape (batch_size, attn_length)
                     attn_dist = masked_attention(e)
+                    copy_dist = masked_attention(k)
 
                     if use_coverage:  # first step of training
                         coverage = tf.expand_dims(tf.expand_dims(attn_dist, 2), 2)
