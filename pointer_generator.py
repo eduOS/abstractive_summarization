@@ -459,19 +459,13 @@ class PointerGenerator(object):
         # emb_enc_dim = self._emb_enc_inputs.get_shape().as_list()[-1]
         # attention_states = linear_mapping_weightnorm(self.attention_keys, emb_enc_dim) + self._emb_enc_inputs
         # outputs, out_state, attn_dists, p_gens, coverage
-        logits, p_gens, attn_dists, _, _ = conv_attention_decoder(
+        logits, _, _, _, _ = conv_attention_decoder(
             emb_dec_inputs, self.enc_padding_mask, self.attention_keys,
             self.attention_values, vsize, is_training)
 
         vocab_dists = tf.unstack(tf.nn.softmax(logits), axis=1)
-        p_gens = tf.unstack(tf.sigmoid(p_gens), axis=1)
-        attn_dists = tf.unstack(attn_dists, axis=1)
 
-        # For pointer-generator model, calc final distribution from copy
-        # distribution and vocabulary distribution, then take log
-        final_dists = self._calc_final_dist(p_gens, vocab_dists, attn_dists)
-
-        return attn_dists, p_gens, final_dists, None, None
+        return None, None, vocab_dists, None, None
 
     def build_graph(self):
         """Add the placeholders, model, global step, train_op and summaries to

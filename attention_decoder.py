@@ -248,7 +248,7 @@ def conv_attention_decoder(emb_dec_inputs, enc_padding_mask, attention_keys, att
                 next_layer, nhids_list[0], dropout=embedding_dropout_keep_prob,
                 var_scope_name="linear_mapping_before_cnn")
 
-            next_layer, att_out, attn_dists = conv_decoder_stack(
+            next_layer = conv_decoder_stack(
                 inputs, attention_keys, attention_values, next_layer, enc_padding_mask,
                 nhids_list, kwidths_list, {'src': embedding_dropout_keep_prob, 'hid': nhid_dropout_keep_prob}, is_training=is_training)
 
@@ -263,11 +263,8 @@ def conv_attention_decoder(emb_dec_inputs, enc_padding_mask, attention_keys, att
             keep_prob=out_dropout_keep_prob,
             is_training=is_training)
 
-    # outputs, att_out, attn_dists = conv_block(inputs, enc_states, attention_states, vocab_size, True)
-    p_gens = linear_mapping_weightnorm(tf.concat(axis=-1, values=[outputs, att_out]), 1, 1, "p_gens")
     logits = linear_mapping_weightnorm(outputs, vocab_size, dropout=out_dropout_keep_prob, var_scope_name="logits_before_softmax")
     # reshape for the length to unstack
-    p_gens = tf.reshape(p_gens, [-1, input_shape[1], 1])
     logits = tf.reshape(logits, [-1, input_shape[1], vocab_size])
 
-    return logits, p_gens, attn_dists, None, None
+    return logits, None, None, None, None

@@ -481,8 +481,6 @@ class MaxOut(base.Layer):
 def conv_decoder_stack(target_embed, attention_keys, attention_values, inputs, enc_padding_mask,
                        nhids_list, kwidths_list, dropout_dict, is_training):
     next_layer = inputs
-    att_outs = []
-    att_scores = []
 
     for layer_idx in range(len(nhids_list)):
         nin = nhids_list[layer_idx] if layer_idx == 0 else nhids_list[layer_idx-1]
@@ -509,25 +507,15 @@ def conv_decoder_stack(target_embed, attention_keys, attention_values, inputs, e
 
         # add attention
         # decoder output -->linear mapping to embed, + target embed,  query decoder output a, softmax --> scores, scores*encoder_output_c-->output,  output--> linear mapping to nhid+  decoder_output -->
-        att_out, att_score = make_attention(target_embed, attention_keys, attention_values, next_layer, layer_idx, enc_padding_mask)
-        att_outs.append(att_out)
-        att_scores.append(att_score)
+        att_out = make_attention(target_embed, attention_keys, attention_values, next_layer, layer_idx, enc_padding_mask)
         # att_out += linear_mapping_weightnorm(_att_out, _att_out.get_shape().as_list()[-1], "linear_mapping_att_out_"+str(layer_idx))
         next_layer = (next_layer + att_out) * tf.sqrt(0.5)
 
         # add res connections
-        next_layer += (next_layer + res_inputs) * tf.sqrt(0.5)
+        next_layer = (next_layer + res_inputs) * tf.sqrt(0.5)
         # why they are not accumulated in a list?
 
-    # this remains a problem on how to combine the outs and scores in different
-    # layers
-    # matrix_outs = tf.get_variable("Matrix_outs", [nout * len(nhids_list), nout])
-    # matrix_scores = tf.get_variable("Matrix_scores", [len(nhids_list), 1])
-    att_out = linear_mapping_stupid(tf.concat(axis=-1, values=att_outs), nout, "matrix_outs")
-    scores = tf.stack(axis=-1, values=att_scores)
-    att_score = tf.reduce_mean(scores, axis=-1)
-    att_score = tf.nn.softmax(att_score)
-    return next_layer, att_out, att_score
+    return next_layer
 
 
 def linear_mapping_stupid(inputs, out_dim, in_dim=None, dropout=1.0, var_scope_name="linear_mapping"):
@@ -572,7 +560,7 @@ def make_attention(target_embed, attention_keys, attention_values, decoder_hidde
         # M*N1*N2  ** M*N2*K   --> M*N1*k
 
         att_out = linear_mapping_weightnorm(att_out, decoder_hidden.get_shape().as_list()[-1], var_scope_name="linear_mapping_att_out")
-    return att_out, att_score
+    return att_out
 
 
 def transpose_batch_time(x):
