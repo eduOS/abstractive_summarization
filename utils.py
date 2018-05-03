@@ -278,7 +278,7 @@ def selective_fn(encoder_outputs, dec_in_state):
 
         _, _, sele_ar = tf.while_loop(
             cond, mask_fn, (enc_outputs, tf.constant(0, dtype=tf.int32), sele_ar))
-        new_enc_outputs = tf.transpose(tf.squeeze(sele_ar.stack()), perm=[1, 0])
+        new_enc_outputs = tf.transpose(tf.squeeze(sele_ar.stack()), perm=[1, 0, 2])
     return new_enc_outputs
 
 

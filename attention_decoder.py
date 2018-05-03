@@ -77,6 +77,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
     """
 
     copy_states = selective_fn(encoder_states, initial_state)
+    # copy_states = tf.squeeze(copy_states, [3])
 
     # can this be applied to beam repetitive batch?
     with variable_scope.variable_scope("attention_decoder"):
@@ -89,7 +90,7 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
         # now is shape (batch_size, attn_len, 1, attn_size)
         # the length is one
         encoder_states = tf.expand_dims(encoder_states, axis=2)
-        copy_states = tf.expand_dims(encoder_states, axis=2)
+        copy_states = tf.expand_dims(copy_states, axis=2)
 
         # To calculate attention, we calculate
         #   v^T tanh(W_h h_i + W_s s_t + b_attn)
