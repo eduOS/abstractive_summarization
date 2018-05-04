@@ -206,9 +206,10 @@ def attention_decoder(decoder_inputs, initial_state, encoder_states, enc_padding
                 context_vector = math_ops.reduce_sum(
                     array_ops.reshape(attn_dist, [batch_size, -1, 1, 1]) * encoder_states, [1, 2])
                 copy_vector = math_ops.reduce_sum(
-                    array_ops.reshape(copy_dist, [batch_size, -1, 1, 1]) * encoder_states, [1, 2])
+                    array_ops.reshape(copy_dist, [batch_size, -1, 1, 1]) * copy_states, [1, 2])
                 # shape (batch_size, attn_size).
                 context_vector = array_ops.reshape(context_vector, [-1, attn_size])
+                copy_vector = array_ops.reshape(copy_vector, [-1, attn_size])
 
             return context_vector, copy_vector, copy_dist, coverage
 
