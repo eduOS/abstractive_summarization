@@ -39,7 +39,7 @@ from utils import maxout
 # attention mechanism using the new seq2seq library for tensorflow 1.0:
 # https://www.tensorflow.org/api_guides/python/contrib.seq2seq#Attention
 
-def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attentions_keys, initial_state,
+def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attention_keys, initial_state,
                            cell, initial_state_attention=False, use_coverage=False,
                            prev_coverage=None, local_attention_layers=3):
     # can this be applied to beam repetitive batch?
@@ -48,7 +48,7 @@ def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attentions_keys, in
         # if this line fails, it's because the batch size isn't defined
         batch_size = array_ops.shape(decoder_inputs)[0]
         # if this line fails, it's because the attention length isn't defined
-        attn_size = attention_keys.get_shape()[2].value
+        attn_size = encoder_states.get_shape()[2].value
 
         # Reshape encoder_states (need to insert a dim)
         # now is shape (batch_size, attn_len, 1, attn_size)
@@ -159,7 +159,6 @@ def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attentions_keys, in
 
         outputs = []
         attn_dists = []
-        p_gens = []
         state = initial_state
         coverage = prev_coverage
         # initialize coverage to None or whatever was passed in
@@ -202,29 +201,18 @@ def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attentions_keys, in
                 context_vector, attn_dist, coverage = attention(state, coverage)
             attn_dists.append(attn_dist)
 
-            # Calculate p_gen
-            with tf.variable_scope('calculate_pgen'):
-                p_gen = linear([context_vector, state.c, state.h, x], 1, True)
-                # a scalar
-                # p_gen = maxout(p_gen, 1)
-                # p_gen = tf.reshape(p_gen, 1)
-                p_gen = tf.sigmoid(p_gen)
-                p_gens.append(p_gen)
-
             # Concatenate the cell_output (= decoder state) and the context
             # vector, and pass them through a linear layer
             # This is V[s_t, h*_t] + b in the paper
             with variable_scope.variable_scope("AttnOutputProjection"):
-                output_2 = linear([cell_output] + [context_vector], cell.output_size * 2, True)
-                output = maxout(output_2, cell.output_size)
-                output = tf.reshape(output, [-1, cell.output_size])
+                output = linear([cell_output] + [context_vector], cell.output_size, True)
             outputs.append(output)
 
         # If using coverage, reshape it
         if coverage is not None:
             coverage = array_ops.reshape(coverage, [batch_size, -1])
 
-        return outputs, p_gens, attn_dists, state, coverage
+        return outputs, state, attn_dists
 
 
 def conv_attention_decoder(emb_enc_inputs, enc_padding_mask, emb_dec_inputs, attentions_keys,

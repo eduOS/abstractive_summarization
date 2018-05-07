@@ -106,9 +106,8 @@ tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max 
 tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 100
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
-tf.app.flags.DEFINE_integer('gen_vocab_size', 5000, 'Size of vocabulary. These will be read from the vocabulary file in'
-                            ' order. If the vocabulary file contains fewer words than this number,'
-                            ' or if this number is set to 0, will take all words in the vocabulary file.')
+tf.app.flags.DEFINE_integer('dec_vocab_size', 7500, 'Size of vocabulary of the decoder in the generator.')
+tf.app.flags.DEFINE_integer('enc_vocab_size', 500000, 'Size of vocabulary of the encoder in the generator.')
 tf.app.flags.DEFINE_float('gen_lr', 0.0001, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
@@ -276,7 +275,8 @@ def main(argv):
         'rand_unif_init_mag',
         'gen_vocab_file',
         'vocab_type',
-        'gen_vocab_size',
+        'dec_vocab_size',
+        'enc_vocab_size',
         'hidden_dim',
         'gen_lr',
         'gen_max_gradient',
@@ -424,7 +424,8 @@ def main(argv):
             ckpt_state = tf.train.get_checkpoint_state(emb_path)
             if ckpt_state:
                 ckpt = ckpt_state.model_checkpoint_path
-                generator.saver.restore(sess, ckpt)
+                generator.dec_saver.restore(sess, ckpt)
+                generator.enc_saver.restore(sess, ckpt)
                 print(colored("successfully restored embeddings form %s" % emb_path, 'green'))
             else:
                 print(colored("failed to restore embeddings form %s" % emb_path, 'red'))

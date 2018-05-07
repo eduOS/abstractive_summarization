@@ -48,9 +48,10 @@ class PointerGenerator(object):
     """A class to represent a sequence-to-sequence model for text summarization.
     Supports both baseline mode, pointer-generator mode, and coverage"""
 
-    def __init__(self, hps, vocab):
+    def __init__(self, hps, enc_vocab, dec_vocab):
         self.hps = hps
-        self._vocab = vocab
+        self._enc_vocab = enc_vocab
+        self._dec_vocab = dec_vocab
         self._log_writer = open("./pg_log", "a", "utf-8")
 
     def _add_placeholders(self):
@@ -131,102 +132,11 @@ class PointerGenerator(object):
                 feed_dict[self._dec_batch] = batch.dec_batch
         return feed_dict
 
-    def _calc_final_dist(self, p_gens, vocab_dists, attn_dists):
-        # this is the core function
-        """Calculate the final distribution, for the pointer-generator model
-
-        Args:
-          vocab_dists: The vocabulary distributions. List length max_dec_steps
-          of (batch_size, vsize) arrays. The words are in the order they appear
-          in the vocabulary file.
-          attn_dists: The attention distributions. List length max_dec_steps of
-          (batch_size, attn_len) arrays
-
-        Returns:
-          final_dists: The final distributions. List length max-dec_steps of
-          (batch_size, extended_vsize) arrays.
-        """
-        batch_size = tf.shape(vocab_dists[0])[0]
-        with tf.variable_scope('final_distribution'):
-            # Multiply vocab dists by p_gen and attention dists by (1-p_gen)
-            # these three variable is confusing: vocab_dists, p_gens and
-            # attn_dists
-            vocab_dists = [
-                p_gen * dist
-                for (p_gen, dist) in zip(p_gens, vocab_dists)]
-            # vocab_dists [max_dec_steps * (batch_size, vsize)]
-            attn_dists = [
-                (1 - p_gen) * dist
-                for (p_gen, dist) in zip(p_gens, attn_dists)]
-            # vocab_dists [max_dec_steps * (batch_size, attn_len)]
-
-            # Concatenate some zeros to each vocabulary dist, to hold the
-            # probabilities for in-article OOV words
-            # the maximum (over the batch) size of the extended vocabulary
-            extended_vsize = self._vocab.size() + self.max_art_oovs
-            extra_zeros = tf.zeros((batch_size, self.max_art_oovs))
-            vocab_dists_extended = [
-                tf.concat(axis=1, values=[dist, extra_zeros])
-                for dist in vocab_dists]
-            # list length max_dec_steps of shape (batch_size, extended_vsize)
-
-            # Project the values in the attention distributions onto the
-            # appropriate entries in the final distributions
-            # This means that if a_i = 0.1 and the ith encoder word is w, and w
-            # has index 500 in the vocabulary, then we add 0.1 onto the 500th
-            # entry of the final distribution
-            # This is done for each decoder timestep.
-            # This is fiddly; we use tf.scatter_nd to do the projection
-            batch_nums = tf.range(0, limit=batch_size)
-            # shape (batch_size)
-            batch_nums = tf.expand_dims(batch_nums, 1)
-            # shape (batch_size, 1)
-            attn_len = tf.shape(self.enc_batch_extend_vocab)[1]
-            # number of states we attend over
-            # this is too tedious
-            # shape (batch_size, attn_len)
-            batch_nums = tf.tile(batch_nums, [1, attn_len])
-            indices = tf.stack((batch_nums, self.enc_batch_extend_vocab), axis=2)
-            # shape (batch_size, enc_t, 2)
-            # what is this enc_batch_extend_vocab?
-            shape = [batch_size, extended_vsize]
-            attn_dists_projected = [
-                tf.scatter_nd(indices, copy_dist, shape)
-                for copy_dist in attn_dists]
-            # this causes the error in the rollout!
-            # a detailed article should be written about this
-            # list length max_dec_steps (batch_size, extended_vsize)
-
-            # Add the vocab distributions and the copy distributions together to
-            # get the final distributions
-            # final_dists is a list length max_dec_steps; each entry is a tensor
-            # shape (batch_size, extended_vsize) giving the final distribution
-            # for that decoder timestep
-            # Note that for decoder timesteps and examples corresponding to a
-            # [PAD] token, this is junk - ignore.
-            final_dists = [
-                vocab_dist + copy_dist for (vocab_dist, copy_dist) in zip(
-                    vocab_dists_extended, attn_dists_projected)]
-
-            # OOV part of vocab is max_art_oov long. Not all the sequences in a
-            # batch will have max_art_oov tokens.  That will cause some entries
-            # to be 0 in the distribution, which will result in NaN when
-            # calulating log_dists Add a very small number to prevent that.
-
-            def add_epsilon(dist, epsilon=sys.float_info.epsilon):
-                epsilon_mask = tf.ones_like(dist) * epsilon
-                return dist + epsilon_mask
-
-            final_dists = [add_epsilon(dist) for dist in final_dists]
-
-            return final_dists
-
     def _add_seq2seq(self):
         """Add the whole sequence-to-sequence model to the graph."""
         hps = self.hps
 
         with tf.name_scope('seq2seq'):
-            # Some initializers
             self.rand_unif_init = tf.random_uniform_initializer(
                 -hps.rand_unif_init_mag, hps.rand_unif_init_mag, seed=123)
             self.trunc_norm_init = tf.truncated_normal_initializer(stddev=hps.trunc_norm_init_std)
@@ -237,21 +147,23 @@ class PointerGenerator(object):
             k_rewards_ls = tf.unstack(self.k_rewards, axis=0)
 
             with tf.variable_scope('embeddings'):
-                self.embeddings = tf.get_variable(
-                    'embeddings', [self._vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
-                self.saver = tf.train.Saver({"embeddings": self.embeddings})
-                self._emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
-                self.temp_embedded_seq = tf.nn.embedding_lookup(self.embeddings, self.temp_batch)
+                self.enc_embeddings = tf.get_variable(
+                    'enc_embeddings', [self._enc_vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+                self.dec_embeddings = tf.get_variable(
+                    'dec_embeddings', [self._dec_vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+                self.dec_saver = tf.train.Saver({"dec_embeddings": self.dec_embeddings})
+                self.enc_saver = tf.train.Saver({"enc_embeddings": self.enc_embeddings})
+                self._emb_enc_inputs = tf.nn.embedding_lookup(self.enc_embeddings, self.enc_batch)
                 # for gen training(mode is pretrain_gen) and
                 # beam searching(mode is decode or train_gan)
-                emb_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
+                emb_dec_inputs = [tf.nn.embedding_lookup(self.dec_embeddings, x)
                                   for x in tf.unstack(self._dec_batch, axis=1)]
-                # for evaluation gan(when mode is train_gan)
-                emb_eval_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
+
+                emb_eval_dec_inputs = [tf.nn.embedding_lookup(self.dec_embeddings, x)
                                        for x in tf.unstack(self._eval_dec_batch, axis=1)]
 
                 k_emb_samples_ls = [
-                    [tf.nn.embedding_lookup(self.embeddings, x)
+                    [tf.nn.embedding_lookup(self.dec_embeddings, x)
                      for x in tf.unstack(samples, axis=1)]
                     for samples in k_samples_ls
                 ]
@@ -268,25 +180,21 @@ class PointerGenerator(object):
 
             with tf.variable_scope('decoder') as decoder_scope:
                 decoder_fn = getattr(self, "_" + hps.decoder)
-                self.attn_dists, self.p_gens, final_dists, \
-                    self.coverage, self._dec_out_state = decoder_fn(emb_dec_inputs)
+                vocab_dists, self.attn_dists = decoder_fn(emb_dec_inputs)
                 decoder_scope.reuse_variables()
 
-                self.final_dists = final_dists
-
-                eval_attn_dists, _, eval_final_dists, eval_coverage, _ \
-                    = decoder_fn(emb_eval_dec_inputs)
+                eval_final_dists, eval_attn_dists = decoder_fn(emb_eval_dec_inputs)
 
                 k_sample_final_dists_ls = []
                 for emb_samples in k_emb_samples_ls:
-                    _, _, sample_final_dists, _, _ = decoder_fn(emb_samples)
+                    sample_final_dists, _ = decoder_fn(emb_samples)
                     k_sample_final_dists_ls.append(sample_final_dists)
 
-            def get_loss(final_dists, target_batch, padding_mask, rewards=None):
+            def get_loss(vocab_dists, target_batch, padding_mask, rewards=None):
                 batch_nums = tf.range(0, limit=tf.shape(target_batch)[0])
 
                 loss_per_step = []
-                for dec_step, dist in enumerate(final_dists):
+                for dec_step, dist in enumerate(vocab_dists):
                     targets = target_batch[:, dec_step]
                     indices = tf.stack((batch_nums, targets), axis=1)
                     gold_probs = tf.gather_nd(dist, indices)
@@ -298,7 +206,7 @@ class PointerGenerator(object):
             with tf.variable_scope('generator_loss'):
 
                 # for training of generator
-                loss_per_step = get_loss(final_dists, self.target_batch, self.dec_padding_mask)
+                loss_per_step = get_loss(vocab_dists, self.target_batch, self.dec_padding_mask)
                 # self.loss_per_step = loss_per_step
                 eval_loss_per_step = get_loss(eval_final_dists, self.target_batch, self.dec_padding_mask)
                 # Apply padding_mask mask and get loss
@@ -329,14 +237,14 @@ class PointerGenerator(object):
         # log_dists is a singleton list containing shape (batch_size,
         # extended_vsize)
         if len(emb_dec_inputs) == 1:
-            assert len(final_dists) == 1
-            self.final_dists = final_dists[0]
+            assert len(vocab_dists) == 1
+            self.vocab_dists = vocab_dists[0]
             topk_probs, self._topk_ids = tf.nn.top_k(
-                self.final_dists, hps.beam_size * 2)
+                self.vocab_dists, hps.beam_size * 2)
             self._topk_log_probs = tf.log(topk_probs)
 
             # for the monte carlo searching
-            self._ran_id = tf.multinomial(tf.log(self.final_dists), 1)
+            self._ran_id = tf.multinomial(tf.log(self.vocab_dists), 1)
 
         # for the loss
         loss_to_minimize = self._total_loss if self.hps.coverage else self._loss
@@ -407,18 +315,13 @@ class PointerGenerator(object):
             state_is_tuple=True,
             initializer=self.rand_unif_init)
 
-        # In decode mode, we run attention_decoder one step at a time and so
-        # need to pass in the previous step's coverage vector each time
-        # a placeholder, why not a variable?
         prev_coverage = self.prev_coverage if self.hps.coverage and self.hps.mode in ["train_gan", "decode"] else None
-        # coverage is for decoding in beam_search and gan training
 
-        outputs, p_gens, attn_dists, out_state, coverage = lstm_attention_decoder(
+        outputs, out_state, attn_dists = lstm_attention_decoder(
             emb_dec_inputs, self.enc_padding_mask, self.attentions_keys, self.dec_in_state, cell,
             initial_state_attention=(len(emb_dec_inputs) == 1),
             use_coverage=self.hps.coverage, prev_coverage=prev_coverage)
 
-        # Add the output projection to obtain the vocabulary distribution
         with tf.variable_scope('output_projection'):
             w = tf.get_variable(
                 'w', [self.hps.hidden_dim, vsize],
@@ -426,27 +329,13 @@ class PointerGenerator(object):
             w_t = tf.transpose(w)  # NOQA
             v = tf.get_variable('v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
             vocab_scores = []
-            # vocab_scores is the vocabulary distribution before applying
-            # softmax. Each entry on the list corresponds to one decoder
-            # step
             for i, output in enumerate(outputs):
-                # _mask = self._get_encoder_oov_mask(vsize, batch_size)
 
                 vocab_scores.append(tf.nn.xw_plus_b(output, w, v))
-                # apply the linear layer
 
-            # The vocabulary distributions. List length max_dec_steps of
-            # (batch_size, vsize) arrays. The words are in the order they
-            # appear in the vocabulary file.
             vocab_dists = [tf.nn.softmax(s) for s in vocab_scores]
-            # if not FLAGS.pointer_gen:  # calculate loss from log_dists
-            #     self.vocab_scores = vocab_scores
-            # is the oov included
 
-        # For pointer-generator model, calc final distribution from copy
-        # distribution and vocabulary distribution, then take log
-        final_dists = self._calc_final_dist(p_gens, vocab_dists, attn_dists)
-        return attn_dists, p_gens, final_dists, coverage, out_state
+        return vocab_dists, attn_dists
 
     def _conv_decoder(self, emb_dec_inputs):
         emb_dec_inputs = tf.stack(emb_dec_inputs, axis=1)
@@ -456,14 +345,8 @@ class PointerGenerator(object):
             self._emb_enc_inputs, self.enc_padding_mask, emb_dec_inputs, self.attentions_keys, vsize, is_training)
 
         vocab_dists = tf.unstack(tf.nn.softmax(logits), axis=1)
-        p_gens = tf.unstack(tf.sigmoid(p_gens), axis=1)
-        attn_dists = tf.unstack(attn_dists, axis=1)
 
-        # For pointer-generator model, calc final distribution from copy
-        # distribution and vocabulary distribution, then take log
-        final_dists = self._calc_final_dist(p_gens, vocab_dists, attn_dists)
-
-        return attn_dists, p_gens, final_dists, None, None
+        return vocab_dists, None
 
     def build_graph(self):
         """Add the placeholders, model, global step, train_op and summaries to

@@ -48,7 +48,7 @@ class Example(object):
     def __len__(self):
         return self.enc_len
 
-    def __init__(self, article, abstract, vocab, hps):
+    def __init__(self, article, abstract, enc_vocab, dec_vocab, hps):
         """Initializes the Example, performing tokenization and truncation to
         produce the encoder, decoder and target sequences, which are stored in
         self.
@@ -56,14 +56,13 @@ class Example(object):
         Args:
           article: source text; a string. each token is separated by a single
           space.
-          vocab: Vocabulary object
           hps: hyperparameters
         """
         self.hps = hps
 
         # Get ids of special tokens
-        start_decoding = vocab.word2id(data.START_DECODING)
-        stop_decoding = vocab.word2id(data.STOP_DECODING)
+        start_decoding = dec_vocab.word2id(data.START_DECODING)
+        stop_decoding = dec_vocab.word2id(data.STOP_DECODING)
 
         # Process the article
         article_words = article.split()
@@ -72,14 +71,14 @@ class Example(object):
         # store the length after truncation but before padding
         self.enc_len = len(article_words)
         # list of word ids; OOVs are represented by the id for UNK token
-        self.enc_input = [vocab.word2id(w) for w in article_words]
+        self.enc_input = [enc_vocab.word2id(w) for w in article_words]
 
         # Process the abstract
         abstract_words = abstract.split()  # list of strings
         # list of word ids; OOVs are represented by the id for UNK token
         if len(abstract_words) > hps.max_dec_steps:
             abstract_words = article_words[:hps.max_dec_steps]
-        self.abs_ids = [vocab.word2id(w) for w in abstract_words]
+        self.abs_ids = [dec_vocab.word2id(w) for w in abstract_words]
 
         # Get the decoder input sequence and target sequence
         self.dec_input, _ = self.get_dec_inp_targ_seqs(
@@ -91,12 +90,12 @@ class Example(object):
         # represented by their temporary OOV id; also store the in-article
         # OOVs words themselves
         self.enc_input_extend_vocab, self.article_oovs = \
-            data.article2ids(article_words, vocab)
+            data.article2ids(article_words, enc_vocab)
 
         # Get a verison of the reference summary where in-article OOVs are
         # represented by their temporary article OOV id
         self.abs_ids_extend_vocab = data.abstract2ids(
-            abstract_words, vocab, self.article_oovs)
+            abstract_words, dec_vocab, self.article_oovs)
 
         # Overwrite decoder target sequence so it uses the temp article OOV
         # ids
@@ -162,7 +161,7 @@ class Batch(object):
     """Class representing a minibatch of train/val/test examples for text
     summarization."""
 
-    def __init__(self, example_list, hps, vocab):
+    def __init__(self, example_list, hps, enc_vocab, dec_vocab):
         """Turns the example_list into a Batch object.
 
         Args:
@@ -170,7 +169,7 @@ class Batch(object):
            hps: hyperparameters
            vocab: Vocabulary object
         """
-        self.pad_id = vocab.word2id(
+        self.pad_id = enc_vocab.word2id(
             data.PAD_TOKEN)  # id of the PAD token used to pad sequences
         # initialize the input to the encoder
         self.init_encoder_seq(example_list, hps)
@@ -290,7 +289,7 @@ class GenBatcher(object):
 
     BATCH_QUEUE_MAX = 100  # max number of batches the batch_queue can hold
 
-    def __init__(self, file_name, mode, vocab, hps):
+    def __init__(self, file_name, mode, enc_vocab, dec_vocab, hps):
         """Initialize the batcher. Start threads that process the data into
         batches.
 
@@ -307,7 +306,8 @@ class GenBatcher(object):
           vocab: Vocabulary object
           hps: hyperparameters from the generator
         """
-        self._vocab = vocab
+        self._enc_vocab = enc_vocab
+        self._dec_vocab = dec_vocab
         self._hps = hps
         red_assert(
             mode in ["train", "test", "val"],
@@ -424,7 +424,7 @@ class GenBatcher(object):
             # Process into an Example.
             if article and abstract:
                 example = Example(
-                    article, abstract, self._vocab, self._hps)
+                    article, abstract, self._enc_vocab, self._dec_vocab, self._hps)
                 # what is the vocab here? the extended vocab?
                 # place the Example in the example queue.
                 oov_len = len(example.article_oovs)
@@ -489,7 +489,7 @@ class GenBatcher(object):
                     continue
                 elif len(b) != self._hps.batch_size:
                     continue
-                self._batch_queue.put(Batch(b, self._hps, self._vocab))
+                self._batch_queue.put(Batch(b, self._hps, self._enc_vocab, self._dec_vocab))
 
     def watch_threads(self):
         """Watch example queue and batch queue threads and restart if dead."""
