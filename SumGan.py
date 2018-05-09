@@ -430,7 +430,7 @@ def main(argv):
         dec_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
-        model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator'))
+        model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', 'val'))
         gan_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir))
         gan_val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir, "val"))
         gan_newly_added = []
