@@ -75,7 +75,8 @@ tf.app.flags.DEFINE_string("val_dir", "val", "Training directory.")
 tf.app.flags.DEFINE_string(
     'data_path', './data/', 'Path expression to tf.Example datafiles and vocabulary \
     Can include wildcards to access multiple datafiles.')
-tf.app.flags.DEFINE_string("gen_vocab_file", "vocab", "the path of the generator vocabulary.")
+tf.app.flags.DEFINE_string("enc_vocab_file", "enc_vocab", "the path of the generator vocabulary.")
+tf.app.flags.DEFINE_string("dec_vocab_file", "dec_vocab", "the path of the generator vocabulary.")
 
 #  data_path/gen_vocab: vocabulary for the generator
 #  data_path/dis_vocab: vocabulary for the generator
@@ -101,8 +102,8 @@ tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 300, 'dimension of word embeddings')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
-tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 400
-tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 100
+tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 120
+tf.app.flags.DEFINE_integer('max_dec_steps', 25, 'max timesteps of decoder (max summary tokens)')  # 25
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('dec_vocab_size', 7500, 'Size of vocabulary of the decoder in the generator.')
@@ -207,7 +208,7 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
             # print the print the dashboard
             current_speed = (time.time() - start_time + epsilon) / ((counter * hps.batch_size) + epsilon)
             total_training_time = (time.time() - start_time) * global_step / (counter * 3600)
-            print_dashboard("Generator", global_step, hps.batch_size, hps.gen_vocab_size,
+            print_dashboard("Generator", global_step, hps.batch_size, hps.enc_vocab_size, hps.dec_vocab_size,
                             running_avg_loss, eval_loss,
                             total_training_time, current_speed,
                             coverage_loss if coverage_loss else "not set")
@@ -272,7 +273,8 @@ def main(argv):
         'coverage',
         'emb_dim',
         'rand_unif_init_mag',
-        'gen_vocab_file',
+        'enc_vocab_file',
+        'dec_vocab_file',
         'vocab_type',
         'dec_vocab_size',
         'enc_vocab_size',
@@ -296,7 +298,8 @@ def main(argv):
     hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
 
     print("Building vocabulary for generator ...")
-    gen_vocab = Vocab(join_path(hps_gen.data_path, hps_gen.gen_vocab_file), hps_gen.gen_vocab_size)
+    enc_vocab = Vocab(join_path(hps_gen.data_path, hps_gen.enc_vocab_file), hps_gen.enc_vocab_size)
+    dec_vocab = Vocab(join_path(hps_gen.data_path, hps_gen.dec_vocab_file), hps_gen.dec_vocab_size)
 
     hparam_dis = [
         'mode',
@@ -335,29 +338,18 @@ def main(argv):
             hps_dict[key] = val  # add it to the dict
 
     hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
-    if hps_gen.gen_vocab_file == hps_dis.dis_vocab_file:
+    if hps_gen.dec_vocab_file == hps_dis.dis_vocab_file:
         assert hps_dis.vocab_type == hps_gen.vocab_type, (
             "the vocab type of the generator and the discriminator should be the same")
         hps_dis = hps_dis._replace(layer_size=hps_gen.emb_dim)
-        hps_dis = hps_dis._replace(dis_vocab_size=hps_gen.gen_vocab_size)
-
-    if hps_gen.vocab_type == 'word' == hps_dis.vocab_type:
-        hps_dis = hps_dis._replace(max_dec_steps=15)
-        hps_dis = hps_dis._replace(max_enc_steps=73)
-        hps_gen = hps_gen._replace(max_dec_steps=15)
-        hps_gen = hps_gen._replace(max_enc_steps=73)
-    elif hps_gen.vocab_type == 'char' == hps_dis.vocab_type:
-        hps_dis = hps_dis._replace(max_dec_steps=25)
-        hps_dis = hps_dis._replace(max_enc_steps=120)
-        hps_gen = hps_gen._replace(max_dec_steps=25)
-        hps_gen = hps_gen._replace(max_enc_steps=120)
+        hps_dis = hps_dis._replace(dis_vocab_size=hps_gen.dec_vocab_size)
 
     if FLAGS.mode == "train_gan":
         hps_gen = hps_gen._replace(batch_size=hps_gen.batch_size * hps_dis.num_models)
 
     if FLAGS.mode != "pretrain_dis":
         with tf.variable_scope("generator"), tf.device("/gpu:0"):
-            generator = PointerGenerator(hps_gen, gen_vocab)
+            generator = PointerGenerator(hps_gen, enc_vocab, dec_vocab)
             print("Building generator graph ...")
             gen_decoder_scope = generator.build_graph()
 
@@ -448,7 +440,7 @@ def main(argv):
         # for the loss test
         gen_val_saver = tf.train.Saver(max_to_keep=10, var_list=var_list)
         utils.load_ckpt(dec_saver, sess, model_dir, mode="val", force=True)
-        decoder = Decoder(sess, generator, gen_vocab)
+        decoder = Decoder(sess, generator, dec_vocab)
 
     if FLAGS.mode == "pretrain_dis" or (FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1):
         dis_saver = tf.train.Saver(
@@ -461,14 +453,14 @@ def main(argv):
 
     # --------------- train models ---------------
     if FLAGS.mode not in ["pretrain_dis", "decode"]:
-        gen_batcher_train = GenBatcher("train", "train", gen_vocab, hps_gen)
-        gen_batcher_val = GenBatcher("val", "val", gen_vocab, hps_gen)
+        gen_batcher_train = GenBatcher("train", "train", enc_vocab, dec_vocab, hps_gen)
+        gen_batcher_val = GenBatcher("val", "val", enc_vocab, dec_vocab, hps_gen)
 
     if FLAGS.mode == "decode":
-        decoder_batcher = GenBatcher("val", "test", gen_vocab, hps_gen)
+        decoder_batcher = GenBatcher("val", "test", enc_vocab, dec_vocab, hps_gen)
 
     if FLAGS.mode == "train_gan":
-        gan_batcher_val = GenBatcher("mini_val", "val", gen_vocab, hps_gen)
+        gan_batcher_val = GenBatcher("mini_val", "val", enc_vocab, dec_vocab, hps_gen)
 
     if FLAGS.mode == "pretrain_dis":
         dis_val_batch_size = hps_dis.batch_size * hps_dis.num_models \
@@ -574,7 +566,6 @@ def main(argv):
                 current_speed.append(time.time() - start_time)
 
             # Test
-            # if FLAGS.gan_gen_iter and (i_gan % 100 == 0 or i_gan == hps_gan.gan_iter - 1):
             if hps_gan.gan_gen_iter and (i_gan % 50 == 0 or i_gan == hps_gan.gan_iter - 1):
                 print('Going to test the loss of the generator.')
                 current_speed = (float(sum(current_speed)) + epsilon) / (int(len(current_speed)) * hps_gen.batch_size + epsilon)

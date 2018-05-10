@@ -189,26 +189,13 @@ def abstract2ids(abstract_words, vocab, article_oovs):
       temporary OOV numbers. Out-of-article OOV words are mapped to the UNK
       token id."""
     ids = []
-    unk_id = vocab.word2id(UNKNOWN_TOKEN)
     for w in abstract_words:
         i = vocab.word2id(w)
-        if i == unk_id:  # If w is an OOV word
-            if w in article_oovs:  # If w is an in-article OOV
-                # Map to its temporary article OOV number
-                vocab_idx = vocab.size() + article_oovs.index(w)
-                ids.append(vocab_idx)
-            else:  # If w is an out-of-article OOV
-                # print('oov', w)
-                ids.append(unk_id)  # Map to the UNK token id
-                # that means all words appear in the decoded abstract should be
-                # from the
-                # article
-        else:
-            ids.append(i)
+        ids.append(i)
     return ids
 
 
-def outputsids2words(id_ar, vocab, articles_oovs, art_ids=None):
+def outputsids2words(id_ar, vocab, art_ids=None):
     """Maps output ids to words, including mapping in-article OOVs from their
     temporary ids to the original OOV string (applicable in pointer-generator
     mode).
@@ -227,29 +214,7 @@ def outputsids2words(id_ar, vocab, articles_oovs, art_ids=None):
     for j, id_list in enumerate(id_ar):
         words = []
         for i in id_list:
-            try:
-                w = vocab.id2word(i)  # might be [UNK]
-            except ValueError:  # w is OOV
-                assert articles_oovs is not None, (
-                    "Error: model produced a word ID that isn't in the vocabulary.\
-                    This should not happen in baseline (no pointer-generator) mode")
-                article_oov_idx = i - vocab.size()
-                try:
-                    w = articles_oovs[j][article_oov_idx]
-                except IndexError:
-                    print(
-                        'Error: model produced word ID %i which corresponds to'
-                        'article OOV %i but this example only has %i article OOVs' %
-                        (i, article_oov_idx, len(articles_oovs[j])))
-                    w = UNKNOWN_TOKEN
-                    # this happen in the gan generated samples
-                    # ids may out of the oovs, quite strange
-                    # print("article oovs")
-                    # print("|".join(articles_oovs[j]))
-                    # print("artcle ids")
-                    # print(art_ids[j])
-                    # print("generated ids ")
-                    # print(id_lists[j])
+            w = vocab.id2word(i)  # might be [UNK]
             words.append(w)
         words_lists.append(words)
     return words_lists

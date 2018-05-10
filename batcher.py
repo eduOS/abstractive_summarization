@@ -81,29 +81,9 @@ class Example(object):
         self.abs_ids = [dec_vocab.word2id(w) for w in abstract_words]
 
         # Get the decoder input sequence and target sequence
-        self.dec_input, _ = self.get_dec_inp_targ_seqs(
+        self.dec_input, self.target = self.get_dec_inp_targ_seqs(
             self.abs_ids, hps.max_dec_steps, start_decoding, stop_decoding)
         self.dec_len = len(self.dec_input)
-
-        # If using pointer-generator mode, we need to store some extra info
-        # Store a version of the enc_input where in-article OOVs are
-        # represented by their temporary OOV id; also store the in-article
-        # OOVs words themselves
-        self.enc_input_extend_vocab, self.article_oovs = \
-            data.article2ids(article_words, enc_vocab)
-
-        # Get a verison of the reference summary where in-article OOVs are
-        # represented by their temporary article OOV id
-        self.abs_ids_extend_vocab = data.abstract2ids(
-            abstract_words, dec_vocab, self.article_oovs)
-
-        # Overwrite decoder target sequence so it uses the temp article OOV
-        # ids
-        _, self.target = self.get_dec_inp_targ_seqs(
-            self.abs_ids_extend_vocab,
-            hps.max_dec_steps,
-            start_decoding,
-            stop_decoding)
 
         # Store the original strings ART:
         self.original_article = article
@@ -153,8 +133,6 @@ class Example(object):
         """Pad the encoder input sequence with pad_id up to max_len."""
         while len(self.enc_input) < max_len:
             self.enc_input.append(pad_id)
-        while len(self.enc_input_extend_vocab) < max_len:
-            self.enc_input_extend_vocab.append(pad_id)
 
 
 class Batch(object):
@@ -228,16 +206,6 @@ class Batch(object):
             self.enc_lens[i] = ex.enc_len
             for j in range(ex.enc_len):
                 self.enc_padding_mask[i][j] = 1
-
-        # For pointer-generator mode, need to store some extra info
-        # Determine the max number of in-article OOVs in this batch
-        self.max_art_oovs = max([len(ex.article_oovs) for ex in example_list])
-        # Store the in-article OOVs themselves
-        self.art_oovs = [ex.article_oovs for ex in example_list]
-        # Store the version of the enc_batch that uses the article OOV ids
-        self.enc_batch_extend_vocab = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
-        for i, ex in enumerate(example_list):
-            self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
 
     def init_decoder_seq(self, example_list, hps):
         """Initializes the following:
@@ -427,20 +395,9 @@ class GenBatcher(object):
                     article, abstract, self._enc_vocab, self._dec_vocab, self._hps)
                 # what is the vocab here? the extended vocab?
                 # place the Example in the example queue.
-                oov_len = len(example.article_oovs)
-                enc_len = len(example.enc_input_extend_vocab)
-                abs_len = len(example.abs_ids_extend_vocab)
-                if oov_len > enc_len / 3:
-                    self._log_writer.write("article oovs %s, total length of the article %s" % (oov_len, enc_len))
-                    self._log_writer.write("\n")
-                    self._log_writer.write(example.original_article)
-                    self._log_writer.write("\n")
-                    self._log_writer.write(example.original_abstract)
-                    self._log_writer.write("\n")
-                    self._log_writer.write(" ".join(example.article_oovs))
-                    self._log_writer.write("\n")
-                    self._log_writer.write("\n")
-                elif enc_len < 2 * abs_len:
+                enc_len = len(example.enc_input)
+                abs_len = len(example.abs_ids)
+                if enc_len < 2 * abs_len:
                     self._log_writer.write("total length of abstract %s, total length of the article %s" % (enc_len, abs_len))
                     self._log_writer.write("\n")
                     self._log_writer.write(example.original_article)

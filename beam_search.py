@@ -106,14 +106,14 @@ class Hypothesis(object):
         return self.log_prob / len(self._tokens)
 
 
-def run_beam_search(sess, model, vocab, batch, top_k=1):
+def run_beam_search(sess, model, dec_vocab, batch, top_k=1):
     """ For the GAN
     Performs beam search decoding on the given example.
 
     Args:
       sess: a tf.Session
       model: a seq2seq model
-      vocab: Vocabulary object
+      dec_vocab: decoder vocabulary object
       batch: Batch object that has the beam_size * batch_size samples,
         batch_size kinds of sample, each sample repeated beam_size times
         What actually matters in the decode_onestep is the max_art_oovs and
@@ -140,12 +140,11 @@ def run_beam_search(sess, model, vocab, batch, top_k=1):
     for i in xrange(batch_size):
         hyps = [
             Hypothesis(
-                tokens=[vocab.word2id(data.START_DECODING)],
+                tokens=[dec_vocab.word2id(data.START_DECODING)],
                 log_probs=[0.0],
                 state=tf.contrib.rnn.LSTMStateTuple(
                     dec_in_state.c[i], dec_in_state.h[i]),
                 attn_dists=[],
-                p_gens=[],
                 # zero vector of length attention_length
                 coverage=np.zeros([batch.enc_batch.shape[1]])
             ) for _ in range(beam_size)]
@@ -156,7 +155,6 @@ def run_beam_search(sess, model, vocab, batch, top_k=1):
     # this can be optimized into multithread
     for k in xrange(batch_size):
         hyps = batch_hyps[k]
-        enc_batch_extend_vocab = np.tile(batch.enc_batch_extend_vocab[k], (beam_size, 1))
         enc_padding_mask = np.tile(batch.enc_padding_mask[k], (beam_size, 1))
         enc_states_ = np.tile(enc_states[k], (beam_size, 1, 1))
         results = []
@@ -165,16 +163,7 @@ def run_beam_search(sess, model, vocab, batch, top_k=1):
         while steps < model.hps.max_dec_steps and len(results) < beam_size:
             # latest token produced by each hypothesis
             latest_tokens = [h.latest_token for h in hyps]
-            # change any in-article temporary OOV ids to [UNK] id, so that we can
-            # lookup word embeddings
-            latest_tokens = [
-                t if t in xrange(
-                    vocab.size()) else vocab.word2id(data.UNKNOWN_TOKEN)
-                for t in latest_tokens]
             latest_tokens = np.transpose(np.array([latest_tokens]))
-            # UNKNOWN_TOKEN will be replaced with a placeholder
-            # max_art_oovs = np.tile(batch.max_art_oovs[k], (beam_size, 1))
-            # list of current decoder states of the hypotheses
             states = [h.state for h in hyps]
             # list of coverage vectors (or None)
             prev_coverage = np.stack([h.coverage for h in hyps], axis=0)
@@ -184,10 +173,9 @@ def run_beam_search(sess, model, vocab, batch, top_k=1):
 
             (
                 topk_ids, topk_log_probs, new_states,
-                attn_dists, p_gens, new_coverage
+                attn_dists, new_coverage
             ) = model.run_decode_onestep(
-                sess=sess, enc_batch_extend_vocab=enc_batch_extend_vocab,
-                max_art_oovs=batch.max_art_oovs, latest_tokens=latest_tokens,
+                sess=sess, latest_tokens=latest_tokens,
                 enc_states=enc_states_, enc_padding_mask=enc_padding_mask,
                 dec_init_states=states, prev_coverage=prev_coverage,
             )
@@ -200,8 +188,8 @@ def run_beam_search(sess, model, vocab, batch, top_k=1):
             # distinct.
             num_orig_hyps = 1 if steps == 0 else len(hyps)
             for i in xrange(num_orig_hyps):
-                h, new_state, attn_dist, p_gen, new_coverage_i = (
-                    hyps[i], new_states[i], attn_dists[i], p_gens[i], new_coverage[i]
+                h, new_state, attn_dist, new_coverage_i = (
+                    hyps[i], new_states[i], attn_dists[i], new_coverage[i]
                 )
                 # take the ith hypothesis and new decoder state info
                 # for each of the top 2*beam_size hyps:
@@ -212,14 +200,13 @@ def run_beam_search(sess, model, vocab, batch, top_k=1):
                         log_prob=topk_log_probs[i, j],
                         state=new_state,
                         attn_dist=attn_dist,
-                        p_gen=p_gen,
                         coverage=new_coverage_i)
                     all_hyps.append(new_hyp)
 
             # Filter and collect any hypotheses that have produced the end token.
             hyps = []  # will contain hypotheses for the next step
             for h in sort_hyps(all_hyps):  # in order of most likely h
-                if h.latest_token == vocab.word2id(data.STOP_DECODING):
+                if h.latest_token == dec_vocab.word2id(data.STOP_DECODING):
                     # if stop token is reached...
                     # If this hypothesis is sufficiently long, put in results.
                     # Otherwise discard.

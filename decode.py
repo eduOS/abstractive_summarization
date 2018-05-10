@@ -213,8 +213,6 @@ class Decoder(object):
                     sample_n = randint(0, batch_size)
                     if sample == 1:
                         print()
-                    art_oovs = [batch.art_oovs[i]
-                                for i in xrange(batch_size)]
                     decoded_words_list = data.outputsids2words(
                         outputs_ids, self._vocab, art_oovs)
 

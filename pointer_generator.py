@@ -37,13 +37,6 @@ from tensorflow.contrib.rnn import LSTMStateTuple
 FLAGS = tf.app.flags.FLAGS
 
 
-def execute_encoder_fn(function_name, inputs, seq_len, is_training, hidden_dim, rand_unif_init):
-    return {
-        'lstm_encoder': lambda: lstm_encoder(inputs, seq_len, hidden_dim, rand_unif_init),
-        'conv_encoder': lambda: conv_encoder(inputs, seq_len, is_training),
-    }[function_name]()
-
-
 class PointerGenerator(object):
     """A class to represent a sequence-to-sequence model for text summarization.
     Supports both baseline mode, pointer-generator mode, and coverage"""
@@ -122,8 +115,6 @@ class PointerGenerator(object):
         feed_dict[self.enc_lens] = batch.enc_lens
         feed_dict[self.enc_padding_mask] = batch.enc_padding_mask
         if not just_enc:
-            feed_dict[self.enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
-            feed_dict[self.max_art_oovs] = batch.max_art_oovs
             feed_dict[self.target_batch] = batch.target_batch
             feed_dict[self.dec_padding_mask] = batch.dec_padding_mask
             if gan_eval:
@@ -168,10 +159,8 @@ class PointerGenerator(object):
                     for samples in k_samples_ls
                 ]
 
-            attentions_keys, dec_in_state = execute_encoder_fn(
-                hps.encoder, self._emb_enc_inputs,
-                self.enc_lens, hps.mode in ["pretrain_gen", "train_gan"],
-                hps.hidden_dim, self.rand_unif_init)
+            attentions_keys, dec_in_state = lstm_encoder(
+                self._emb_enc_inputs, self.enc_lens, hps.hidden_dim, self.rand_unif_init)
 
             self.attentions_keys, self.dec_in_state = attentions_keys, dec_in_state
 
@@ -179,15 +168,14 @@ class PointerGenerator(object):
             # self.attention_keys = selective_fn(self.attention_keys, self.dec_in_state)
 
             with tf.variable_scope('decoder') as decoder_scope:
-                decoder_fn = getattr(self, "_" + hps.decoder)
-                vocab_dists, self.attn_dists = decoder_fn(emb_dec_inputs)
+                vocab_dists, self.attn_dists = self._lstm_decoder(emb_dec_inputs)
                 decoder_scope.reuse_variables()
 
-                eval_final_dists, eval_attn_dists = decoder_fn(emb_eval_dec_inputs)
+                eval_final_dists, eval_attn_dists = self._lstm_decoder(emb_eval_dec_inputs)
 
                 k_sample_final_dists_ls = []
                 for emb_samples in k_emb_samples_ls:
-                    sample_final_dists, _ = decoder_fn(emb_samples)
+                    sample_final_dists, _ = self._lstm_decoder(emb_samples)
                     k_sample_final_dists_ls.append(sample_final_dists)
 
             def get_loss(vocab_dists, target_batch, padding_mask, rewards=None):
@@ -307,7 +295,7 @@ class PointerGenerator(object):
                 linear(self.dec_in_state, self.hps.hidden_dim, bias=True, scope="lstmstatetuple_c"),
                 linear(self.dec_in_state, self.hps.hidden_dim, bias=True, scope="lstmstatetuple_h")
             )
-        vsize = self._vocab.size()  # size of the vocabulary
+        vsize = self._dec_vocab.size()  # size of the vocabulary
         # batch_size = tf.shape(emb_dec_inputs[0])[0]
         # Add the decoder.
         cell = tf.contrib.rnn.LSTMCell(
@@ -477,7 +465,7 @@ class PointerGenerator(object):
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
         return output_id, new_states
 
-    def run_decode_onestep(self, sess, enc_batch_extend_vocab, max_art_oovs,
+    def run_decode_onestep(self, sess,
                            latest_tokens, attention_keys, enc_padding_mask,
                            dec_init_states, prev_coverage, method="bs"):
         """For beam search decoding. Run the decoder for one step.
@@ -523,15 +511,11 @@ class PointerGenerator(object):
             self.enc_padding_mask: enc_padding_mask,
             self.dec_in_state: new_dec_in_state,
             self._dec_batch: latest_tokens,
-            self.enc_batch_extend_vocab: enc_batch_extend_vocab,
-            self.max_art_oovs: max_art_oovs,
         }
 
         to_return = {
           "states": self._dec_out_state,
           "attn_dists": self.attn_dists,
-          "final_dists": self.final_dists,
-          "p_gens": self.p_gens,
         }
 
         if method == "bs":
@@ -562,14 +546,11 @@ class PointerGenerator(object):
             attn_dists = results['attn_dists'][0].tolist()
 
             # Convert singleton list containing a tensor to a list of k arrays
-            assert len(results['p_gens']) == 1
-            p_gens = results['p_gens'][0].tolist()
         else:
             sample_ids = results["ran_id"]
             probs = None
 
             attn_dists = None
-            p_gens = None
 
         # Convert the coverage tensor to a list length k containing the coverage
         # vector for each hypothesis
@@ -579,7 +560,7 @@ class PointerGenerator(object):
         else:
             new_coverage = [None for _ in xrange(attention_keys.shape[1])]
 
-        return sample_ids, probs, new_states, attn_dists, p_gens, new_coverage
+        return sample_ids, probs, new_states, attn_dists, new_coverage
 
     def g_optimizer(self, *args, **kwargs):
         return tf.train.AdamOptimizer(*args, **kwargs)

@@ -46,7 +46,7 @@ def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attention_keys, ini
     with variable_scope.variable_scope("attention_decoder"):
         encoder_states = attention_keys
         # if this line fails, it's because the batch size isn't defined
-        batch_size = array_ops.shape(decoder_inputs)[0]
+        batch_size = array_ops.shape(enc_padding_mask)[0]
         # if this line fails, it's because the attention length isn't defined
         attn_size = encoder_states.get_shape()[2].value
 

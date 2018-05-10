@@ -77,14 +77,15 @@ def initialize_uninitialized(sess):
         sess.run(tf.variables_initializer(not_initialized_vars))
 
 
-def print_dashboard(type, step, batch_size, vocab_size,
+def print_dashboard(type, step, batch_size, enc_vocab_size, dec_vocab_size,
                     running_avg_loss, eval_loss,
                     total_training_time, current_speed,
                     coverage_loss="not set"):
     print(
         "\nDashboard for %s updated %s, finished steps:\t%s\n"
         "\tBatch size:\t%s\n"
-        "\tVocabulary size:\t%s\n"
+        "\tEncoder vocabulary size:\t%s\n"
+        "\tDecoder vocabulary size:\t%s\n"
         "\tArticles trained:\t%s\n"
         "\tTotal training time approxiately:\t%.4f hours\n"
         "\tCurrent speed:\t%.4f seconds/article\n"
@@ -94,7 +95,8 @@ def print_dashboard(type, step, batch_size, vocab_size,
             datetime.datetime.now().strftime("on %m-%d at %H:%M"),
             step,
             batch_size,
-            vocab_size,
+            enc_vocab_size,
+            dec_vocab_size,
             batch_size * step,
             total_training_time,
             current_speed,
@@ -248,8 +250,7 @@ def lstm_encoder(encoder_inputs, seq_len, hidden_dim,
     dec_in_state = reduce_states(
         fw_st, bw_st, hidden_dim=hidden_dim,
         activation_fn=tf.tanh, trunc_norm_init_std=trunc_norm_init_std)
-    attentions_keys = tf.stack([encoder_outputs] * att_head_num)
-    return attentions_keys, dec_in_state
+    return encoder_outputs, dec_in_state
 
 
 def conv_encoder(inputs, seq_len, is_training,
