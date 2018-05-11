@@ -265,6 +265,9 @@ def conv_attention_decoder(emb_dec_inputs, enc_padding_mask, attention_keys, att
 
     logits = linear_mapping_weightnorm(outputs, vocab_size, dropout=out_dropout_keep_prob, var_scope_name="logits_before_softmax")
     # reshape for the length to unstack
-    logits = tf.reshape(logits, [-1, input_shape[1], vocab_size])
+    if is_training:
+        logits = tf.reshape(logits, [-1, input_shape[1], vocab_size])
+    else:
+        logits = tf.reshape(logits, [-1, vocab_size])
 
-    return logits, None, None, None, None
+    return logits
