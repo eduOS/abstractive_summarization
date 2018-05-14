@@ -33,6 +33,7 @@ from utils import conv_encoder
 from codecs import open
 from six.moves import xrange
 from tensorflow.contrib.rnn import LSTMStateTuple
+import data
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -170,6 +171,8 @@ class PointerGenerator(object):
             with tf.variable_scope('decoder') as decoder_scope:
                 vocab_dists, self.attn_dists = self._lstm_decoder(emb_dec_inputs)
                 decoder_scope.reuse_variables()
+                if self.hps.mode == "decode":
+                    self.beam_search()
 
                 eval_final_dists, eval_attn_dists = self._lstm_decoder(emb_eval_dec_inputs)
 
@@ -282,7 +285,8 @@ class PointerGenerator(object):
         _mask = tf.cast(_mask, tf.float32)
         return _mask
 
-    def _lstm_decoder(self, emb_dec_inputs):
+    def _lstm_decoder(self, emb_dec_inputs,
+                      enc_padding_mask=None, attention_keys=None, dec_in_state=None):
         """
         input:
             emb_dec_inputs, the input of the cell
@@ -290,10 +294,17 @@ class PointerGenerator(object):
             output log distribution
             new state
         """
-        if type(self.dec_in_state) != LSTMStateTuple:
-            self.dec_in_state = LSTMStateTuple(
-                linear(self.dec_in_state, self.hps.hidden_dim, bias=True, scope="lstmstatetuple_c"),
-                linear(self.dec_in_state, self.hps.hidden_dim, bias=True, scope="lstmstatetuple_h")
+        if not dec_in_state:
+            enc_padding_mask = self.enc_padding_mask
+            attentions_keys = self.attentions_keys
+            dec_in_state = self.dec_in_state
+
+        if type(emb_dec_inputs) is not list:
+            emb_dec_inputs = [emb_dec_inputs]
+        if type(dec_in_state) != LSTMStateTuple:
+            dec_in_state = LSTMStateTuple(
+                linear(dec_in_state, self.hps.hidden_dim, bias=True, scope="lstmstatetuple_c"),
+                linear(dec_in_state, self.hps.hidden_dim, bias=True, scope="lstmstatetuple_h")
             )
         vsize = self._dec_vocab.size()  # size of the vocabulary
         # batch_size = tf.shape(emb_dec_inputs[0])[0]
@@ -306,7 +317,7 @@ class PointerGenerator(object):
         prev_coverage = self.prev_coverage if self.hps.coverage and self.hps.mode in ["train_gan", "decode"] else None
 
         outputs, out_state, attn_dists = lstm_attention_decoder(
-            emb_dec_inputs, self.enc_padding_mask, self.attentions_keys, self.dec_in_state, cell,
+            emb_dec_inputs, enc_padding_mask, attentions_keys, dec_in_state, cell,
             initial_state_attention=(len(emb_dec_inputs) == 1),
             use_coverage=self.hps.coverage, prev_coverage=prev_coverage)
 
@@ -323,7 +334,7 @@ class PointerGenerator(object):
 
             vocab_dists = [tf.nn.softmax(s) for s in vocab_scores]
 
-        return vocab_dists, attn_dists
+        return vocab_dists, attn_dists, out_state
 
     def _conv_decoder(self, emb_dec_inputs):
         emb_dec_inputs = tf.stack(emb_dec_inputs, axis=1)
@@ -456,7 +467,7 @@ class PointerGenerator(object):
             the embedded input
         """
         # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
-        _, _, _, final_dists, new_states = getattr(self, "_" + self.hps.decoder)(emb_dec_inputs, dec_in_state)
+        _, _, _, final_dists, new_states = getattr(self, "_" + 'lstm_decoder')(emb_dec_inputs, dec_in_state)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         # final_dists_sliced = tf.slice(final_dists[0], [0, 0], [-1, self._vocab.size()])
         final_dists = final_dists[0]
@@ -465,6 +476,75 @@ class PointerGenerator(object):
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
         return output_id, new_states
 
+    def beam_search(self):
+        # state, attention
+        beam_size = self.hps.beam_size
+        batch_size = self.hps.batch_size
+        vocab_size = self._dec_vocab.size()
+        num_steps = self.hps.max_dec_steps
+        self.dec_input = tf.placeholder(
+            tf.float32, shape=[batch_size, self.hps.hidden_dim])
+        dec_in_state = tf.placeholder(
+            tf.float32, shape=[batch_size, self.hps.hidden_dim])
+
+        log_beam_probs, beam_symbols, beam_path = [], [], []
+        output_projection = None
+
+        def beam_search(prev, i, log_fn):
+            if output_projection is not None:
+                prev = tf.nn.xw_plus_b(prev, output_projection[0], output_projection[1])
+                # (batch_size*beam_size, embedding_size) -> (batch_size*beam_size, vocab_size)
+
+            log_probs = log_fn(prev)
+
+            if i > 1:
+                log_probs = tf.reshape(log_probs + log_beam_probs[-1], [-1, beam_size * vocab_size])
+                # (batch_size*beam_size, vocab_size) -> (batch_size, beam_size*vocab_size)
+            best_probs, indices = tf.nn.top_k(log_probs, beam_size)
+            # (batch_size, beam_size)
+            indices = tf.squeeze(tf.reshape(indices, [-1, 1]))
+            best_probs = tf.reshape(best_probs, [-1, 1])
+            # (batch_size*beam_size)
+
+            symbols = indices % vocab_size       # which word in vocabulary
+            beam_parent = indices // vocab_size  # which hypothesis it came from
+
+            beam_symbols.append(symbols)
+            beam_path.append(beam_parent)
+
+            index_base = tf.tile(tf.expand_dims(
+                tf.reshape(tf.tile(tf.expand_dims(tf.range(batch_size), axis=1),
+                                   [1, beam_size]), [-1]), axis=1), [1, i])
+            # (batch_size*beam_size, num_steps)
+            real_path = tf.reshape(tf.stack(beam_path, axis=1) + index_base, [beam_size*batch_size, i])
+            real_path = tf.unstack(real_path, axis=1)
+            # adapt the previous symbols according to the current symbol
+            if i > 1:
+                for j in range(i)[:0:-1]:
+                    beam_symbols[j-1] = tf.gather(beam_symbols[j-1], beam_path[i-1])
+
+            log_beam_probs.append(best_probs)
+
+            return tf.nn.embedding_lookup(self.dec_embeddings, symbols)
+            # (batch_size*beam_size, embedding_size)
+
+        dec_input = self._dec_vocab.word2id(data.START_DECODING)
+        for i in range(num_steps):
+            if i > 0:
+                attentions_keys = tf.tile(tf.expand_dims(self.attentions_keys, axis=1), [1, beam_size, 1])
+                enc_padding_mask = tf.tile(tf.expand_dims(self.enc_padding_mask, axis=1), [1, beam_size, 1])
+            else:
+                dec_in_state = self.dec_in_state
+            vocab_dists, _, dec_in_state = self._lstm_decoder([dec_input], enc_padding_mask, attentions_keys, dec_in_state)
+            dec_input = beam_search(vocab_dists, i+1, tf.log)
+
+        self.best_seq = tf.stack(values=beam_symbols, axis=1)
+        # (batch_size*beam_size, num_steps)
+
+    def run_beam_search(self, sess, batch):
+        feed_dict = self._make_feed_dict(batch, just_enc=True)
+        best_seq = sess.run([self.best_seq], feed_dict)  # run the encoder
+        return best_seq
     def run_decode_onestep(self, sess,
                            latest_tokens, attention_keys, enc_padding_mask,
                            dec_init_states, prev_coverage, method="bs"):

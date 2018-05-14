@@ -195,7 +195,7 @@ def abstract2ids(abstract_words, vocab, article_oovs):
     return ids
 
 
-def outputsids2words(id_ar, vocab, art_ids=None):
+def outputsids2words(id_ar, vocab):
     """Maps output ids to words, including mapping in-article OOVs from their
     temporary ids to the original OOV string (applicable in pointer-generator
     mode).
@@ -203,9 +203,6 @@ def outputsids2words(id_ar, vocab, art_ids=None):
     Args:
       id_ar: a 2-D array of ids
       vocab: Vocabulary object
-      articles_oovs: a list of list of OOV words (strings) in the order corresponding to
-      their temporary article OOV ids (that have been assigned in
-      pointer-generator mode), or None (in baseline mode)
 
     Returns:
       words: list of words (strings)
