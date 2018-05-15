@@ -155,7 +155,7 @@ class Decoder(object):
 
     def beam_search(self, batcher, save2file=True, single_pass=True, sample_rate=0):
         batch = batcher.next_batch()
-        batch_size = len(batch.enc_batch_extend_vocab)
+        batch_size = len(batch.enc_batch)
 
         rouge_scores = []
         # t0 = time.time()
@@ -189,9 +189,10 @@ class Decoder(object):
                         ove_f.close()
                         return
 
-                best_seq = self._model.run_beam_search(self._sess, batch)
+                best_seq = self._model.run_beam_search(self._sess, batch).tolist()
                 # is the beam_size here 1?
-                outputs_ids = [[t for t in hyp[:hyp.index(data.STOP_DECODING)]] for hyp in best_seq]
+                outputs_ids = [[t for t in hyp[:hyp.index(data.STOP_DECODING) if data.STOP_DECODING in hyp else -1]]
+                               for hyp in best_seq]
 
                 original_articles = batch.original_articles
                 original_abstracts = batch.original_abstracts

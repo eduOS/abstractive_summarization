@@ -160,25 +160,25 @@ class PointerGenerator(object):
                     for samples in k_samples_ls
                 ]
 
-            attentions_keys, dec_in_state = lstm_encoder(
+            attention_keys, dec_in_state = lstm_encoder(
                 self._emb_enc_inputs, self.enc_lens, hps.hidden_dim, self.rand_unif_init)
 
-            self.attentions_keys, self.dec_in_state = attentions_keys, dec_in_state
+            self.attention_keys, self.dec_in_state = attention_keys, dec_in_state
 
             # selective encoding: http://arxiv.org/abs/1704.07073
             # self.attention_keys = selective_fn(self.attention_keys, self.dec_in_state)
 
             with tf.variable_scope('decoder') as decoder_scope:
-                vocab_dists, self.attn_dists = self._lstm_decoder(emb_dec_inputs)
+                vocab_dists, self.attn_dists, _ = self._lstm_decoder(emb_dec_inputs)
                 decoder_scope.reuse_variables()
                 if self.hps.mode == "decode":
                     self.beam_search()
 
-                eval_final_dists, eval_attn_dists = self._lstm_decoder(emb_eval_dec_inputs)
+                eval_final_dists, eval_attn_dists, _ = self._lstm_decoder(emb_eval_dec_inputs)
 
                 k_sample_final_dists_ls = []
                 for emb_samples in k_emb_samples_ls:
-                    sample_final_dists, _ = self._lstm_decoder(emb_samples)
+                    sample_final_dists, _, _ = self._lstm_decoder(emb_samples)
                     k_sample_final_dists_ls.append(sample_final_dists)
 
             def get_loss(vocab_dists, target_batch, padding_mask, rewards=None):
@@ -296,7 +296,7 @@ class PointerGenerator(object):
         """
         if not dec_in_state:
             enc_padding_mask = self.enc_padding_mask
-            attentions_keys = self.attentions_keys
+            attention_keys = self.attention_keys
             dec_in_state = self.dec_in_state
 
         if type(emb_dec_inputs) is not list:
@@ -317,7 +317,7 @@ class PointerGenerator(object):
         prev_coverage = self.prev_coverage if self.hps.coverage and self.hps.mode in ["train_gan", "decode"] else None
 
         outputs, out_state, attn_dists = lstm_attention_decoder(
-            emb_dec_inputs, enc_padding_mask, attentions_keys, dec_in_state, cell,
+            emb_dec_inputs, enc_padding_mask, attention_keys, dec_in_state, cell,
             initial_state_attention=(len(emb_dec_inputs) == 1),
             use_coverage=self.hps.coverage, prev_coverage=prev_coverage)
 
@@ -528,14 +528,25 @@ class PointerGenerator(object):
             return tf.nn.embedding_lookup(self.dec_embeddings, symbols)
             # (batch_size*beam_size, embedding_size)
 
-        dec_input = self._dec_vocab.word2id(data.START_DECODING)
+        dec_input = tf.convert_to_tensor(batch_size * [self._dec_vocab.word2id(data.START_DECODING)])
+        dec_input = tf.nn.embedding_lookup(self.dec_embeddings, dec_input)
         for i in range(num_steps):
             if i > 0:
-                attentions_keys = tf.tile(tf.expand_dims(self.attentions_keys, axis=1), [1, beam_size, 1])
+                attention_keys = tf.tile(tf.expand_dims(self.attention_keys, axis=1), [1, beam_size, 1, 1])
+                attention_keys = tf.reshape(attention_keys, [batch_size*beam_size, tf.shape(self.attention_keys)[1], self.attention_keys.get_shape().as_list()[-1]])
                 enc_padding_mask = tf.tile(tf.expand_dims(self.enc_padding_mask, axis=1), [1, beam_size, 1])
+                enc_padding_mask = tf.reshape(enc_padding_mask, [batch_size*beam_size, tf.shape(self.enc_padding_mask)[1]])
             else:
                 dec_in_state = self.dec_in_state
-            vocab_dists, _, dec_in_state = self._lstm_decoder([dec_input], enc_padding_mask, attentions_keys, dec_in_state)
+                attention_keys = self.attention_keys
+                enc_padding_mask = self.enc_padding_mask
+            if i == 1:
+                new_c = tf.tile(tf.expand_dims(dec_in_state.c, axis=1), [1, beam_size, 1])
+                new_c = tf.reshape(new_c, [batch_size*beam_size, -1])
+                new_h = tf.tile(tf.expand_dims(dec_in_state.h, axis=1), [1, beam_size, 1])
+                new_h = tf.reshape(new_h, [batch_size*beam_size, -1])
+                dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
+            vocab_dists, _, dec_in_state = self._lstm_decoder([dec_input], enc_padding_mask, attention_keys, dec_in_state)
             dec_input = beam_search(vocab_dists, i+1, tf.log)
 
         self.best_seq = tf.stack(values=beam_symbols, axis=1)
@@ -543,8 +554,9 @@ class PointerGenerator(object):
 
     def run_beam_search(self, sess, batch):
         feed_dict = self._make_feed_dict(batch, just_enc=True)
-        best_seq = sess.run([self.best_seq], feed_dict)  # run the encoder
+        best_seq = sess.run(self.best_seq, feed_dict)  # run the encoder
         return best_seq
+
     def run_decode_onestep(self, sess,
                            latest_tokens, attention_keys, enc_padding_mask,
                            dec_init_states, prev_coverage, method="bs"):

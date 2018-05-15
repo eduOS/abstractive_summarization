@@ -43,6 +43,7 @@ def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attention_keys, ini
                            cell, initial_state_attention=False, use_coverage=False,
                            prev_coverage=None, local_attention_layers=3):
     # can this be applied to beam repetitive batch?
+    assert type(decoder_inputs) == list, "decoder inputs should be list, but % given" % type(decoder_inputs)
     with variable_scope.variable_scope("attention_decoder"):
         encoder_states = attention_keys
         # if this line fails, it's because the batch size isn't defined
