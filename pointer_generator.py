@@ -482,12 +482,8 @@ class PointerGenerator(object):
         batch_size = self.hps.batch_size
         vocab_size = self._dec_vocab.size()
         num_steps = self.hps.max_dec_steps
-        self.dec_input = tf.placeholder(
-            tf.float32, shape=[batch_size, self.hps.hidden_dim])
-        dec_in_state = tf.placeholder(
-            tf.float32, shape=[batch_size, self.hps.hidden_dim])
 
-        log_beam_probs, beam_symbols, beam_path = [], [], []
+        log_beam_probs, beam_symbols = [], []
         output_projection = None
 
         def beam_search(prev, i, log_fn):
@@ -498,32 +494,36 @@ class PointerGenerator(object):
             log_probs = log_fn(prev)
 
             if i > 1:
-                log_probs = tf.reshape(log_probs + log_beam_probs[-1], [-1, beam_size * vocab_size])
+                log_probs = tf.reshape(tf.expand_dims(tf.reduce_sum(tf.stack(log_beam_probs, axis=1), axis=1), axis=1) + log_probs,
+                                       [-1, beam_size * vocab_size])
                 # (batch_size*beam_size, vocab_size) -> (batch_size, beam_size*vocab_size)
             best_probs, indices = tf.nn.top_k(log_probs, beam_size)
             # (batch_size, beam_size)
             indices = tf.squeeze(tf.reshape(indices, [-1, 1]))
-            best_probs = tf.reshape(best_probs, [-1, 1])
+            best_probs = tf.reshape(best_probs, [-1])
             # (batch_size*beam_size)
 
             symbols = indices % vocab_size       # which word in vocabulary
             beam_parent = indices // vocab_size  # which hypothesis it came from
 
             beam_symbols.append(symbols)
-            beam_path.append(beam_parent)
 
-            index_base = tf.tile(tf.expand_dims(
-                tf.reshape(tf.tile(tf.expand_dims(tf.range(batch_size), axis=1),
-                                   [1, beam_size]), [-1]), axis=1), [1, i])
+            index_base = tf.reshape(
+                tf.tile(tf.expand_dims(tf.range(batch_size) * beam_size, axis=1), [1, beam_size]), [-1])
             # (batch_size*beam_size, num_steps)
-            real_path = tf.reshape(tf.stack(beam_path, axis=1) + index_base, [beam_size*batch_size, i])
-            real_path = tf.unstack(real_path, axis=1)
+            # real_path = tf.reshape(tf.stack(beam_path, axis=1) + index_base, [beam_size*batch_size, i])
+            real_path = beam_parent + index_base
             # adapt the previous symbols according to the current symbol
             if i > 1:
+                pre_sum = tf.reduce_sum(tf.stack(log_beam_probs, axis=1), axis=1)
+                pre_sum = tf.gather(pre_sum, real_path)
+            else:
+                pre_sum = 0
+            log_beam_probs.append(best_probs-pre_sum)
+            if i > 1:
                 for j in range(i)[:0:-1]:
-                    beam_symbols[j-1] = tf.gather(beam_symbols[j-1], beam_path[i-1])
-
-            log_beam_probs.append(best_probs)
+                    beam_symbols[j-1] = tf.gather(beam_symbols[j-1], real_path)
+                    log_beam_probs[j-1] = tf.gather(log_beam_probs[j-1], real_path)
 
             return tf.nn.embedding_lookup(self.dec_embeddings, symbols)
             # (batch_size*beam_size, embedding_size)
@@ -547,9 +547,10 @@ class PointerGenerator(object):
                 new_h = tf.reshape(new_h, [batch_size*beam_size, -1])
                 dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
             vocab_dists, _, dec_in_state = self._lstm_decoder([dec_input], enc_padding_mask, attention_keys, dec_in_state)
-            dec_input = beam_search(vocab_dists, i+1, tf.log)
+            dec_input = beam_search(vocab_dists[0], i+1, tf.log)
 
-        self.best_seq = tf.stack(values=beam_symbols, axis=1)
+        best_seq = tf.stack(values=beam_symbols, axis=1)
+        self.best_seq = tf.reshape(best_seq, [batch_size, beam_size, num_steps])
         # (batch_size*beam_size, num_steps)
 
     def run_beam_search(self, sess, batch):

@@ -24,6 +24,7 @@ from __future__ import division
 import os
 from gan_utils import rouge_l
 from data import strip_pads
+import pprint
 import time
 import tensorflow as tf
 from random import randint
@@ -189,7 +190,8 @@ class Decoder(object):
                         ove_f.close()
                         return
 
-                best_seq = self._model.run_beam_search(self._sess, batch).tolist()
+                best_seq = self._model.run_beam_search(self._sess, batch)
+                best_seq = best_seq[:, 1, :].tolist()
                 # is the beam_size here 1?
                 outputs_ids = [[t for t in hyp[:hyp.index(data.STOP_DECODING) if data.STOP_DECODING in hyp else -1]]
                                for hyp in best_seq]
