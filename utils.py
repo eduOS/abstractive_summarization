@@ -79,11 +79,11 @@ def initialize_uninitialized(sess):
 
 def print_dashboard(type, step, batch_size, enc_vocab_size, dec_vocab_size,
                     running_avg_loss, eval_loss,
-                    total_training_time, current_speed,
+                    total_training_time, current_speed, current_learning_rate,
                     coverage_loss="not set"):
     print(
         "\nDashboard for %s updated %s, finished steps:\t%s\n"
-        "\tBatch size:\t%s\n"
+        "\tBatch size:\t%s, current learning rate:\t%s\n"
         "\tEncoder vocabulary size:\t%s\n"
         "\tDecoder vocabulary size:\t%s\n"
         "\tArticles trained:\t%s\n"
@@ -95,6 +95,7 @@ def print_dashboard(type, step, batch_size, enc_vocab_size, dec_vocab_size,
             datetime.datetime.now().strftime("on %m-%d at %H:%M"),
             step,
             batch_size,
+            current_learning_rate,
             enc_vocab_size,
             dec_vocab_size,
             batch_size * step,

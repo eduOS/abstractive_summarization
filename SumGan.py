@@ -98,8 +98,10 @@ tf.app.flags.DEFINE_string('dec_dir', '', 'Where to generate the decode results.
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in adirectory with this name, under log_root.')
 
 # Hyperparameters
-tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
-tf.app.flags.DEFINE_integer('emb_dim', 300, 'dimension of word embeddings')
+tf.app.flags.DEFINE_integer('hidden_dim', 1024, 'Dimension of RNN hidden states')
+tf.app.flags.DEFINE_integer('word_emb_dim', 512, 'Dimension of word embeddings.')
+tf.app.flags.DEFINE_integer('char_emb_dim', 512, 'Dimension of character embeddings.')
+tf.app.flags.DEFINE_boolean('load_emb', False, 'If the embedding should be loaded.')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
 tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 120
@@ -201,16 +203,18 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
                 sess, model, best_loss, model_dir, model_saver,
                 batcher_val, val_dir, val_saver, global_step, gan_eval=False)
             last_ten_eval_loss.append(eval_loss)
-            if len(last_ten_eval_loss) == 10 and min(last_ten_eval_loss) == last_ten_eval_loss[0] and eval_save_steps > 5000:
+            if len(last_ten_eval_loss) == 15 and min(last_ten_eval_loss) == last_ten_eval_loss[0] and eval_save_steps > 5000:
                 last_ten_eval_loss = deque(maxlen=10)
                 eval_save_steps -= 1000
+
+            current_learing_rate = model.get_cur_lr(sess)
 
             # print the print the dashboard
             current_speed = (time.time() - start_time + epsilon) / ((counter * hps.batch_size) + epsilon)
             total_training_time = (time.time() - start_time) * global_step / (counter * 3600)
             print_dashboard("Generator", global_step, hps.batch_size, hps.enc_vocab_size, hps.dec_vocab_size,
                             running_avg_loss, eval_loss,
-                            total_training_time, current_speed,
+                            total_training_time, current_speed, current_learing_rate,
                             coverage_loss if coverage_loss else "not set")
 
 
@@ -271,7 +275,8 @@ def main(argv):
         'beam_size',
         'cov_loss_wt',
         'coverage',
-        'emb_dim',
+        'word_emb_dim',
+        'char_emb_dim',
         'rand_unif_init_mag',
         'enc_vocab_file',
         'dec_vocab_file',
@@ -341,7 +346,7 @@ def main(argv):
     if hps_gen.dec_vocab_file == hps_dis.dis_vocab_file:
         assert hps_dis.vocab_type == hps_gen.vocab_type, (
             "the vocab type of the generator and the discriminator should be the same")
-        hps_dis = hps_dis._replace(layer_size=hps_gen.emb_dim)
+        hps_dis = hps_dis._replace(layer_size=hps_gen.char_emb_dim)
         hps_dis = hps_dis._replace(dis_vocab_size=hps_gen.dec_vocab_size)
 
     if FLAGS.mode == "train_gan":
@@ -415,18 +420,25 @@ def main(argv):
             ckpt_state = tf.train.get_checkpoint_state(emb_path)
             if ckpt_state:
                 ckpt = ckpt_state.model_checkpoint_path
-                generator.dec_saver.restore(sess, ckpt)
-                generator.enc_saver.restore(sess, ckpt)
-                print(colored("successfully restored embeddings form %s" % emb_path, 'green'))
+                try:
+                    generator.dec_emb_saver.restore(sess, ckpt)
+                    print(colored("successfully restored embeddings for decoder form %s" % emb_path, 'green'))
+                except:
+                    print(colored("Failed to restore embeddings for decoder in %s" % emb_path, 'red'))
+                try:
+                    generator.enc_emb_saver.restore(sess, ckpt)
+                    print(colored("successfully restored embeddings for encoder form %s" % emb_path, 'green'))
+                except:
+                    print(colored("Failed to restore embeddings for encoder in %s" % emb_path, 'red'))
             else:
-                print(colored("failed to restore embeddings form %s" % emb_path, 'red'))
+                print(colored("No embeddings restored in %s" % emb_path, 'red'))
 
     elif FLAGS.mode in ["decode", "train_gan"]:
         print("Restoring the generator model from the best checkpoint...")
         dec_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
-        model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator'))
+        model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', 'val'))
         gan_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir))
         gan_val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir, "val"))
         gan_newly_added = []

@@ -140,11 +140,11 @@ class PointerGenerator(object):
 
             with tf.variable_scope('embeddings'):
                 self.enc_embeddings = tf.get_variable(
-                    'enc_embeddings', [self._enc_vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+                    'enc_embeddings', [self._enc_vocab.size(), hps.word_emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
                 self.dec_embeddings = tf.get_variable(
-                    'dec_embeddings', [self._dec_vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
-                self.dec_saver = tf.train.Saver({"dec_embeddings": self.dec_embeddings})
-                self.enc_saver = tf.train.Saver({"enc_embeddings": self.enc_embeddings})
+                    'dec_embeddings', [self._dec_vocab.size(), hps.char_emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+                self.dec_emb_saver = tf.train.Saver({"dec_embeddings": self.dec_embeddings})
+                self.enc_emb_saver = tf.train.Saver({"enc_embeddings": self.enc_embeddings})
                 self._emb_enc_inputs = tf.nn.embedding_lookup(self.enc_embeddings, self.enc_batch)
                 # for gen training(mode is pretrain_gen) and
                 # beam searching(mode is decode or train_gan)
@@ -250,7 +250,7 @@ class PointerGenerator(object):
                 gradients, self.hps.gen_max_gradient)
 
         # set the adaptive learning rate
-        learning_rate = tf.train.exponential_decay(
+        self.learning_rate = tf.train.exponential_decay(
             self.hps.gen_lr,               # Base learning rate.
             self.global_step * self.hps.batch_size,  # Current index into the dataset.
             100000,             # Decay step.
@@ -258,7 +258,7 @@ class PointerGenerator(object):
             staircase=True)
 
         # Apply adagrad optimizer
-        optimizer = tf.train.AdamOptimizer(learning_rate)
+        optimizer = tf.train.AdamOptimizer(self.learning_rate)
         with tf.device("/gpu:0"):
             self._train_op = optimizer.apply_gradients(
                 zip(grads, trainable_variables),
@@ -375,6 +375,9 @@ class PointerGenerator(object):
         t1 = time.time()
         print(colored('Time to build graph: %s seconds' % (t1 - t0), "yellow"))
         return decoder_scope
+
+    def get_cur_lr(self, sess):
+        return sess.run(self.learning_rate)
 
     def run_one_batch(self, sess, batch, update=True, gan_eval=False):
         """Runs one training iteration. Returns a dictionary containing train
