@@ -54,7 +54,7 @@ tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
 tf.app.flags.DEFINE_integer("dis_vocab_size", 5000, "vocabulary size.")
 tf.app.flags.DEFINE_string("dis_vocab_file", "vocab", "the path of the discriminator vocabulary.")
-tf.app.flags.DEFINE_string("vocab_type", "char", "the path of the discriminator vocabulary.")
+tf.app.flags.DEFINE_string("vocab_type", "word", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_integer("num_models", 3, "Size of each model layer. The actural size is doubled.")
 
@@ -98,7 +98,7 @@ tf.app.flags.DEFINE_string('dec_dir', '', 'Where to generate the decode results.
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in adirectory with this name, under log_root.')
 
 # Hyperparameters
-tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
+tf.app.flags.DEFINE_integer('hidden_dim', 512, 'dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 300, 'dimension of word embeddings')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
@@ -424,17 +424,20 @@ def main(argv):
             ckpt_state = tf.train.get_checkpoint_state(emb_path)
             if ckpt_state:
                 ckpt = ckpt_state.model_checkpoint_path
-                generator.saver.restore(sess, ckpt)
+                try:
+                    generator.saver.restore(sess, ckpt)
+                except:
+                    print(colored("failed to restore embeddings form %s" % emb_path, 'red'))
                 print(colored("successfully restored embeddings form %s" % emb_path, 'green'))
             else:
-                print(colored("failed to restore embeddings form %s" % emb_path, 'red'))
+                print(colored("embeddings doesn't exist in %s" % emb_path, 'red'))
 
     elif FLAGS.mode in ["decode", "train_gan"]:
         print("Restoring the generator model from the best checkpoint...")
         dec_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
-        model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator'))
+        model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', 'val'))
         gan_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir))
         gan_val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir, "val"))
         gan_newly_added = []

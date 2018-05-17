@@ -210,7 +210,7 @@ if __name__ == '__main__':
         print("USAGE: python make_datafiles.py <source_dir>")
         sys.exit()
     source_dir = sys.argv[1]
-    segment = False
+    segment = True
 
     # Create some new directories
     if not os.path.exists(finished_files_dir):
