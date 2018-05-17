@@ -30,6 +30,7 @@ from utils import conv_encoder
 from utils import linear_mapping_weightnorm
 from codecs import open
 from six.moves import xrange
+import data
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -221,19 +222,6 @@ class PointerGenerator(object):
 
                 self.gan_loss = tf.reduce_mean(tf.stack(k_gan_losses))
 
-        # We run decode beam search mode one decoder step at a time
-        # log_dists is a singleton list containing shape (batch_size,
-        # extended_vsize)
-        if len(emb_dec_inputs) == 1:
-            assert len(final_dists) == 1
-            self.final_dists = final_dists[0]
-            topk_probs, self._topk_ids = tf.nn.top_k(
-                self.final_dists, hps.beam_size * 2)
-            self._topk_log_probs = tf.log(topk_probs)
-
-            # for the monte carlo searching
-            self._ran_id = tf.multinomial(tf.log(self.final_dists), 1)
-
         # for the loss
         loss_to_minimize = self._total_loss if self.hps.coverage else self._loss
         trainable_variables = tf.trainable_variables()
@@ -246,8 +234,14 @@ class PointerGenerator(object):
             grads, global_norm = tf.clip_by_global_norm(
                 gradients, self.hps.gen_max_gradient)
 
+        self.learning_rate = tf.train.exponential_decay(
+            self.hps.gen_lr,               # Base learning rate.
+            self.global_step * self.hps.batch_size,  # Current index into the dataset.
+            1000000,             # Decay step.
+            0.95,                # Decay rate.
+            staircase=True)
         # Apply adagrad optimizer
-        optimizer = tf.train.AdamOptimizer(self.hps.gen_lr)
+        optimizer = tf.train.AdamOptimizer(self.learning_rate)
         with tf.device("/gpu:0"):
             self._train_op = optimizer.apply_gradients(
                 zip(grads, trainable_variables),
@@ -264,8 +258,77 @@ class PointerGenerator(object):
 
         return decoder_scope
 
+    def get_cur_lr(self, sess):
+        return sess.run(self.learning_rate)
+
+    def beam_search(self):
+        # state, attention
+        beam_size = self.hps.beam_size
+        batch_size = self.hps.batch_size
+        vocab_size = self._dec_vocab.size()
+        num_steps = self.hps.max_dec_steps
+
+        log_beam_probs, beam_symbols = [], []
+        output_projection = None
+
+        def beam_search(prev, i, log_fn):
+            if output_projection is not None:
+                prev = tf.nn.xw_plus_b(prev, output_projection[0], output_projection[1])
+                # (batch_size*beam_size, embedding_size) -> (batch_size*beam_size, vocab_size)
+
+            log_probs = log_fn(prev)
+
+            if i > 1:
+                log_probs = tf.reshape(tf.expand_dims(tf.reduce_sum(tf.stack(log_beam_probs, axis=1), axis=1), axis=1) + log_probs,
+                                       [-1, beam_size * vocab_size])
+                # (batch_size*beam_size, vocab_size) -> (batch_size, beam_size*vocab_size)
+            best_probs, indices = tf.nn.top_k(log_probs, beam_size)
+            # (batch_size, beam_size)
+            indices = tf.squeeze(tf.reshape(indices, [-1, 1]))
+            best_probs = tf.reshape(best_probs, [-1])
+            # (batch_size*beam_size)
+
+            symbols = indices % vocab_size       # which word in vocabulary
+            beam_parent = indices // vocab_size  # which hypothesis it came from
+
+            beam_symbols.append(symbols)
+
+            index_base = tf.reshape(
+                tf.tile(tf.expand_dims(tf.range(batch_size) * beam_size, axis=1), [1, beam_size]), [-1])
+            # (batch_size*beam_size, num_steps)
+            # real_path = tf.reshape(tf.stack(beam_path, axis=1) + index_base, [beam_size*batch_size, i])
+            real_path = beam_parent + index_base
+            # adapt the previous symbols according to the current symbol
+            if i > 1:
+                pre_sum = tf.reduce_sum(tf.stack(log_beam_probs, axis=1), axis=1)
+                pre_sum = tf.gather(pre_sum, real_path)
+            else:
+                pre_sum = 0
+            log_beam_probs.append(best_probs-pre_sum)
+            if i > 1:
+                for j in range(i)[:0:-1]:
+                    beam_symbols[j-1] = tf.gather(beam_symbols[j-1], real_path)
+                    log_beam_probs[j-1] = tf.gather(log_beam_probs[j-1], real_path)
+
+        dec_input = tf.convert_to_tensor(batch_size * [self._dec_vocab.word2id(data.START_DECODING)])
+        dec_input = tf.nn.embedding_lookup(self.dec_embeddings, dec_input)
+        for i in range(num_steps):
+            vocab_dists = self._conv_decoder(dec_input)
+            beam_search(vocab_dists[0], i+1, tf.log)
+            dec_input = tf.nn.embedding_lookup(tf.stack(values=beam_symbols, axis=1))
+
+        best_seq = tf.stack(values=beam_symbols, axis=1)
+        self.best_seq = tf.reshape(best_seq, [batch_size, beam_size, num_steps])
+        # (batch_size*beam_size, num_steps)
+
+    def run_beam_search(self, sess, batch):
+        feed_dict = self._make_feed_dict(batch, just_enc=True)
+        best_seq = sess.run(self.best_seq, feed_dict)  # run the encoder
+        return best_seq
+
     def _conv_decoder(self, emb_dec_inputs):
-        emb_dec_inputs = tf.stack(emb_dec_inputs, axis=1)
+        if type(emb_dec_inputs) is list:
+            emb_dec_inputs = tf.stack(emb_dec_inputs, axis=1)
         vsize = self.hps.gen_vocab_size
         is_training = self.hps.mode in ["pretrain_gen", "train_gan"]
         # emb_enc_dim = self._emb_enc_inputs.get_shape().as_list()[-1]

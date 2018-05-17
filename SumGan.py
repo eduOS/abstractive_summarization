@@ -109,7 +109,7 @@ tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of gene
 tf.app.flags.DEFINE_integer('gen_vocab_size', 5000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
-tf.app.flags.DEFINE_float('gen_lr', 0.0001, 'learning rate')
+tf.app.flags.DEFINE_float('gen_lr', 0.001, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
 tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
@@ -694,7 +694,8 @@ def main(argv):
     # --------------- decoding samples ---------------
     elif FLAGS.mode == "decode":
         print('Going to decode from the generator.')
-        decoder.bs_decode(decoder_batcher)
+
+        decoder.beam_search(decoder_batcher)
         print("Finished decoding..")
         # decode for generating corpus for discriminator
 
