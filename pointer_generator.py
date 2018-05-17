@@ -253,8 +253,8 @@ class PointerGenerator(object):
         self.learning_rate = tf.train.exponential_decay(
             self.hps.gen_lr,               # Base learning rate.
             self.global_step * self.hps.batch_size,  # Current index into the dataset.
-            100000,             # Decay step.
-            0.9,                # Decay rate.
+            1000000,             # Decay step.
+            0.95,                # Decay rate.
             staircase=True)
 
         # Apply adagrad optimizer

@@ -7,6 +7,7 @@ import tensorflow as tf
 import math
 import datetime
 import utils
+import sys
 from os.path import join as join_path
 from termcolor import colored
 from tensorflow.python import pywrap_tensorflow
@@ -98,7 +99,7 @@ def save_ckpt(sess, model, best_loss, model_dir, model_saver,
             losses.append(loss_eval)
         else:
             print(colored("Encountered a NAN.", 'red'))
-    eval_loss = sum(losses) / len(losses)
+    eval_loss = sum(losses) / (len(losses) + sys.float_info.epsilon)
     if best_loss is None or eval_loss < best_loss:
         sess.run(model.least_val_loss.assign(eval_loss))
         print(
