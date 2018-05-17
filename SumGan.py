@@ -19,7 +19,6 @@ from gen_utils import calc_running_avg_loss
 from gen_utils import get_best_loss_from_chpt
 from gen_utils import save_ckpt as gen_save_ckpt
 from gan_utils import save_ckpt as gan_save_ckpt
-from tensorflow.python import debug as tf_debug
 from utils import sattolo_cycle
 from utils import print_dashboard
 from dis_utils import dump_chpt
@@ -425,7 +424,7 @@ def main(argv):
             if ckpt_state:
                 ckpt = ckpt_state.model_checkpoint_path
                 try:
-                    generator.saver.restore(sess, ckpt)
+                    generator.emb_saver.restore(sess, ckpt)
                 except:
                     print(colored("failed to restore embeddings form %s" % emb_path, 'red'))
                 print(colored("successfully restored embeddings form %s" % emb_path, 'green'))

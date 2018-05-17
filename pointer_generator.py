@@ -240,7 +240,7 @@ class PointerGenerator(object):
             with tf.variable_scope('embeddings'):
                 self.embeddings = tf.get_variable(
                     'embeddings', [self._vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
-                self.saver = tf.train.Saver({"embeddings": self.embeddings})
+                self.emb_saver = tf.train.Saver({"enc_embeddings": self.embeddings})
                 self._emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
                 self.temp_embedded_seq = tf.nn.embedding_lookup(self.embeddings, self.temp_batch)
                 # for gen training(mode is pretrain_gen) and
