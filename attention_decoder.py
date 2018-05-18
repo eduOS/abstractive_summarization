@@ -39,14 +39,14 @@ from utils import maxout
 # attention mechanism using the new seq2seq library for tensorflow 1.0:
 # https://www.tensorflow.org/api_guides/python/contrib.seq2seq#Attention
 
-def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attention_keys, attention_values,
-                           initial_state, cell, initial_state_attention=False, use_coverage=False,
-                           prev_coverage=None, local_attention_layers=3):
+def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attention_keys,
+                           initial_state, cell, initial_state_attention=False,
+                           use_coverage=False, prev_coverage=None):
     # can this be applied to beam repetitive batch?
     with variable_scope.variable_scope("attention_decoder"):
         encoder_states = attention_keys
         # if this line fails, it's because the batch size isn't defined
-        batch_size = array_ops.shape(decoder_inputs)[0]
+        batch_size = array_ops.shape(enc_padding_mask)[0]
         # if this line fails, it's because the attention length isn't defined
         attn_size = attention_keys.get_shape()[2].value
 
