@@ -9,10 +9,14 @@ from codecs import open
 from collections import defaultdict as dd
 import random
 import sys
+import os
 
 # generate checkpoint from vocab and embeddings
 # python embed_file2ckpt.py vocab_file embed_file vocab_size out_dir
 # python dataprocess/embed_file2ckpt.py data/vocab ../../data/zh_emb/emb_wd/embedding.300 100000 ./temp/
+finished_files_dir = "./temp/"
+if not os.path.exists(finished_files_dir):
+    os.makedirs(finished_files_dir)
 
 
 def read_from_file(vocab_path, embed_path, vocab_size):
@@ -63,7 +67,7 @@ def read_from_file(vocab_path, embed_path, vocab_size):
 
     return new_embed_l, emb_dim
 
-vocab_path, embed_path, vocab_size = sys.argv[1], sys.argv[2], int(sys.argv[3])
+vocab_path, embed_path, vocab_size = './data/vocab', '../../data/zh_emb/emb_wd/embedding.300', int(sys.argv[1])
 emb_l, emb_dim = read_from_file(vocab_path, embed_path, vocab_size)
 # vocab_size = 100000
 # emb_dim = 300
@@ -81,4 +85,4 @@ as_op = embeddings.assign(emb_ph)
 
 sess = tf.Session()
 sess.run(as_op, feed_dict={emb_ph: emb_l})
-saver.save(sess, sys.argv[-1])
+saver.save(sess, finished_files_dir)
