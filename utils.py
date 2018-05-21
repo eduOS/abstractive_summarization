@@ -252,6 +252,8 @@ def conv_encoder(inputs, seq_len, is_training,
                  nhids_list=[256, 256, 256, 256],
                  kwidths_list=[3, 3, 3, 3]):
     embed_size = inputs.get_shape().as_list()[-1]
+    batch_size = tf.shape(inputs)[0]
+    enc_len = tf.shape(inputs)[1]
 
     #  Apply dropout to embeddings
     inputs = tf.contrib.layers.dropout(
@@ -271,7 +273,7 @@ def conv_encoder(inputs, seq_len, is_training,
             #  cnn = nn.GradMultiply(cnn, 1 / (2 * nattn))
         cnn_c_output = (next_layer + inputs) * tf.sqrt(0.5)
 
-        attention_keys = next_layer
+        attention_keys = tf.reshape(next_layer, [batch_size, enc_len, embed_size])
     final_state = tf.reduce_mean(cnn_c_output, 1)
     return attention_keys, final_state
 
@@ -507,7 +509,7 @@ def conv_decoder_stack(target_embed, attention_keys, attention_values, inputs, e
 
         # add attention
         # decoder output -->linear mapping to embed, + target embed,  query decoder output a, softmax --> scores, scores*encoder_output_c-->output,  output--> linear mapping to nhid+  decoder_output -->
-        att_out = make_attention(target_embed, attention_keys, attention_values, next_layer, layer_idx, enc_padding_mask)
+        att_out = make_attention(target_embed, attention_keys, attention_values, next_layer, layer_idx, enc_padding_mask, is_training)
         # att_out += linear_mapping_weightnorm(_att_out, _att_out.get_shape().as_list()[-1], "linear_mapping_att_out_"+str(layer_idx))
         next_layer = (next_layer + att_out) * tf.sqrt(0.5)
 
@@ -537,10 +539,30 @@ def linear_mapping_stupid(inputs, out_dim, in_dim=None, dropout=1.0, var_scope_n
   return output
 
 
-def make_attention(target_embed, attention_keys, attention_values, decoder_hidden, layer_idx, enc_padding_mask):
+def make_attention(target_embed, attention_keys, attention_values, decoder_hidden, layer_idx, enc_padding_mask, is_training):
     # this is the so called dot product attention
     # TODO: the tf.sqrt(0.5) should be replaced to make the attention scaled dot product attention
     # enc_padding_mask: M*N2
+    def enc_mask(att_score):
+        dec_len = tf.shape(att_score)[1]
+        batch_size = tf.shape(att_score)[0]
+        enc_len = tf.shape(att_score)[1]
+        att_score = tf.transpose(att_score, [1, 0, 2])
+        # M*N1*N2 -> N1*M*N2
+        att_score_ar = tf.TensorArray(dtype=tf.float32, size=dec_len)
+
+        def cond(att, i, asa):
+            return i < dec_len
+
+        def body(att, i, att_score_ar):
+            att_score_ar = att_score_ar.write(i, att[i] * enc_padding_mask)
+            return att_score, i+1, att_score_ar
+
+        _, _, att_score_ar = tf.while_loop(cond, body, (att_score, 0, att_score_ar))
+        att_score = att_score_ar.stack()
+        att_score = tf.reshape(att_score, [batch_size, dec_len, enc_len])
+        return att_score
+
     with tf.variable_scope("attention_layer_" + str(layer_idx)):
         embed_size = target_embed.get_shape().as_list()[-1]
         # k
@@ -550,9 +572,12 @@ def make_attention(target_embed, attention_keys, attention_values, decoder_hidde
         attention_key_proj = linear_mapping_weightnorm(attention_keys, embed_size, var_scope_name="linear_mapping_enc_output")
 
         att_score = tf.matmul(dec_rep, attention_key_proj, transpose_b=True)
-        enc_padding_mask = tf.tile(tf.expand_dims(enc_padding_mask, axis=1), [1, att_score.get_shape().as_list()[1], 1])
-        att_score *= enc_padding_mask
         # M*N1*K  ** M*N2*K  --> M*N1*N2
+        if is_training:
+            enc_padding_mask = tf.tile(tf.expand_dims(enc_padding_mask, axis=1), [1, att_score.get_shape().as_list()[1], 1])
+            att_score *= enc_padding_mask
+        else:
+            att_score = enc_mask(att_score)
         att_score = tf.nn.softmax(att_score)
 
         length = tf.cast(tf.shape(attention_values), tf.float32)

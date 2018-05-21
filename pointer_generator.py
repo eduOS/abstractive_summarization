@@ -143,8 +143,7 @@ class PointerGenerator(object):
                 self.temp_embedded_seq = tf.nn.embedding_lookup(self.embeddings, self.temp_batch)
                 # for gen training(mode is pretrain_gen) and
                 # beam searching(mode is decode or train_gan)
-                emb_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
-                                  for x in tf.unstack(self._dec_batch, axis=1)]
+                emb_dec_inputs = tf.nn.embedding_lookup(self.embeddings, self._dec_batch)
                 # for evaluation gan(when mode is train_gan)
                 emb_eval_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
                                        for x in tf.unstack(self._eval_dec_batch, axis=1)]
@@ -156,9 +155,8 @@ class PointerGenerator(object):
                 ]
 
             attention_keys, dec_in_state = conv_encoder(
-                hps.encoder, self._emb_enc_inputs,
-                self.enc_lens, hps.mode in ["pretrain_gen", "train_gan"],
-                hps.hidden_dim, self.rand_unif_init)
+                self._emb_enc_inputs,
+                self.enc_lens, hps.mode in ["pretrain_gen", "train_gan"])
 
             self.attention_keys = attention_keys
             self.attention_values = (
@@ -169,6 +167,8 @@ class PointerGenerator(object):
             with tf.variable_scope('decoder') as decoder_scope:
                 final_dists = self._conv_decoder(emb_dec_inputs)
                 decoder_scope.reuse_variables()
+                if self.hps.mode == "decode":
+                    self.beam_search()
 
                 self.final_dists = final_dists
 
@@ -265,7 +265,7 @@ class PointerGenerator(object):
         # state, attention
         beam_size = self.hps.beam_size
         batch_size = self.hps.batch_size
-        vocab_size = self._dec_vocab.size()
+        vocab_size = self._vocab.size()
         num_steps = self.hps.max_dec_steps
 
         log_beam_probs, beam_symbols = [], []
@@ -310,12 +310,14 @@ class PointerGenerator(object):
                     beam_symbols[j-1] = tf.gather(beam_symbols[j-1], real_path)
                     log_beam_probs[j-1] = tf.gather(log_beam_probs[j-1], real_path)
 
-        dec_input = tf.convert_to_tensor(batch_size * [self._dec_vocab.word2id(data.START_DECODING)])
-        dec_input = tf.nn.embedding_lookup(self.dec_embeddings, dec_input)
+        dec_input = tf.convert_to_tensor([batch_size * [self._vocab.word2id(data.START_DECODING)]])
+        dec_input = tf.nn.embedding_lookup(self.embeddings, dec_input)
         for i in range(num_steps):
+            print(dec_input.get_shape().as_list())
             vocab_dists = self._conv_decoder(dec_input)
             beam_search(vocab_dists[0], i+1, tf.log)
-            dec_input = tf.nn.embedding_lookup(tf.stack(values=beam_symbols, axis=1))
+            dec_input = tf.nn.embedding_lookup(self.embeddings, tf.stack(values=beam_symbols, axis=1))
+            dec_input = tf.reshape(dec_input, [batch_size, len(beam_symbols), self.hps.emb_dim])
 
         best_seq = tf.stack(values=beam_symbols, axis=1)
         self.best_seq = tf.reshape(best_seq, [batch_size, beam_size, num_steps])
