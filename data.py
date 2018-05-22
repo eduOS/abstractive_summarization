@@ -208,7 +208,7 @@ def abstract2ids(abstract_words, vocab, article_oovs):
     return ids
 
 
-def outputsids2words(id_ar, vocab, articles_oovs, art_ids=None):
+def outputsids2words(id_ar, vocab):
     """Maps output ids to words, including mapping in-article OOVs from their
     temporary ids to the original OOV string (applicable in pointer-generator
     mode).
@@ -216,9 +216,6 @@ def outputsids2words(id_ar, vocab, articles_oovs, art_ids=None):
     Args:
       id_ar: a 2-D array of ids
       vocab: Vocabulary object
-      articles_oovs: a list of list of OOV words (strings) in the order corresponding to
-      their temporary article OOV ids (that have been assigned in
-      pointer-generator mode), or None (in baseline mode)
 
     Returns:
       words: list of words (strings)
@@ -227,33 +224,10 @@ def outputsids2words(id_ar, vocab, articles_oovs, art_ids=None):
     for j, id_list in enumerate(id_ar):
         words = []
         for i in id_list:
-            try:
-                w = vocab.id2word(i)  # might be [UNK]
-            except ValueError:  # w is OOV
-                assert articles_oovs is not None, (
-                    "Error: model produced a word ID that isn't in the vocabulary.\
-                    This should not happen in baseline (no pointer-generator) mode")
-                article_oov_idx = i - vocab.size()
-                try:
-                    w = articles_oovs[j][article_oov_idx]
-                except IndexError:
-                    print(
-                        'Error: model produced word ID %i which corresponds to'
-                        'article OOV %i but this example only has %i article OOVs' %
-                        (i, article_oov_idx, len(articles_oovs[j])))
-                    w = UNKNOWN_TOKEN
-                    # this happen in the gan generated samples
-                    # ids may out of the oovs, quite strange
-                    # print("article oovs")
-                    # print("|".join(articles_oovs[j]))
-                    # print("artcle ids")
-                    # print(art_ids[j])
-                    # print("generated ids ")
-                    # print(id_lists[j])
+            w = vocab.id2word(i)  # might be [UNK]
             words.append(w)
         words_lists.append(words)
     return words_lists
-
 
 def show_art_oovs(articles, vocab):
     """Returns the article string, highlighting the OOVs by placing

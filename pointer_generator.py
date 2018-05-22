@@ -265,12 +265,12 @@ class PointerGenerator(object):
         log_beam_probs, beam_symbols = [], []
         output_projection = None
 
-        attention_keys = tf.tile(tf.expand_dims(self.attention_keys, axis=1), [1, beam_size, 1, 1])
-        attention_keys = tf.reshape(attention_keys, [batch_size*beam_size, tf.shape(self.attention_keys)[1], self.attention_keys.get_shape().as_list()[-1]])
-        attention_values = tf.tile(tf.expand_dims(self.attention_values, axis=1), [1, beam_size, 1, 1])
-        attention_values = tf.reshape(attention_values, [batch_size*beam_size, tf.shape(self.attention_values)[1], self.attention_values.get_shape().as_list()[-1]])
-        enc_padding_mask = tf.tile(tf.expand_dims(self.enc_padding_mask, axis=1), [1, beam_size, 1])
-        enc_padding_mask = tf.reshape(enc_padding_mask, [batch_size*beam_size, tf.shape(self.enc_padding_mask)[1]])
+        _attention_keys = tf.tile(tf.expand_dims(self.attention_keys, axis=1), [1, beam_size, 1, 1])
+        _attention_keys = tf.reshape(_attention_keys, [batch_size*beam_size, tf.shape(self.attention_keys)[1], self.attention_keys.get_shape().as_list()[-1]])
+        _attention_values = tf.tile(tf.expand_dims(self.attention_values, axis=1), [1, beam_size, 1, 1])
+        _attention_values = tf.reshape(_attention_values, [batch_size*beam_size, tf.shape(self.attention_values)[1], self.attention_values.get_shape().as_list()[-1]])
+        _enc_padding_mask = tf.tile(tf.expand_dims(self.enc_padding_mask, axis=1), [1, beam_size, 1])
+        _enc_padding_mask = tf.reshape(_enc_padding_mask, [batch_size*beam_size, tf.shape(self.enc_padding_mask)[1]])
 
         def beam_search(prev, i, log_fn):
             if output_projection is not None:
@@ -321,9 +321,9 @@ class PointerGenerator(object):
                 attention_values = self.attention_values
                 enc_padding_mask = self.enc_padding_mask
             else:
-                attention_keys = attention_keys
-                attention_values = attention_values
-                enc_padding_mask = enc_padding_mask
+                attention_keys = _attention_keys
+                attention_values = _attention_values
+                enc_padding_mask = _enc_padding_mask
             vocab_dists = self._conv_decoder(dec_input, attention_keys, attention_values, enc_padding_mask)
             beam_search(vocab_dists[0], i+1, tf.log)
             dec_input = tf.nn.embedding_lookup(self.embeddings, tf.stack(values=beam_symbols, axis=1))
