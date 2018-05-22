@@ -104,7 +104,7 @@ tf.app.flags.DEFINE_integer('emb_dim', 300, 'dimension of word embeddings')
 # search is the same as the original beam search
 tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 400
 tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 100
-tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
+tf.app.flags.DEFINE_integer('beam_size', 40, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('gen_vocab_size', 5000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
@@ -113,8 +113,8 @@ tf.app.flags.DEFINE_float('gen_lr', 0.001, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
 tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
-tf.app.flags.DEFINE_string('encoder', 'lstm_encoder', 'Name for the encoder type. Support lstm_encoder and conv_encoder so far.')
-tf.app.flags.DEFINE_string('decoder', 'lstm_decoder', 'Name for the decoder type. Support lstm_decoder and conv_decoder so far.')
+tf.app.flags.DEFINE_string('encoder', 'conv_encoder', 'Name for the encoder type. Support lstm_encoder and conv_encoder so far.')
+tf.app.flags.DEFINE_string('decoder', 'conv_decoder', 'Name for the decoder type. Support lstm_decoder and conv_decoder so far.')
 
 # Pointer-generator or baseline model
 # tf.app.flags.DEFINE_boolean('pointer_gen', True, 'If True, use pointer-generator model. If False, use baseline model.')
@@ -189,6 +189,54 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
         loss = results['loss']
         if global_step == 1:
             print("The training starts with loss %s." % loss)
+            print("The parameters: \n")
+
+            print(
+                'mode: %s\n'
+                'model_dir: %s\n'
+                'decoder: %s\n'
+                'steps_per_checkpoint: %s\n'
+                'batch_size: %s\n'
+                'beam_size: %s\n'
+                'coverage: %s\n'
+                'emb_dim: %s\n'
+                'rand_unif_init_mag: %s\n'
+                'gen_vocab_file: %s\n'
+                'vocab_type: %s\n'
+                'gen_vocab_size: %s\n'
+                'hidden_dim: %s\n'
+                'gen_lr: %s\n'
+                'gen_max_gradient: %s\n'
+                'max_dec_steps: %s\n'
+                'max_enc_steps: %s\n'
+                'min_dec_steps: %s\n'
+                'trunc_norm_init_std: %s\n'
+                'single_pass: %s\n'
+                'log_root: %s\n'
+                'data_path: %s\n' % (
+                    hps.mode,
+                    hps.model_dir,
+                    hps.decoder,
+                    hps.steps_per_checkpoint,
+                    hps.batch_size,
+                    hps.beam_size,
+                    hps.coverage,
+                    hps.emb_dim,
+                    hps.rand_unif_init_mag,
+                    hps.gen_vocab_file,
+                    hps.vocab_type,
+                    hps.gen_vocab_size,
+                    hps.hidden_dim,
+                    hps.gen_lr,
+                    hps.gen_max_gradient,
+                    hps.max_dec_steps,
+                    hps.max_enc_steps,
+                    hps.min_dec_steps,
+                    hps.trunc_norm_init_std,
+                    hps.single_pass,
+                    hps.log_root,
+                    hps.data_path)
+            )
 
         if hps.coverage:
             coverage_loss = results['coverage_loss']
@@ -264,9 +312,7 @@ def main(argv):
     hparam_gen = [
         'mode',
         'model_dir',
-        'encoder',
         'decoder',
-        'adagrad_init_acc',
         'steps_per_checkpoint',
         'batch_size',
         'beam_size',
@@ -401,8 +447,8 @@ def main(argv):
         tf.get_collection_ref(tf.GraphKeys.WEIGHTS) + \
         tf.get_collection_ref(tf.GraphKeys.BIASES)
     sess = tf.Session(config=utils.get_config())
-    # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-    # sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
+    sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+    sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
     sess.run(tf.variables_initializer(all_variables))
     if FLAGS.mode == "pretrain_gen":
         print("Restoring the generator model from the latest checkpoint...")

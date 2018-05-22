@@ -104,6 +104,10 @@ class PointerGenerator(object):
           update: only for the evaluation and training of the generator in gan training
         """
 
+        print(batch.enc_batch)
+        print(batch.enc_lens)
+        print(batch.enc_padding_mask)
+
         if gan_eval:
             gan = True
         feed_dict = {}
@@ -372,14 +376,10 @@ class PointerGenerator(object):
             'global_step': self.global_step,
         }
 
-        # to_return['attn_dists'] = self.attn_dists
-        # to_return['p_gens'] = self.p_gens
-        # to_return['final_dists'] = self.final_dists
-
         to_return['loss'] = self._eval_loss
         if gan_eval:
             to_return['loss'] = self._eval_loss
-        else:
+        elif update:
             to_return['loss'] = self._loss
         if update:
             # if update is False it is for the generator evaluation
@@ -388,13 +388,6 @@ class PointerGenerator(object):
         if self.hps.coverage:
             to_return['coverage_loss'] = self._coverage_loss
         rsts = sess.run(to_return, feed_dict)
-        # print('attn_dists')
-        # print(rsts['attn_dists'])
-        # print('p_gens')
-        # print(rsts['p_gens'])
-        # print('final_dists')
-        # print(rsts['final_dists'])
-        # time.sleep(100*100)
 
         return rsts
 
