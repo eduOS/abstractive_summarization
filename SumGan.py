@@ -42,7 +42,7 @@ tf.app.flags.DEFINE_boolean('restore_best_model', False, 'Restore the best model
 tf.app.flags.DEFINE_integer('steps_per_checkpoint', 10000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decay by this rate')
 tf.app.flags.DEFINE_float('sample_rate', 0.001, 'the sample rate, should be [0, 0.5]')
-tf.app.flags.DEFINE_boolean('debug', True, 'If debug is needed.')
+tf.app.flags.DEFINE_boolean('debug', False, 'If debug is needed.')
 
 # ------------------------------------- discriminator
 
@@ -482,9 +482,9 @@ def main(argv):
         dec_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
-        model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator'))
+        # model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator'))
         gan_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir))
-        gan_val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir, "val"))
+        gan_val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir, FLAGS.val_dir))
         gan_newly_added = []
         # add the newly added variables here
         var_list = [v for v in all_variables if "generator" in v.name]
@@ -495,7 +495,7 @@ def main(argv):
         gan_val_saver = tf.train.Saver(max_to_keep=3, var_list=var_list)
         # for the loss test
         gen_val_saver = tf.train.Saver(max_to_keep=10, var_list=var_list)
-        utils.load_ckpt(dec_saver, sess, model_dir, mode="val", force=True)
+        utils.load_ckpt(dec_saver, sess, val_dir, mode="val", force=True)
         decoder = Decoder(sess, generator, gen_vocab)
 
     if FLAGS.mode == "pretrain_dis" or (FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1):

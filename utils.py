@@ -562,10 +562,15 @@ def make_attention(target_embed, attention_keys, attention_values, decoder_hidde
 
         _, _, att_score_ar = tf.while_loop(cond, body, (att_score, 0, att_score_ar))
         att_score = att_score_ar.stack()
-        att_score = tf.reshape(att_score, [batch_size, dec_len, enc_len])
+        att_score = tf.transpose(att_score, [1, 0, 2])
         return att_score
 
     with tf.variable_scope("attention_layer_" + str(layer_idx)):
+        beam_size = target_embed.get_shape().as_list()[0] / attention_keys.get_shape().as_list()[0]
+        if beam_size > 1:
+            attention_keys = tf.expand_dims(attention_keys, axis=1)
+            attention_values
+            enc_padding_mask
         embed_size = target_embed.get_shape().as_list()[-1]
         # k
         dec_hidden_proj = linear_mapping_weightnorm(decoder_hidden, embed_size, var_scope_name="linear_mapping_att_query")

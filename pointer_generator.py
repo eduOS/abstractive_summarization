@@ -279,7 +279,7 @@ class PointerGenerator(object):
             best_probs, indices = tf.nn.top_k(log_probs, beam_size)
             # (batch_size, beam_size)
             indices = tf.squeeze(tf.reshape(indices, [-1, 1]))
-            best_probs = tf.reshape(best_probs, [-1])
+            best_probs = tf.reshape(best_probs, [batch_size*beam_size])
             # (batch_size*beam_size)
 
             symbols = indices % vocab_size       # which word in vocabulary
@@ -304,13 +304,14 @@ class PointerGenerator(object):
                     beam_symbols[j-1] = tf.gather(beam_symbols[j-1], real_path)
                     log_beam_probs[j-1] = tf.gather(log_beam_probs[j-1], real_path)
 
-        dec_input = tf.convert_to_tensor([batch_size * [self._vocab.word2id(data.START_DECODING)]])
+        dec_input = tf.convert_to_tensor(batch_size * [self._vocab.word2id(data.START_DECODING)])
         dec_input = tf.nn.embedding_lookup(self.embeddings, dec_input)
+        dec_input = tf.expand_dims(dec_input, axis=1)
         for i in range(num_steps):
             vocab_dists = self._conv_decoder(dec_input)
             beam_search(vocab_dists[0], i+1, tf.log)
             dec_input = tf.nn.embedding_lookup(self.embeddings, tf.stack(values=beam_symbols, axis=1))
-            dec_input = tf.reshape(dec_input, [batch_size, len(beam_symbols), self.hps.emb_dim])
+            dec_input = tf.reshape(dec_input, [batch_size*beam_size, len(beam_symbols), self.hps.emb_dim])
 
         best_seq = tf.stack(values=beam_symbols, axis=1)
         self.best_seq = tf.reshape(best_seq, [batch_size, beam_size, num_steps])
