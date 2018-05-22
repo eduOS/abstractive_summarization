@@ -41,6 +41,7 @@ tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training
 tf.app.flags.DEFINE_integer('steps_per_checkpoint', 10000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decay by this rate')
 tf.app.flags.DEFINE_float('sample_rate', 0.001, 'the sample rate, should be [0, 0.5]')
+tf.app.flags.DEFINE_float('keep_prob', 0.5, 'the dropout prob')
 
 # ------------------------------------- discriminator
 
@@ -98,9 +99,9 @@ tf.app.flags.DEFINE_string('dec_dir', '', 'Where to generate the decode results.
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in adirectory with this name, under log_root.')
 
 # Hyperparameters
-tf.app.flags.DEFINE_integer('hidden_dim', 512, 'Dimension of RNN hidden states')
-tf.app.flags.DEFINE_integer('word_emb_dim', 300, 'Dimension of word embeddings.')
-tf.app.flags.DEFINE_integer('char_emb_dim', 300, 'Dimension of character embeddings.')
+tf.app.flags.DEFINE_integer('hidden_dim', 500, 'Dimension of RNN hidden states')
+tf.app.flags.DEFINE_integer('word_emb_dim', 500, 'Dimension of word embeddings.')
+tf.app.flags.DEFINE_integer('char_emb_dim', 500, 'Dimension of character embeddings.')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
 tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 120
@@ -282,6 +283,7 @@ def main(argv):
         'vocab_type',
         'dec_vocab_size',
         'enc_vocab_size',
+        'keep_prob',
         'hidden_dim',
         'gen_lr',
         'gen_max_gradient',
@@ -325,6 +327,7 @@ def main(argv):
         'dis_max_gradient',
         'batch_size',
         'dis_lr',
+        'keep_prob',
         'lr_decay_factor',
         'rand_unif_init_mag',
         'cell_type',

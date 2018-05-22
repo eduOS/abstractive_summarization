@@ -214,6 +214,7 @@ def red_print(message, color='red'):
 def lstm_encoder(encoder_inputs, seq_len, hidden_dim,
                  att_head_num=4, rand_unif_init=None,
                  state_is_tuple=True, trunc_norm_init_std=1e-4,
+                 keep_prob=0.5, is_training=False
                  ):
     """Add a single-layer bidirectional LSTM encoder to the graph.
 
@@ -232,6 +233,8 @@ def lstm_encoder(encoder_inputs, seq_len, hidden_dim,
         Each are LSTMStateTuples of shape
         ([batch_size,hidden_dim],[batch_size,hidden_dim])
     """
+    encoder_outputs = tf.contrib.layers.dropout(encoder_inputs, keep_prob=keep_prob, is_training=is_training)
+
     with tf.variable_scope('encoder'):
         cell_fw = tf.contrib.rnn.LSTMCell(
             hidden_dim, initializer=rand_unif_init, state_is_tuple=state_is_tuple)
@@ -250,7 +253,9 @@ def lstm_encoder(encoder_inputs, seq_len, hidden_dim,
 
     dec_in_state = reduce_states(
         fw_st, bw_st, hidden_dim=hidden_dim,
-        activation_fn=tf.tanh, trunc_norm_init_std=trunc_norm_init_std)
+        activation_fn=tf.tanh, trunc_norm_init_std=trunc_norm_init_std,
+        keep_prob=keep_prob, is_training=is_training)
+    encoder_outputs = tf.contrib.layers.dropout(encoder_outputs, keep_prob=keep_prob, is_training=is_training)
     return encoder_outputs, dec_in_state
 
 
@@ -332,7 +337,7 @@ def conv1d_weightnorm(inputs, layer_idx, out_dim, kernel_size, padding="SAME", d
         return inputs
 
 
-def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_init_std=1e-4):
+def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_init_std=1e-4, keep_prob=0.5, is_training=True):
     """Add to the graph a linear layer to reduce the encoder's final FW and
     BW state into a single initial state for the decoder. This is needed
     because the encoder is bidirectional but the decoder is not.
@@ -375,6 +380,8 @@ def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_in
         new_h = tf.nn.relu(_h) - alpha * tf.nn.relu(-_h)
         # new_c = activation_fn(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
         # new_h = activation_fn(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
+        new_c = tf.contrib.layers.dropout(new_c, keep_prob=keep_prob, is_training=is_training)
+        new_h = tf.contrib.layers.dropout(new_h, keep_prob=keep_prob, is_training=is_training)
         return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
 
 

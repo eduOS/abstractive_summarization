@@ -47,6 +47,7 @@ class PointerGenerator(object):
         self._enc_vocab = enc_vocab
         self._dec_vocab = dec_vocab
         self._log_writer = open("./pg_log", "a", "utf-8")
+        self.is_training = self.hps.mode in ["pretrain_gen", "train_gan"]
 
     def _add_placeholders(self):
         """Add placeholders to the graph. These are entry points for any input
@@ -161,7 +162,7 @@ class PointerGenerator(object):
                 ]
 
             attention_keys, dec_in_state = lstm_encoder(
-                self._emb_enc_inputs, self.enc_lens, hps.hidden_dim, self.rand_unif_init)
+                self._emb_enc_inputs, self.enc_lens, hps.hidden_dim, self.rand_unif_init, hps.keep_prob, self.is_training)
 
             self.attention_keys, self.dec_in_state = attention_keys, dec_in_state
 
@@ -355,9 +356,9 @@ class PointerGenerator(object):
     def _conv_decoder(self, emb_dec_inputs):
         emb_dec_inputs = tf.stack(emb_dec_inputs, axis=1)
         vsize = self.hps.gen_vocab_size
-        is_training = self.hps.mode in ["pretrain_gen", "train_gan"]
+        self.is_training = self.hps.mode in ["pretrain_gen", "train_gan"]
         logits, p_gens, attn_dists, _, _ = conv_attention_decoder(
-            self._emb_enc_inputs, self.enc_padding_mask, emb_dec_inputs, self.attentions_keys, vsize, is_training)
+            self._emb_enc_inputs, self.enc_padding_mask, emb_dec_inputs, self.attentions_keys, vsize, self.is_training)
 
         vocab_dists = tf.unstack(tf.nn.softmax(logits), axis=1)
 
