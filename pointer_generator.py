@@ -60,7 +60,6 @@ class PointerGenerator(object):
         self.temp_batch = tf.placeholder(tf.int32, [batch_size, None], name='temp_batch_for_embedding')
         self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
         self.enc_padding_mask = tf.placeholder(tf.float32, [batch_size, None], name='enc_padding_mask')
-        self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch_extend_vocab')
 
         # decoder part
         # when max_dec_steps is 1, this is for beam search decoding, it is for
@@ -104,10 +103,6 @@ class PointerGenerator(object):
           update: only for the evaluation and training of the generator in gan training
         """
 
-        print(batch.enc_batch)
-        print(batch.enc_lens)
-        print(batch.enc_padding_mask)
-
         if gan_eval:
             gan = True
         feed_dict = {}
@@ -115,7 +110,6 @@ class PointerGenerator(object):
         feed_dict[self.enc_lens] = batch.enc_lens
         feed_dict[self.enc_padding_mask] = batch.enc_padding_mask
         if not just_enc:
-            feed_dict[self.enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
             feed_dict[self.target_batch] = batch.target_batch
             feed_dict[self.dec_padding_mask] = batch.dec_padding_mask
             if gan_eval:
@@ -149,12 +143,10 @@ class PointerGenerator(object):
                 # beam searching(mode is decode or train_gan)
                 emb_dec_inputs = tf.nn.embedding_lookup(self.embeddings, self._dec_batch)
                 # for evaluation gan(when mode is train_gan)
-                emb_eval_dec_inputs = [tf.nn.embedding_lookup(self.embeddings, x)
-                                       for x in tf.unstack(self._eval_dec_batch, axis=1)]
+                emb_eval_dec_inputs = tf.nn.embedding_lookup(self.embeddings, self._eval_dec_batch)
 
                 k_emb_samples_ls = [
-                    [tf.nn.embedding_lookup(self.embeddings, x)
-                     for x in tf.unstack(samples, axis=1)]
+                    tf.nn.embedding_lookup(self.embeddings, samples)
                     for samples in k_samples_ls
                 ]
 
@@ -199,7 +191,8 @@ class PointerGenerator(object):
             with tf.variable_scope('generator_loss'):
 
                 # for training of generator
-                loss_per_step = get_loss(final_dists, self.target_batch, self.dec_padding_mask)
+                tf.Print(self.final_dists, self.final_dists, "final list")
+                loss_per_step = get_loss(self.final_dists, self.target_batch, self.dec_padding_mask)
                 # self.loss_per_step = loss_per_step
                 eval_loss_per_step = get_loss(eval_final_dists, self.target_batch, self.dec_padding_mask)
                 # Apply padding_mask mask and get loss
@@ -317,7 +310,6 @@ class PointerGenerator(object):
         dec_input = tf.convert_to_tensor([batch_size * [self._vocab.word2id(data.START_DECODING)]])
         dec_input = tf.nn.embedding_lookup(self.embeddings, dec_input)
         for i in range(num_steps):
-            print(dec_input.get_shape().as_list())
             vocab_dists = self._conv_decoder(dec_input)
             beam_search(vocab_dists[0], i+1, tf.log)
             dec_input = tf.nn.embedding_lookup(self.embeddings, tf.stack(values=beam_symbols, axis=1))
@@ -333,8 +325,6 @@ class PointerGenerator(object):
         return best_seq
 
     def _conv_decoder(self, emb_dec_inputs):
-        if type(emb_dec_inputs) is list:
-            emb_dec_inputs = tf.stack(emb_dec_inputs, axis=1)
         vsize = self.hps.gen_vocab_size
         is_training = self.hps.mode in ["pretrain_gen", "train_gan"]
         # emb_enc_dim = self._emb_enc_inputs.get_shape().as_list()[-1]

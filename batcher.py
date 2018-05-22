@@ -82,7 +82,7 @@ class Example(object):
         self.abs_ids = [vocab.word2id(w) for w in abstract_words]
 
         # Get the decoder input sequence and target sequence
-        self.dec_input, _ = self.get_dec_inp_targ_seqs(
+        self.dec_input, self.target = self.get_dec_inp_targ_seqs(
             self.abs_ids, hps.max_dec_steps, start_decoding, stop_decoding)
         self.dec_len = len(self.dec_input)
 
@@ -97,14 +97,6 @@ class Example(object):
         # represented by their temporary article OOV id
         self.abs_ids_extend_vocab = data.abstract2ids(
             abstract_words, vocab, self.article_oovs)
-
-        # Overwrite decoder target sequence so it uses the temp article OOV
-        # ids
-        _, self.target = self.get_dec_inp_targ_seqs(
-            self.abs_ids_extend_vocab,
-            hps.max_dec_steps,
-            start_decoding,
-            stop_decoding)
 
         # Store the original strings ART:
         self.original_article = article
