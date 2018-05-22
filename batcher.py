@@ -35,6 +35,8 @@ from cntk.tokenizer import text2charlist
 from codecs import open
 from utils import red_assert, red_print
 
+BATCH_QUEUE_MAX = 150  # max number of batches the batch_queue can hold
+
 
 def fopen(filename, mode='r'):
     if filename.endswith('.gz'):
@@ -279,8 +281,6 @@ class GenBatcher(object):
     """A class to generate minibatches of data. Buckets examples together based
     on length of the encoder sequence."""
     # TODO: bucket can be added
-
-    BATCH_QUEUE_MAX = 100  # max number of batches the batch_queue can hold
 
     def __init__(self, file_name, mode, vocab, hps):
         """Initialize the batcher. Start threads that process the data into
