@@ -47,6 +47,7 @@ def load_ckpt(saver, sess, dire, mode="train", force=False, lastest_filename="ch
             saver.restore(sess, ckpt_state.model_checkpoint_path)
             return ckpt_state.model_checkpoint_path
         except Exception as ex:
+            print(ex)
             print(colored("Failed to load checkpoint from %s. " % first_ckpt_dir, 'red'))
             try:
                 if mode == "train":
@@ -65,6 +66,7 @@ def load_ckpt(saver, sess, dire, mode="train", force=False, lastest_filename="ch
                 elif mode == "train":
                     print("Failed to load checkpoint from %s Sleeping %s munites to waite." % (second_ckpt_dir, 10))
                     time.sleep(10 * 60)
+        time.sleep(10)
 
 
 def initialize_uninitialized(sess):
