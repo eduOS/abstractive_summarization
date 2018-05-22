@@ -547,8 +547,8 @@ def make_attention(target_embed, attention_keys, attention_values, decoder_hidde
     # enc_padding_mask: M*N2
     def enc_mask(att_score):
         dec_len = tf.shape(att_score)[1]
-        # batch_size = tf.shape(att_score)[0]
-        # enc_len = tf.shape(att_score)[1]
+        batch_size = tf.shape(att_score)[0]
+        enc_len = tf.shape(att_score)[1]
         att_score = tf.transpose(att_score, [1, 0, 2])
         # M*N1*N2 -> N1*M*N2
         att_score_ar = tf.TensorArray(dtype=tf.float32, size=dec_len)

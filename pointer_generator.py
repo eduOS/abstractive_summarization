@@ -265,6 +265,13 @@ class PointerGenerator(object):
         log_beam_probs, beam_symbols = [], []
         output_projection = None
 
+        attention_keys = tf.tile(tf.expand_dims(self.attention_keys, axis=1), [1, beam_size, 1, 1])
+        attention_keys = tf.reshape(attention_keys, [batch_size*beam_size, tf.shape(self.attention_keys)[1], self.attention_keys.get_shape().as_list()[-1]])
+        attention_values = tf.tile(tf.expand_dims(self.attention_values, axis=1), [1, beam_size, 1, 1])
+        attention_values = tf.reshape(attention_values, [batch_size*beam_size, tf.shape(self.attention_values)[1], self.attention_values.get_shape().as_list()[-1]])
+        enc_padding_mask = tf.tile(tf.expand_dims(self.enc_padding_mask, axis=1), [1, beam_size, 1])
+        enc_padding_mask = tf.reshape(enc_padding_mask, [batch_size*beam_size, tf.shape(self.enc_padding_mask)[1]])
+
         def beam_search(prev, i, log_fn):
             if output_projection is not None:
                 prev = tf.nn.xw_plus_b(prev, output_projection[0], output_projection[1])
@@ -307,8 +314,17 @@ class PointerGenerator(object):
         dec_input = tf.convert_to_tensor(batch_size * [self._vocab.word2id(data.START_DECODING)])
         dec_input = tf.nn.embedding_lookup(self.embeddings, dec_input)
         dec_input = tf.expand_dims(dec_input, axis=1)
+
         for i in range(num_steps):
-            vocab_dists = self._conv_decoder(dec_input)
+            if i == 0:
+                attention_keys = self.attention_keys
+                attention_values = self.attention_values
+                enc_padding_mask = self.enc_padding_mask
+            else:
+                attention_keys = attention_keys
+                attention_values = attention_values
+                enc_padding_mask = enc_padding_mask
+            vocab_dists = self._conv_decoder(dec_input, attention_keys, attention_values, enc_padding_mask)
             beam_search(vocab_dists[0], i+1, tf.log)
             dec_input = tf.nn.embedding_lookup(self.embeddings, tf.stack(values=beam_symbols, axis=1))
             dec_input = tf.reshape(dec_input, [batch_size*beam_size, len(beam_symbols), self.hps.emb_dim])
@@ -322,15 +338,18 @@ class PointerGenerator(object):
         best_seq = sess.run(self.best_seq, feed_dict)  # run the encoder
         return best_seq
 
-    def _conv_decoder(self, emb_dec_inputs):
+    def _conv_decoder(self, emb_dec_inputs, attention_keys=None, attention_values=None, enc_padding_mask=None):
+        if attention_keys is None:
+            enc_padding_mask = self.enc_padding_mask
+            attention_keys = self.attention_keys
+            attention_values = self.attention_values
         vsize = self.hps.gen_vocab_size
         is_training = self.hps.mode in ["pretrain_gen", "train_gan"]
         # emb_enc_dim = self._emb_enc_inputs.get_shape().as_list()[-1]
         # attention_states = linear_mapping_weightnorm(self.attention_keys, emb_enc_dim) + self._emb_enc_inputs
         # outputs, out_state, attn_dists, p_gens, coverage
         logits = conv_attention_decoder(
-            emb_dec_inputs, self.enc_padding_mask, self.attention_keys,
-            self.attention_values, vsize, is_training)
+            emb_dec_inputs, enc_padding_mask, attention_keys, attention_values, vsize, is_training)
 
         if is_training:
             vocab_dists = tf.unstack(tf.nn.softmax(logits), axis=1)
