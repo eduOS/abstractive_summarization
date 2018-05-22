@@ -504,6 +504,10 @@ class PointerGenerator(object):
 
         log_beam_probs, beam_symbols = [], []
         output_projection = None
+        _attention_keys = tf.tile(tf.expand_dims(self.attention_keys, axis=1), [1, beam_size, 1, 1])
+        _attention_keys = tf.reshape(_attention_keys, [batch_size*beam_size, tf.shape(self.attention_keys)[1], self.attention_keys.get_shape().as_list()[-1]])
+        _enc_padding_mask = tf.tile(tf.expand_dims(self.enc_padding_mask, axis=1), [1, beam_size, 1])
+        _enc_padding_mask = tf.reshape(_enc_padding_mask, [batch_size*beam_size, tf.shape(self.enc_padding_mask)[1]])
 
         def beam_search(prev, i, log_fn):
             if output_projection is not None:
@@ -551,10 +555,8 @@ class PointerGenerator(object):
         dec_input = tf.nn.embedding_lookup(self.dec_embeddings, dec_input)
         for i in range(num_steps):
             if i > 0:
-                attention_keys = tf.tile(tf.expand_dims(self.attention_keys, axis=1), [1, beam_size, 1, 1])
-                attention_keys = tf.reshape(attention_keys, [batch_size*beam_size, tf.shape(self.attention_keys)[1], self.attention_keys.get_shape().as_list()[-1]])
-                enc_padding_mask = tf.tile(tf.expand_dims(self.enc_padding_mask, axis=1), [1, beam_size, 1])
-                enc_padding_mask = tf.reshape(enc_padding_mask, [batch_size*beam_size, tf.shape(self.enc_padding_mask)[1]])
+                attention_keys = _attention_keys
+                enc_padding_mask = _enc_padding_mask
             else:
                 dec_in_state = self.dec_in_state
                 attention_keys = self.attention_keys
