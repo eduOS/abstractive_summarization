@@ -20,16 +20,13 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 
-import sys
 import time
-import numpy as np
 import tensorflow as tf
 from termcolor import colored
 from attention_decoder import conv_attention_decoder
 from utils import conv_encoder
 from utils import linear_mapping_weightnorm
 from codecs import open
-from six.moves import xrange
 import data
 
 FLAGS = tf.app.flags.FLAGS
@@ -366,10 +363,9 @@ class PointerGenerator(object):
             'global_step': self.global_step,
         }
 
-        to_return['loss'] = self._eval_loss
         if gan_eval:
             to_return['loss'] = self._eval_loss
-        elif update:
+        else:
             to_return['loss'] = self._loss
         if update:
             # if update is False it is for the generator evaluation

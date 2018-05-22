@@ -190,7 +190,7 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
         loss = results['loss']
         if global_step == 1:
             print("The training starts with loss %s." % loss)
-            print("The parameters: \n")
+            print("\nThe parameters: \n")
 
             print(
                 'mode: %s\n'
