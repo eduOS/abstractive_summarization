@@ -105,7 +105,7 @@ tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max 
 tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 100
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
-tf.app.flags.DEFINE_integer('gen_vocab_size', 50000, 'Size of vocabulary. These will be read from the vocabulary file in'
+tf.app.flags.DEFINE_integer('gen_vocab_size', 10000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
 tf.app.flags.DEFINE_float('gen_lr', 0.001, 'learning rate')
@@ -205,12 +205,14 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
                 last_ten_eval_loss = deque(maxlen=10)
                 eval_save_steps -= 1000
 
+            current_learing_rate = model.get_cur_lr(sess)
+
             # print the print the dashboard
             current_speed = (time.time() - start_time + epsilon) / ((counter * hps.batch_size) + epsilon)
             total_training_time = (time.time() - start_time) * global_step / (counter * 3600)
-            print_dashboard("Generator", global_step, hps.batch_size, hps.gen_vocab_size,
+            print_dashboard("Generator", global_step, hps.batch_size, hps.enc_vocab_size, hps.dec_vocab_size,
                             running_avg_loss, eval_loss,
-                            total_training_time, current_speed,
+                            total_training_time, current_speed, current_learing_rate,
                             coverage_loss if coverage_loss else "not set")
 
 
@@ -426,7 +428,8 @@ def main(argv):
                 try:
                     generator.emb_saver.restore(sess, ckpt)
                     print(colored("successfully restored embeddings form %s" % emb_path, 'green'))
-                except:
+                except Exception as e:
+                    print(e)
                     print(colored("failed to restore embeddings form %s" % emb_path, 'red'))
             else:
                 print(colored("embeddings doesn't exist in %s" % emb_path, 'red'))

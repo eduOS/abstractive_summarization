@@ -240,7 +240,7 @@ class PointerGenerator(object):
             with tf.variable_scope('embeddings'):
                 self.embeddings = tf.get_variable(
                     'embeddings', [self._vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
-                self.emb_saver = tf.train.Saver({"enc_embeddings": self.embeddings})
+                self.emb_saver = tf.train.Saver({"embeddings": self.embeddings})
                 self._emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
                 self.temp_embedded_seq = tf.nn.embedding_lookup(self.embeddings, self.temp_batch)
                 # for gen training(mode is pretrain_gen) and
@@ -354,15 +354,31 @@ class PointerGenerator(object):
             grads, global_norm = tf.clip_by_global_norm(
                 gradients, self.hps.gen_max_gradient)
 
+        self.learning_rate = tf.train.exponential_decay(
+            self.hps.gen_lr,               # Base learning rate.
+            self.global_step * self.hps.batch_size,  # Current index into the dataset.
+            1000000,             # Decay step.
+            0.95,                # Decay rate.
+            staircase=True)
+
         # Apply adagrad optimizer
-        optimizer = tf.train.AdamOptimizer(self.hps.gen_lr)
+        optimizer = tf.train.AdamOptimizer(self.learning_rate)
         with tf.device("/gpu:0"):
             self._train_op = optimizer.apply_gradients(
                 zip(grads, trainable_variables),
                 global_step=self.global_step)
 
-        # for the loss
-        g_opt = self.g_optimizer(FLAGS.gan_lr)
+        # set the adaptive learning rate
+        learning_rate_gan = tf.train.exponential_decay(
+            FLAGS.gan_lr,               # Base learning rate.
+            self.global_step * self.hps.batch_size,  # Current index into the dataset.
+            100,             # Decay step.
+            0.9,                # Decay rate.
+            staircase=True)
+
+        # for the gan loss
+        g_opt = self.g_optimizer(learning_rate_gan)
+
         trainable_variables = tf.trainable_variables()
         gradients = tf.gradients(self.gan_loss, trainable_variables,
                                  aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
@@ -485,6 +501,9 @@ class PointerGenerator(object):
         t1 = time.time()
         print(colored('Time to build graph: %s seconds' % (t1 - t0), "yellow"))
         return decoder_scope
+
+    def get_cur_lr(self, sess):
+        return sess.run(self.learning_rate)
 
     def run_one_batch(self, sess, batch, update=True, gan_eval=False):
         """Runs one training iteration. Returns a dictionary containing train
