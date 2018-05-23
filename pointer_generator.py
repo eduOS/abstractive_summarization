@@ -259,7 +259,7 @@ class PointerGenerator(object):
             staircase=True)
 
         # Apply adagrad optimizer
-        optimizer = tf.train.AdamOptimizer(self.learning_rate)
+        optimizer = tf.train.AdagradOptimizer(self.learning_rate)
         with tf.device("/gpu:0"):
             self._train_op = optimizer.apply_gradients(
                 zip(grads, trainable_variables),
@@ -269,8 +269,8 @@ class PointerGenerator(object):
         learning_rate_gan = tf.train.exponential_decay(
             FLAGS.gan_lr,               # Base learning rate.
             self.global_step * self.hps.batch_size,  # Current index into the dataset.
-            100,             # Decay step.
-            0.9,                # Decay rate.
+            1000000,             # Decay step.
+            0.95,                # Decay rate.
             staircase=True)
 
         # for the gan loss
