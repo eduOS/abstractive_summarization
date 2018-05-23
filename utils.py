@@ -251,7 +251,7 @@ def lstm_encoder(encoder_inputs, seq_len, hidden_dim,
 
 def conv_encoder(inputs, seq_len, is_training,
                  keep_prob=0.9, cnn_layers=4,
-                 nhids_list=[512, 512, 512, 512],
+                 nhids_list=[256, 256, 256, 256],
                  kwidths_list=[3, 3, 3, 3]):
     embed_size = inputs.get_shape().as_list()[-1]
     batch_size = tf.shape(inputs)[0]

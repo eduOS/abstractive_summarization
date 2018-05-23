@@ -311,7 +311,7 @@ class PointerGenerator(object):
                     beam_symbols[j-1] = tf.gather(beam_symbols[j-1], real_path)
                     log_beam_probs[j-1] = tf.gather(log_beam_probs[j-1], real_path)
 
-        dec_input = tf.convert_to_tensor(batch_size * [self._vocab.word2id(data.START_DECODING)])
+        dec_input = tf.fill([batch_size], self._vocab.word2id(data.START_DECODING))
         dec_input = tf.nn.embedding_lookup(self.embeddings, dec_input)
         dec_input = tf.expand_dims(dec_input, axis=1)
 
@@ -354,7 +354,7 @@ class PointerGenerator(object):
         if is_training:
             vocab_dists = tf.unstack(tf.nn.softmax(logits), axis=1)
         else:
-            vocab_dists = [logits]
+            vocab_dists = [tf.nn.softmax(logits)]
 
         return vocab_dists
 
