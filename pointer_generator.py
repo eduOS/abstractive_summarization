@@ -341,15 +341,22 @@ class PointerGenerator(object):
             grads, global_norm = tf.clip_by_global_norm(
                 gradients, self.hps.gen_max_gradient)
 
+        self.learning_rate = tf.train.exponential_decay(
+            self.hps.gen_lr,               # Base learning rate.
+            self.global_step * self.hps.batch_size,  # Current index into the dataset.
+            1000000,             # Decay step.
+            0.95,                # Decay rate.
+            staircase=True)
+
         # Apply adagrad optimizer
-        optimizer = tf.train.AdamOptimizer(self.hps.gen_lr)
+        optimizer = tf.train.AdamOptimizer(self.learning_rate)
         with tf.device("/gpu:0"):
             self._train_op = optimizer.apply_gradients(
                 zip(grads, trainable_variables),
                 global_step=self.global_step)
 
         # for the loss
-        g_opt = self.g_optimizer(FLAGS.gan_lr)
+        g_opt = self.g_optimizer(self.learning_rate)
         trainable_variables = tf.trainable_variables()
         gradients = tf.gradients(self.gan_loss, trainable_variables,
                                  aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
