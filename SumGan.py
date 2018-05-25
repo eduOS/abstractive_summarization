@@ -106,7 +106,7 @@ tf.app.flags.DEFINE_integer('char_emb_dim', 300, 'Dimension of character embeddi
 # search is the same as the original beam search
 tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 120
 tf.app.flags.DEFINE_integer('max_dec_steps', 25, 'max timesteps of decoder (max summary tokens)')  # 25
-tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
+tf.app.flags.DEFINE_integer('beam_size', 20, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('dec_vocab_size', 7500, 'Size of vocabulary of the decoder in the generator.')
 tf.app.flags.DEFINE_integer('enc_vocab_size', 500000, 'Size of vocabulary of the encoder in the generator.')
@@ -203,9 +203,11 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
                 'word_emb_dim: %s\n'
                 'char_emb_dim: %s\n'
                 'rand_unif_init_mag: %s\n'
-                'gen_vocab_file: %s\n'
+                'enc_vocab_file: %s\n'
+                'dec_vocab_file: %s\n'
                 'vocab_type: %s\n'
-                'gen_vocab_size: %s\n'
+                'enc_vocab_size: %s\n'
+                'dec_vocab_size: %s\n'
                 'hidden_dim: %s\n'
                 'gen_lr: %s\n'
                 'gen_max_gradient: %s\n'
@@ -226,9 +228,11 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
                     hps.word_emb_dim,
                     hps.char_emb_dim,
                     hps.rand_unif_init_mag,
-                    hps.gen_vocab_file,
+                    hps.enc_vocab_file,
+                    hps.dec_vocab_file,
                     hps.vocab_type,
-                    hps.gen_vocab_size,
+                    hps.enc_vocab_size,
+                    hps.dec_vocab_size,
                     hps.hidden_dim,
                     hps.gen_lr,
                     hps.gen_max_gradient,
@@ -612,7 +616,7 @@ def main(argv):
                 n_samples_extend = np.array(n_samples_extend)[:, :, :-1]
                 # sample_target_padding_mask = pad_sample(sample_target, gen_vocab, hps_gen)
                 n_samples = [np.where(
-                    np.less(samples, hps_gen.gen_vocab_size),
+                    np.less(samples, hps_gen.dec_vocab_size),
                     samples, np.array(
                         [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
                     for samples in n_samples_extend]
