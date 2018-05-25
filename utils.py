@@ -79,14 +79,15 @@ def initialize_uninitialized(sess):
         sess.run(tf.variables_initializer(not_initialized_vars))
 
 
-def print_dashboard(type, step, batch_size, vocab_size,
+def print_dashboard(type, step, batch_size, enc_vocab_size, dec_vocab_size,
                     running_avg_loss, eval_loss,
-                    total_training_time, current_speed,
+                    total_training_time, current_speed, current_learning_rate,
                     coverage_loss="not set"):
     print(
         "\nDashboard for %s updated %s, finished steps:\t%s\n"
-        "\tBatch size:\t%s\n"
-        "\tVocabulary size:\t%s\n"
+        "\tBatch size:\t%s, current learning rate:\t%s\n"
+        "\tEncoder vocabulary size:\t%s\n"
+        "\tDecoder vocabulary size:\t%s\n"
         "\tArticles trained:\t%s\n"
         "\tTotal training time approxiately:\t%.4f hours\n"
         "\tCurrent speed:\t%.4f seconds/article\n"
@@ -96,7 +97,9 @@ def print_dashboard(type, step, batch_size, vocab_size,
             datetime.datetime.now().strftime("on %m-%d at %H:%M"),
             step,
             batch_size,
-            vocab_size,
+            current_learning_rate,
+            enc_vocab_size,
+            dec_vocab_size,
             batch_size * step,
             total_training_time,
             current_speed,
@@ -104,6 +107,7 @@ def print_dashboard(type, step, batch_size, vocab_size,
             coverage_loss,
             )
     )
+
 
 
 def pad_sample(best_samples, vocab, hps):
