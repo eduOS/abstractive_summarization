@@ -100,8 +100,8 @@ tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be sa
 
 # Hyperparameters
 tf.app.flags.DEFINE_integer('hidden_dim', 500, 'Dimension of RNN hidden states')
-tf.app.flags.DEFINE_integer('word_emb_dim', 500, 'Dimension of word embeddings.')
-tf.app.flags.DEFINE_integer('char_emb_dim', 500, 'Dimension of character embeddings.')
+tf.app.flags.DEFINE_integer('word_emb_dim', 300, 'Dimension of word embeddings.')
+tf.app.flags.DEFINE_integer('char_emb_dim', 300, 'Dimension of character embeddings.')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
 tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 120
@@ -190,6 +190,54 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
         loss = results['loss']
         if global_step == 1:
             print("The training starts with loss %s." % loss)
+
+            print("\n\nThe parameters: \n")
+            print(
+                'mode: %s\n'
+                'model_dir: %s\n'
+                'decoder: %s\n'
+                'steps_per_checkpoint: %s\n'
+                'batch_size: %s\n'
+                'beam_size: %s\n'
+                'coverage: %s\n'
+                'emb_dim: %s\n'
+                'rand_unif_init_mag: %s\n'
+                'gen_vocab_file: %s\n'
+                'vocab_type: %s\n'
+                'gen_vocab_size: %s\n'
+                'hidden_dim: %s\n'
+                'gen_lr: %s\n'
+                'gen_max_gradient: %s\n'
+                'max_dec_steps: %s\n'
+                'max_enc_steps: %s\n'
+                'min_dec_steps: %s\n'
+                'trunc_norm_init_std: %s\n'
+                'single_pass: %s\n'
+                'log_root: %s\n'
+                'data_path: %s\n' % (
+                    hps.mode,
+                    hps.model_dir,
+                    hps.decoder,
+                    hps.steps_per_checkpoint,
+                    hps.batch_size,
+                    hps.beam_size,
+                    hps.coverage,
+                    hps.emb_dim,
+                    hps.rand_unif_init_mag,
+                    hps.gen_vocab_file,
+                    hps.vocab_type,
+                    hps.gen_vocab_size,
+                    hps.hidden_dim,
+                    hps.gen_lr,
+                    hps.gen_max_gradient,
+                    hps.max_dec_steps,
+                    hps.max_enc_steps,
+                    hps.min_dec_steps,
+                    hps.trunc_norm_init_std,
+                    hps.single_pass,
+                    hps.log_root,
+                    hps.data_path)
+            )
 
         if hps.coverage:
             coverage_loss = results['coverage_loss']

@@ -36,9 +36,10 @@ class PointerGenerator(object):
     """A class to represent a sequence-to-sequence model for text summarization.
     Supports both baseline mode, pointer-generator mode, and coverage"""
 
-    def __init__(self, hps, vocab):
+    def __init__(self, hps, enc_vocab, dec_vocab):
         self.hps = hps
-        self._vocab = vocab
+        self._enc_vocab = enc_vocab
+        self._dec_vocab = dec_vocab
         self._log_writer = open("./pg_log", "a", "utf-8")
 
     def _add_placeholders(self):
@@ -131,19 +132,22 @@ class PointerGenerator(object):
             k_rewards_ls = tf.unstack(self.k_rewards, axis=0)
 
             with tf.variable_scope('embeddings'):
-                self.embeddings = tf.get_variable(
-                    'embeddings', [self._vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
-                self.saver = tf.train.Saver({"embeddings": self.embeddings})
-                self._emb_enc_inputs = tf.nn.embedding_lookup(self.embeddings, self.enc_batch)
-                self.temp_embedded_seq = tf.nn.embedding_lookup(self.embeddings, self.temp_batch)
+                self.enc_embeddings = tf.get_variable(
+                    'embeddings', [self._enc_vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+                self.dec_embeddings = tf.get_variable(
+                    'embeddings', [self._dec_vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+                self.enc_emb_saver = tf.train.Saver({"enc_embeddings": self.enc_embeddings})
+                self.dec_emb_saver = tf.train.Saver({"dec_embeddings": self.dec_embeddings})
+                self._emb_enc_inputs = tf.nn.embedding_lookup(self.enc_embeddings, self.enc_batch)
+                self.temp_embedded_seq = tf.nn.embedding_lookup(self.enc_embeddings, self.temp_batch)
                 # for gen training(mode is pretrain_gen) and
                 # beam searching(mode is decode or train_gan)
-                emb_dec_inputs = tf.nn.embedding_lookup(self.embeddings, self._dec_batch)
+                emb_dec_inputs = tf.nn.embedding_lookup(self.dec_embeddings, self._dec_batch)
                 # for evaluation gan(when mode is train_gan)
-                emb_eval_dec_inputs = tf.nn.embedding_lookup(self.embeddings, self._eval_dec_batch)
+                emb_eval_dec_inputs = tf.nn.embedding_lookup(self.dec_embeddings, self._eval_dec_batch)
 
                 k_emb_samples_ls = [
-                    tf.nn.embedding_lookup(self.embeddings, samples)
+                    tf.nn.embedding_lookup(self.dec_embeddings, samples)
                     for samples in k_samples_ls
                 ]
 
@@ -259,7 +263,7 @@ class PointerGenerator(object):
         # state, attention
         beam_size = self.hps.beam_size
         batch_size = self.hps.batch_size
-        vocab_size = self._vocab.size()
+        vocab_size = self._dec_vocab.size()
         num_steps = self.hps.max_dec_steps
 
         log_beam_probs, beam_symbols = [], []
@@ -311,8 +315,8 @@ class PointerGenerator(object):
                     beam_symbols[j-1] = tf.gather(beam_symbols[j-1], real_path)
                     log_beam_probs[j-1] = tf.gather(log_beam_probs[j-1], real_path)
 
-        dec_input = tf.fill([batch_size], self._vocab.word2id(data.START_DECODING))
-        dec_input = tf.nn.embedding_lookup(self.embeddings, dec_input)
+        dec_input = tf.fill([batch_size], self._dec_vocab.word2id(data.START_DECODING))
+        dec_input = tf.nn.embedding_lookup(self.dec_embeddings, dec_input)
         dec_input = tf.expand_dims(dec_input, axis=1)
 
         for i in range(num_steps):
@@ -326,7 +330,7 @@ class PointerGenerator(object):
                 enc_padding_mask = _enc_padding_mask
             vocab_dists = self._conv_decoder(dec_input, attention_keys, attention_values, enc_padding_mask)
             beam_search(vocab_dists[0], i+1, tf.log)
-            dec_input = tf.nn.embedding_lookup(self.embeddings, tf.stack(values=beam_symbols, axis=1))
+            dec_input = tf.nn.embedding_lookup(self.dec_embeddings, tf.stack(values=beam_symbols, axis=1))
             dec_input = tf.reshape(dec_input, [batch_size*beam_size, len(beam_symbols), self.hps.emb_dim])
 
         best_seq = tf.stack(values=beam_symbols, axis=1)

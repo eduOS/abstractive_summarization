@@ -63,22 +63,32 @@ def read_from_file(vocab_path, embed_path, vocab_size):
 
     return new_embed_l, emb_dim
 
-vocab_path, embed_path, vocab_size = sys.argv[1], sys.argv[2], int(sys.argv[3])
-emb_l, emb_dim = read_from_file(vocab_path, embed_path, vocab_size)
+enc_vocab_path, enc_embed_path, enc_vocab_size = "./data/enc_vocab", "../../data/zh_emb/emb_wd/embedding.300", 500000
+dec_vocab_path, dec_embed_path, dec_vocab_size = "./data/dec_vocab", "../../data/zh_emb/emb_ch/embedding.300", 7500
+enc_emb_l, enc_emb_dim = read_from_file(enc_vocab_path, enc_embed_path, enc_vocab_size)
+dec_emb_l, dec_emb_dim = read_from_file(dec_vocab_path, dec_embed_path, dec_vocab_size)
 # vocab_size = 100000
 # emb_dim = 300
 # emb_l = [[1.0] * emb_dim] * vocab_size
 
-emb_ph = tf.placeholder(
-    tf.float32, [vocab_size, emb_dim], name='embeddings')
+assert enc_emb_dim == dec_emb_dim
+emb_dim = enc_emb_dim
 
-# var_name = 'generator/seq2seq/embeddings'
-var_name = 'embeddings'
-embeddings = tf.get_variable(
-    var_name, [vocab_size, emb_dim], dtype=tf.float32)
-saver = tf.train.Saver({"embeddings": embeddings})
-as_op = embeddings.assign(emb_ph)
+enc_emb_ph = tf.placeholder(
+    tf.float32, [enc_vocab_size, emb_dim], name='enc_embeddings')
+dec_emb_ph = tf.placeholder(
+    tf.float32, [dec_vocab_size, emb_dim], name='dec_embeddings')
+enc_embeddings = tf.get_variable(
+    "enc_embeddings", [enc_vocab_size, emb_dim], dtype=tf.float32)
+dec_embeddings = tf.get_variable(
+    "dec_embeddings", [dec_vocab_size, emb_dim], dtype=tf.float32)
+saver = tf.train.Saver({"enc_embeddings": enc_embeddings, "dec_embeddings": dec_embeddings})
+enc_as_op = enc_embeddings.assign(enc_emb_ph)
+dec_as_op = dec_embeddings.assign(dec_emb_ph)
 
 sess = tf.Session()
-sess.run(as_op, feed_dict={emb_ph: emb_l})
-saver.save(sess, sys.argv[-1])
+sess.run(enc_as_op, feed_dict={enc_emb_ph: enc_emb_l})
+sess.run(dec_as_op, feed_dict={dec_emb_ph: dec_emb_l})
+save_path = sys.argv[-1]  # this should be file path not directory path
+
+saver.save(sess, save_path)
