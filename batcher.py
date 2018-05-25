@@ -35,8 +35,6 @@ from cntk.tokenizer import text2charlist
 from codecs import open
 from utils import red_assert, red_print
 
-BATCH_QUEUE_MAX = 150  # max number of batches the batch_queue can hold
-
 
 def fopen(filename, mode='r'):
     if filename.endswith('.gz'):
@@ -50,7 +48,7 @@ class Example(object):
     def __len__(self):
         return self.enc_len
 
-    def __init__(self, article, abstract, vocab, hps):
+    def __init__(self, article, abstract, enc_vocab, dec_vocab, hps):
         """Initializes the Example, performing tokenization and truncation to
         produce the encoder, decoder and target sequences, which are stored in
         self.
@@ -58,14 +56,13 @@ class Example(object):
         Args:
           article: source text; a string. each token is separated by a single
           space.
-          vocab: Vocabulary object
           hps: hyperparameters
         """
         self.hps = hps
 
         # Get ids of special tokens
-        start_decoding = vocab.word2id(data.START_DECODING)
-        stop_decoding = vocab.word2id(data.STOP_DECODING)
+        start_decoding = dec_vocab.word2id(data.START_DECODING)
+        stop_decoding = dec_vocab.word2id(data.STOP_DECODING)
 
         # Process the article
         article_words = article.split()
@@ -74,31 +71,19 @@ class Example(object):
         # store the length after truncation but before padding
         self.enc_len = len(article_words)
         # list of word ids; OOVs are represented by the id for UNK token
-        self.enc_input = [vocab.word2id(w) for w in article_words]
+        self.enc_input = [enc_vocab.word2id(w) for w in article_words]
 
         # Process the abstract
         abstract_words = abstract.split()  # list of strings
         # list of word ids; OOVs are represented by the id for UNK token
         if len(abstract_words) > hps.max_dec_steps:
             abstract_words = article_words[:hps.max_dec_steps]
-        self.abs_ids = [vocab.word2id(w) for w in abstract_words]
+        self.abs_ids = [dec_vocab.word2id(w) for w in abstract_words]
 
         # Get the decoder input sequence and target sequence
         self.dec_input, self.target = self.get_dec_inp_targ_seqs(
             self.abs_ids, hps.max_dec_steps, start_decoding, stop_decoding)
         self.dec_len = len(self.dec_input)
-
-        # If using pointer-generator mode, we need to store some extra info
-        # Store a version of the enc_input where in-article OOVs are
-        # represented by their temporary OOV id; also store the in-article
-        # OOVs words themselves
-        self.enc_input_extend_vocab, self.article_oovs = \
-            data.article2ids(article_words, vocab)
-
-        # Get a verison of the reference summary where in-article OOVs are
-        # represented by their temporary article OOV id
-        self.abs_ids_extend_vocab = data.abstract2ids(
-            abstract_words, vocab, self.article_oovs)
 
         # Store the original strings ART:
         self.original_article = article
@@ -148,15 +133,13 @@ class Example(object):
         """Pad the encoder input sequence with pad_id up to max_len."""
         while len(self.enc_input) < max_len:
             self.enc_input.append(pad_id)
-        while len(self.enc_input_extend_vocab) < max_len:
-            self.enc_input_extend_vocab.append(pad_id)
 
 
 class Batch(object):
     """Class representing a minibatch of train/val/test examples for text
     summarization."""
 
-    def __init__(self, example_list, hps, vocab):
+    def __init__(self, example_list, hps, enc_vocab, dec_vocab):
         """Turns the example_list into a Batch object.
 
         Args:
@@ -164,7 +147,7 @@ class Batch(object):
            hps: hyperparameters
            vocab: Vocabulary object
         """
-        self.pad_id = vocab.word2id(
+        self.pad_id = enc_vocab.word2id(
             data.PAD_TOKEN)  # id of the PAD token used to pad sequences
         # initialize the input to the encoder
         self.init_encoder_seq(example_list, hps)
@@ -224,16 +207,6 @@ class Batch(object):
             for j in range(ex.enc_len):
                 self.enc_padding_mask[i][j] = 1
 
-        # For pointer-generator mode, need to store some extra info
-        # Determine the max number of in-article OOVs in this batch
-        self.max_art_oovs = max([len(ex.article_oovs) for ex in example_list])
-        # Store the in-article OOVs themselves
-        self.art_oovs = [ex.article_oovs for ex in example_list]
-        # Store the version of the enc_batch that uses the article OOV ids
-        self.enc_batch_extend_vocab = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
-        for i, ex in enumerate(example_list):
-            self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
-
     def init_decoder_seq(self, example_list, hps):
         """Initializes the following:
             self.dec_batch:
@@ -282,7 +255,9 @@ class GenBatcher(object):
     on length of the encoder sequence."""
     # TODO: bucket can be added
 
-    def __init__(self, file_name, mode, vocab, hps):
+    BATCH_QUEUE_MAX = 100  # max number of batches the batch_queue can hold
+
+    def __init__(self, file_name, mode, enc_vocab, dec_vocab, hps):
         """Initialize the batcher. Start threads that process the data into
         batches.
 
@@ -299,7 +274,8 @@ class GenBatcher(object):
           vocab: Vocabulary object
           hps: hyperparameters from the generator
         """
-        self._vocab = vocab
+        self._enc_vocab = enc_vocab
+        self._dec_vocab = dec_vocab
         self._hps = hps
         red_assert(
             mode in ["train", "test", "val"],
@@ -312,9 +288,9 @@ class GenBatcher(object):
 
         # Initialize a queue of Batches waiting to be used, and a queue of
         # Examples waiting to be batched
-        self._batch_queue = Queue.Queue(BATCH_QUEUE_MAX)
+        self._batch_queue = Queue.Queue(self.BATCH_QUEUE_MAX)
         self._example_queue = Queue.Queue(
-            BATCH_QUEUE_MAX * self._hps.batch_size * self._hps.beam_size)
+            self.BATCH_QUEUE_MAX * self._hps.batch_size * self._hps.beam_size)
 
         # Different settings depending on whether we're in single_pass mode or
         # not
@@ -416,23 +392,12 @@ class GenBatcher(object):
             # Process into an Example.
             if article and abstract:
                 example = Example(
-                    article, abstract, self._vocab, self._hps)
+                    article, abstract, self._enc_vocab, self._dec_vocab, self._hps)
                 # what is the vocab here? the extended vocab?
                 # place the Example in the example queue.
-                oov_len = len(example.article_oovs)
-                enc_len = len(example.enc_input_extend_vocab)
-                abs_len = len(example.abs_ids_extend_vocab)
-                if oov_len > enc_len / 3:
-                    self._log_writer.write("article oovs %s, total length of the article %s" % (oov_len, enc_len))
-                    self._log_writer.write("\n")
-                    self._log_writer.write(example.original_article)
-                    self._log_writer.write("\n")
-                    self._log_writer.write(example.original_abstract)
-                    self._log_writer.write("\n")
-                    self._log_writer.write(" ".join(example.article_oovs))
-                    self._log_writer.write("\n")
-                    self._log_writer.write("\n")
-                elif enc_len < 2 * abs_len:
+                enc_len = len(example.enc_input)
+                abs_len = len(example.abs_ids)
+                if enc_len < 2 * abs_len:
                     self._log_writer.write("total length of abstract %s, total length of the article %s" % (enc_len, abs_len))
                     self._log_writer.write("\n")
                     self._log_writer.write(example.original_article)
@@ -481,7 +446,7 @@ class GenBatcher(object):
                     continue
                 elif len(b) != self._hps.batch_size:
                     continue
-                self._batch_queue.put(Batch(b, self._hps, self._vocab))
+                self._batch_queue.put(Batch(b, self._hps, self._enc_vocab, self._dec_vocab))
 
     def watch_threads(self):
         """Watch example queue and batch queue threads and restart if dead."""

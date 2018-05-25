@@ -189,22 +189,9 @@ def abstract2ids(abstract_words, vocab, article_oovs):
       temporary OOV numbers. Out-of-article OOV words are mapped to the UNK
       token id."""
     ids = []
-    unk_id = vocab.word2id(UNKNOWN_TOKEN)
     for w in abstract_words:
         i = vocab.word2id(w)
-        if i == unk_id:  # If w is an OOV word
-            if w in article_oovs:  # If w is an in-article OOV
-                # Map to its temporary article OOV number
-                vocab_idx = vocab.size() + article_oovs.index(w)
-                ids.append(vocab_idx)
-            else:  # If w is an out-of-article OOV
-                # print('oov', w)
-                ids.append(unk_id)  # Map to the UNK token id
-                # that means all words appear in the decoded abstract should be
-                # from the
-                # article
-        else:
-            ids.append(i)
+        ids.append(i)
     return ids
 
 
@@ -228,6 +215,7 @@ def outputsids2words(id_ar, vocab):
             words.append(w)
         words_lists.append(words)
     return words_lists
+
 
 def show_art_oovs(articles, vocab):
     """Returns the article string, highlighting the OOVs by placing

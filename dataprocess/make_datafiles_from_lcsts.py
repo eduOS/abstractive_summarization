@@ -30,9 +30,12 @@ SENTENCE_END = '</s>'
 
 finished_files_dir = "./finished_files/"
 
-VOCAB_SIZE = 200000
+ENC_VOCAB_SIZE = 500000
+DEC_VOCAB_SIZE = 7500
+
 start = time.time()
-must_include = ['[PAD]', '[UNK]', '[STOP]', '[START]']
+enc_must_include = ['[PAD]', '[UNK]']
+dec_must_include = ['[PAD]', '[UNK]', '[STOP]', '[START]']
 
 
 def read_text_file(text_file):
@@ -47,14 +50,13 @@ def process_line(line):
     return sourceline2words(line)
 
 
-must_include = ['[PAD]', '[UNK]', '[STOP]', '[START]']
 len_art = []
 len_abs = []
 
 log_file = open('corpus_log', 'a', 'utf-8')
 
 
-def get_pairs_from_lcsts(filePath, segment=True):
+def get_pairs_from_lcsts(filePath, enc_segment=False, dec_segment=False):
     """
     both should be segmented if segment is true
     """
@@ -77,7 +79,7 @@ def get_pairs_from_lcsts(filePath, segment=True):
                 raise Exception("something went wrong in %s" % filePath)
             flag = 1
 
-            if segment:
+            if dec_segment:
                 summary = process_line(summary)
             else:
                 summary = text2charlist(summary)
@@ -94,7 +96,7 @@ def get_pairs_from_lcsts(filePath, segment=True):
                 raise Exception("something went wrong in %s" % filePath)
             flag = 0
 
-            if segment:
+            if enc_segment:
                 text = process_line(text)
             else:
                 text = text2charlist(text)
@@ -141,19 +143,21 @@ def get_pairs_from_lcsts(filePath, segment=True):
     print(lines)
 
 
-def write_to_txt(source_path, out_file, makevocab=False, max_length=100000, segment=True):
+def write_to_txt(source_path, out_file, makevocab=False, max_length=100000, enc_segment=False, dec_segment=False):
     """Reads the tokenized .story files corresponding to the urls listed in the
     url_file and writes them to a out_file."""
 
     if makevocab:
-        vocab_counter = collections.Counter()
+        enc_vocab_counter = collections.Counter()
+        dec_vocab_counter = collections.Counter()
 
     file_num = 0
     length = 0
 
     writer = open(out_file + "_" + str(file_num), 'w', 'utf-8')
 
-    for art_tokens, abs_tokens in get_pairs_from_lcsts(source_path, segment=segment):
+    for art_tokens, abs_tokens in \
+            get_pairs_from_lcsts(source_path, enc_segment=enc_segment, dec_segment=dec_segment):
         # Write to file
         if length >= max_length:
             file_num += 1
@@ -173,36 +177,42 @@ def write_to_txt(source_path, out_file, makevocab=False, max_length=100000, segm
                 t for t in abs_tokens if t not in [
                     SENTENCE_START, SENTENCE_END]]
             # remove these tags from vocab
-            tokens = art_tokens + abs_tokens
-            tokens = [t.strip() for t in tokens]  # strip
-            tokens = [t for t in tokens if t != ""]  # remove empty
-            vocab_counter.update(tokens)
+            enc_tokens = [t.strip() for t in art_tokens]  # strip
+            enc_tokens = [t for t in enc_tokens if t != ""]  # remove empty
+            dec_tokens = [t.strip() for t in abs_tokens]  # strip
+            dec_tokens = [t for t in dec_tokens if t != ""]  # remove empty
+            enc_vocab_counter.update(enc_tokens)
+            dec_vocab_counter.update(dec_tokens)
 
     writer.close()
     # write vocab to file
     if makevocab:
         print("Writing vocab file...")
-        total_vocab = sum(vocab_counter.values())
+        total_vocab = sum(enc_vocab_counter.values())
         acc_p = 0
         with open(
-            os.path.join(finished_files_dir, "vocab"), 'w', 'utf-8'
+            os.path.join(finished_files_dir, "enc_vocab"), 'w', 'utf-8'
         ) as writer:
-            for mi in must_include:
+            for mi in enc_must_include:
                 writer.write(mi + ' ' + "1" + " 0.0" + '\n')
-            for word, count in vocab_counter.most_common(VOCAB_SIZE):
+            for word, count in enc_vocab_counter.most_common(ENC_VOCAB_SIZE):
                 acc_p += (count / total_vocab)
                 writer.write(word + ' ' + str(count) + " " + str(acc_p) + '\n')
-        print("Finished writing vocab file")
+        print("Finished writing enc_vocab file")
+
+        total_vocab = sum(dec_vocab_counter.values())
+        acc_p = 0
+        with open(
+            os.path.join(finished_files_dir, "dec_vocab"), 'w', 'utf-8'
+        ) as writer:
+            for mi in dec_must_include:
+                writer.write(mi + ' ' + "1" + " 0.0" + '\n')
+            for word, count in dec_vocab_counter.most_common(DEC_VOCAB_SIZE):
+                acc_p += (count / total_vocab)
+                writer.write(word + ' ' + str(count) + " " + str(acc_p) + '\n')
+        print("Finished writing dec_vocab file")
 
     # cumulative probability
-
-
-def check_num_stories(stories_dir, num_expected):
-    num_stories = len(os.listdir(stories_dir))
-    if num_stories != num_expected:
-        raise Exception(
-            "stories directory %s contains %i files but should contain %i" %
-            (stories_dir, num_stories, num_expected))
 
 
 if __name__ == '__main__':
@@ -210,7 +220,8 @@ if __name__ == '__main__':
         print("USAGE: python make_datafiles.py <source_dir>")
         sys.exit()
     source_dir = sys.argv[1]
-    segment = False
+    enc_segment = True
+    dec_segment = False
 
     # Create some new directories
     if not os.path.exists(finished_files_dir):
@@ -224,17 +235,17 @@ if __name__ == '__main__':
     write_to_txt(
         source_dir+"PART_III.txt",
         os.path.join(finished_files_dir, "test.txt"),
-        segment=segment
+        enc_segment=enc_segment, dec_segment=dec_segment
     )
     write_to_txt(
         source_dir+"PART_II.txt",
         os.path.join(finished_files_dir, "val.txt"),
-        segment=segment
+        enc_segment=enc_segment, dec_segment=dec_segment
     )
     write_to_txt(
         source_dir+"PART_I.txt",
         os.path.join(finished_files_dir, "train.txt"), makevocab=True,
-        segment=segment
+        enc_segment=enc_segment, dec_segment=dec_segment
     )
 
     log_file.write("the mean of art: %s" % float(np.mean(len_art)))
