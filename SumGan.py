@@ -200,7 +200,8 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
                 'batch_size: %s\n'
                 'beam_size: %s\n'
                 'coverage: %s\n'
-                'emb_dim: %s\n'
+                'word_emb_dim: %s\n'
+                'char_emb_dim: %s\n'
                 'rand_unif_init_mag: %s\n'
                 'gen_vocab_file: %s\n'
                 'vocab_type: %s\n'
@@ -222,7 +223,8 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
                     hps.batch_size,
                     hps.beam_size,
                     hps.coverage,
-                    hps.emb_dim,
+                    hps.word_emb_dim,
+                    hps.char_emb_dim,
                     hps.rand_unif_init_mag,
                     hps.gen_vocab_file,
                     hps.vocab_type,

@@ -133,9 +133,9 @@ class PointerGenerator(object):
 
             with tf.variable_scope('embeddings'):
                 self.enc_embeddings = tf.get_variable(
-                    'embeddings', [self._enc_vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+                    'enc_embeddings', [self._enc_vocab.size(), hps.word_emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
                 self.dec_embeddings = tf.get_variable(
-                    'embeddings', [self._dec_vocab.size(), hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+                    'dec_embeddings', [self._dec_vocab.size(), hps.char_emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
                 self.enc_emb_saver = tf.train.Saver({"enc_embeddings": self.enc_embeddings})
                 self.dec_emb_saver = tf.train.Saver({"dec_embeddings": self.dec_embeddings})
                 self._emb_enc_inputs = tf.nn.embedding_lookup(self.enc_embeddings, self.enc_batch)
@@ -331,7 +331,7 @@ class PointerGenerator(object):
             vocab_dists = self._conv_decoder(dec_input, attention_keys, attention_values, enc_padding_mask)
             beam_search(vocab_dists[0], i+1, tf.log)
             dec_input = tf.nn.embedding_lookup(self.dec_embeddings, tf.stack(values=beam_symbols, axis=1))
-            dec_input = tf.reshape(dec_input, [batch_size*beam_size, len(beam_symbols), self.hps.emb_dim])
+            dec_input = tf.reshape(dec_input, [batch_size*beam_size, len(beam_symbols), self.hps.char_emb_dim])
 
         best_seq = tf.stack(values=beam_symbols, axis=1)
         self.best_seq = tf.reshape(best_seq, [batch_size, beam_size, num_steps])
@@ -347,7 +347,7 @@ class PointerGenerator(object):
             enc_padding_mask = self.enc_padding_mask
             attention_keys = self.attention_keys
             attention_values = self.attention_values
-        vsize = self.hps.gen_vocab_size
+        vsize = self.hps.dec_vocab_size
         is_training = self.hps.mode in ["pretrain_gen", "train_gan"]
         # emb_enc_dim = self._emb_enc_inputs.get_shape().as_list()[-1]
         # attention_states = linear_mapping_weightnorm(self.attention_keys, emb_enc_dim) + self._emb_enc_inputs
