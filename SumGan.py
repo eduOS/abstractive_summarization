@@ -19,7 +19,6 @@ from gen_utils import calc_running_avg_loss
 from gen_utils import get_best_loss_from_chpt
 from gen_utils import save_ckpt as gen_save_ckpt
 from gan_utils import save_ckpt as gan_save_ckpt
-from tensorflow.python import debug as tf_debug
 from utils import sattolo_cycle
 from utils import print_dashboard
 from dis_utils import dump_chpt
@@ -104,15 +103,17 @@ tf.app.flags.DEFINE_integer('emb_dim', 300, 'dimension of word embeddings')
 # search is the same as the original beam search
 tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 400
 tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 100
-tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
+tf.app.flags.DEFINE_integer('beam_size', 20, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('gen_vocab_size', 5000, 'Size of vocabulary. These will be read from the vocabulary file in'
                             ' order. If the vocabulary file contains fewer words than this number,'
                             ' or if this number is set to 0, will take all words in the vocabulary file.')
-tf.app.flags.DEFINE_float('gen_lr', 0.0001, 'learning rate')
+tf.app.flags.DEFINE_float('gen_lr', 0.001, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
 tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
+tf.app.flags.DEFINE_string('encoder', 'lstm_encoder', 'Name for the encoder type. Support lstm_encoder and conv_encoder so far.')
+tf.app.flags.DEFINE_string('decoder', 'lstm_decoder', 'Name for the decoder type. Support lstm_decoder and conv_decoder so far.')
 
 # Pointer-generator or baseline model
 # tf.app.flags.DEFINE_boolean('pointer_gen', True, 'If True, use pointer-generator model. If False, use baseline model.')
@@ -122,7 +123,7 @@ tf.app.flags.DEFINE_boolean('coverage', False, 'Use coverage mechanism. Note, th
                             'paper train WITHOUT coverage until converged, and then train for a short phase WITH coverage afterwards.'
                             'i.e. to reproduce the results in the ACL paper, turn this off for most of training then turn on for a short phase at the end.')
 # coverage can be only used while decoding either in the gan or in the pretraining
-tf.app.flags.DEFINE_float('cov_loss_wt', 1, 'Weight of coverage loss (lambda in the paper). If zero, then no incentive to minimize coverage loss.')
+tf.app.flags.DEFINE_float('cov_loss_wt', 1.0, 'Weight of coverage loss (lambda in the paper). If zero, then no incentive to minimize coverage loss.')
 tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-coverage model to a coverage model. '
                             'Turn this on and run in train mode. \ Your current model will be copied to a new version '
                             '(same name with _cov_init appended)\ that will be ready to run with coverage flag turned on,\ for the coverage training stage.')
@@ -204,12 +205,14 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
                 last_ten_eval_loss = deque(maxlen=10)
                 eval_save_steps -= 1000
 
+            current_learing_rate = model.get_cur_lr(sess)
+
             # print the print the dashboard
             current_speed = (time.time() - start_time + epsilon) / ((counter * hps.batch_size) + epsilon)
             total_training_time = (time.time() - start_time) * global_step / (counter * 3600)
-            print_dashboard("Generator", global_step, hps.batch_size, hps.gen_vocab_size,
+            print_dashboard("Generator", global_step, hps.batch_size, hps.enc_vocab_size, hps.dec_vocab_size,
                             running_avg_loss, eval_loss,
-                            total_training_time, current_speed,
+                            total_training_time, current_speed, current_learing_rate,
                             coverage_loss if coverage_loss else "not set")
 
 
@@ -262,6 +265,8 @@ def main(argv):
     hparam_gen = [
         'mode',
         'model_dir',
+        'encoder',
+        'decoder',
         'adagrad_init_acc',
         'steps_per_checkpoint',
         'batch_size',
@@ -420,19 +425,23 @@ def main(argv):
             ckpt_state = tf.train.get_checkpoint_state(emb_path)
             if ckpt_state:
                 ckpt = ckpt_state.model_checkpoint_path
-                generator.saver.restore(sess, ckpt)
-                print(colored("successfully restored embeddings form %s" % emb_path, 'green'))
+                try:
+                    generator.emb_saver.restore(sess, ckpt)
+                    print(colored("successfully restored embeddings form %s" % emb_path, 'green'))
+                except Exception as e:
+                    print(e)
+                    print(colored("failed to restore embeddings form %s" % emb_path, 'red'))
             else:
-                print(colored("failed to restore embeddings form %s" % emb_path, 'red'))
+                print(colored("embeddings doesn't exist in %s" % emb_path, 'red'))
 
     elif FLAGS.mode in ["decode", "train_gan"]:
         print("Restoring the generator model from the best checkpoint...")
         dec_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "generator" in v.name])
         val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.val_dir))
-        model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', 'val'))
+        # model_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', 'val'))
         gan_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir))
-        gan_val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir, "val"))
+        gan_val_dir = ensure_exists(join_path(FLAGS.model_dir, 'generator', FLAGS.gan_dir, FLAGS.val_dir))
         gan_newly_added = []
         # add the newly added variables here
         var_list = [v for v in all_variables if "generator" in v.name]
@@ -443,7 +452,7 @@ def main(argv):
         gan_val_saver = tf.train.Saver(max_to_keep=3, var_list=var_list)
         # for the loss test
         gen_val_saver = tf.train.Saver(max_to_keep=10, var_list=var_list)
-        utils.load_ckpt(dec_saver, sess, model_dir, mode="val", force=True)
+        utils.load_ckpt(dec_saver, sess, val_dir, mode="val", force=True)
         decoder = Decoder(sess, generator, gen_vocab)
 
     if FLAGS.mode == "pretrain_dis" or (FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1):
@@ -690,7 +699,7 @@ def main(argv):
     # --------------- decoding samples ---------------
     elif FLAGS.mode == "decode":
         print('Going to decode from the generator.')
-        decoder.bs_decode(decoder_batcher)
+        decoder.beam_search(decoder_batcher)
         print("Finished decoding..")
         # decode for generating corpus for discriminator
 
