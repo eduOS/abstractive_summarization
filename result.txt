@@ -1,10 +1,10 @@
 1440000
-# vocab char:char 5000:5000, independent copy, old_bs_4, loss: 2.71
-The average rouge_1 is 0.309706700312
-The average rouge_2 is 0.192619545562
-The average rouge_l is 0.285398738944 
+# vocab char:char 5000:5000, independent copy, old_bs_2, loss: 2.71
+The average rouge_1 is 0.311807353003
+The average rouge_2 is 0.191382610671
+The average rouge_l is 0.287148284388
 
-# vocab char:char 5000:5000, independent copy, new_bs_10, loss: 2.71
-The average rouge_1 is 0.252182881539
-The average rouge_2 is 0.135278956961
-The average rouge_l is 0.228482264277
+# vocab char:char 5000:5000, independent copy, new_bs_2, loss: 2.71
+The average rouge_1 is 0.273655041391
+The average rouge_2 is 0.150631964395
+The average rouge_l is 0.24885992619
