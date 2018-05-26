@@ -1,4 +1,4 @@
-
+1440000
 # vocab char:char 5000:5000, independent copy, old_bs_4, loss: 2.71
 The average rouge_1 is 0.309706700312
 The average rouge_2 is 0.192619545562
