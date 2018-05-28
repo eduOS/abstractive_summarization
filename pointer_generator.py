@@ -443,23 +443,19 @@ class PointerGenerator(object):
 
         return attention_keys
 
-    def decode_onestep(self, emb_dec_inputs, dec_in_state):
+    def decode_onestep(self, emb_dec_inputs, attention_keys, attention_values, enc_padding_mask):
         """
         function: decode onestep for rollout
         inputs:
             the embedded input
         """
-        # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
-        _, _, _, final_dists, new_states = getattr(self, "_" + self.hps.decoder)(emb_dec_inputs, dec_in_state)
-        # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
-        # final_dists_sliced = tf.slice(final_dists[0], [0, 0], [-1, self._vocab.size()])
+        final_dists = self._conv_decoder(emb_dec_inputs, attention_keys, attention_values, enc_padding_mask)
         final_dists = final_dists[0]
-        # final_dists += tf.ones_like(final_dists) * sys.float_info.epsilon
-        output_id = tf.squeeze(tf.cast(tf.reshape(tf.multinomial(tf.log(final_dists), 1), [self.hps.batch_size]), tf.int32))
-        # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
-        return output_id, new_states
+        # output_id = tf.squeeze(tf.cast(tf.reshape(tf.multinomial(tf.log(final_dists), 1), [self.hps.batch_size]), tf.int32))
+        return final_dists
+        # vocab_dists = self._conv_decoder(dec_input, attention_keys, attention_values, enc_padding_mask)
 
-    def run_decode_onestep(self, sess, cur_input, attention_keys, enc_padding_mask):
+    def run_decode_onestep(self, emb_dec_inputs, attention_keys, attention_values, enc_padding_mask):
         """
         For beam search decoding. Run the decoder for one step.
 
