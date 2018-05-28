@@ -188,7 +188,7 @@ def run_beam_search(sess, model, vocab, batch, top_k=1):
             ) = model.run_decode_onestep(
                 sess=sess, enc_batch_extend_vocab=enc_batch_extend_vocab,
                 max_art_oovs=batch.max_art_oovs, latest_tokens=latest_tokens,
-                enc_states=enc_states_, enc_padding_mask=enc_padding_mask,
+                attention_keys=enc_states_, enc_padding_mask=enc_padding_mask,
                 dec_init_states=states, prev_coverage=prev_coverage,
             )
             # the attn_dists seems wrong, they are all the same
