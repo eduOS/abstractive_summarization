@@ -1,5 +1,10 @@
 
-5000:5000
+5000:5000, new_bs_2, 
 The average rouge_1 is 0.274229087416
 The average rouge_2 is 0.166699407436
 The average rouge_l is 0.252436667581
+
+5000:5000, old_bs_2, 
+The average rouge_1 is 0.299346722109
+The average rouge_2 is 0.187362509615
+The average rouge_l is 0.280653552583
