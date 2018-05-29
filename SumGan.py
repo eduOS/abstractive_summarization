@@ -107,7 +107,7 @@ tf.app.flags.DEFINE_integer('char_emb_dim', 300, 'Dimension of character embeddi
 tf.app.flags.DEFINE_integer('max_enc_steps', 120, 'max timesteps of encoder (max source text tokens)')  # 120
 tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 25
 tf.app.flags.DEFINE_integer('beam_size', 20, 'beam size for beam search decoding.')
-tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
+tf.app.flags.DEFINE_integer('min_dec_steps', 3, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('dec_vocab_size', 50000, 'Size of vocabulary of the decoder in the generator.')
 tf.app.flags.DEFINE_integer('enc_vocab_size', 7500, 'Size of vocabulary of the encoder in the generator.')
 tf.app.flags.DEFINE_float('gen_lr', 0.001, 'learning rate')
