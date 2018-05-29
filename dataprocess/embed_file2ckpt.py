@@ -63,8 +63,8 @@ def read_from_file(vocab_path, embed_path, vocab_size):
 
     return new_embed_l, emb_dim
 
-enc_vocab_path, enc_embed_path, enc_vocab_size = "./data/enc_vocab", "../../data/zh_emb/emb_wd/embedding.300", 100000
-dec_vocab_path, dec_embed_path, dec_vocab_size = "./data/dec_vocab", "../../data/zh_emb/emb_ch/embedding.300", 7500
+enc_vocab_path, enc_embed_path, enc_vocab_size = "./data/enc_vocab", "../../data/zh_emb/emb_ch/embedding.300", 7500
+dec_vocab_path, dec_embed_path, dec_vocab_size = "./data/dec_vocab", "../../data/zh_emb/emb_wd/embedding.300", 50000
 enc_emb_l, enc_emb_dim = read_from_file(enc_vocab_path, enc_embed_path, enc_vocab_size)
 dec_emb_l, dec_emb_dim = read_from_file(dec_vocab_path, dec_embed_path, dec_vocab_size)
 # vocab_size = 100000

@@ -54,7 +54,6 @@ tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
 tf.app.flags.DEFINE_integer("dis_vocab_size", 5000, "vocabulary size.")
 tf.app.flags.DEFINE_string("dis_vocab_file", "vocab", "the path of the discriminator vocabulary.")
-tf.app.flags.DEFINE_string("vocab_type", "char", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_integer("num_models", 3, "Size of each model layer. The actural size is doubled.")
 
@@ -100,16 +99,16 @@ tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be sa
 
 # Hyperparameters
 tf.app.flags.DEFINE_integer('hidden_dim', 500, 'Dimension of RNN hidden states')
-tf.app.flags.DEFINE_integer('word_emb_dim', 500, 'Dimension of word embeddings.')
-tf.app.flags.DEFINE_integer('char_emb_dim', 500, 'Dimension of character embeddings.')
+tf.app.flags.DEFINE_integer('word_emb_dim', 300, 'Dimension of word embeddings.')
+tf.app.flags.DEFINE_integer('char_emb_dim', 300, 'Dimension of character embeddings.')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
-tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 120
-tf.app.flags.DEFINE_integer('max_dec_steps', 25, 'max timesteps of decoder (max summary tokens)')  # 25
+tf.app.flags.DEFINE_integer('max_enc_steps', 120, 'max timesteps of encoder (max source text tokens)')  # 120
+tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 25
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
-tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
-tf.app.flags.DEFINE_integer('dec_vocab_size', 7500, 'Size of vocabulary of the decoder in the generator.')
-tf.app.flags.DEFINE_integer('enc_vocab_size', 500000, 'Size of vocabulary of the encoder in the generator.')
+tf.app.flags.DEFINE_integer('min_dec_steps', 3, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
+tf.app.flags.DEFINE_integer('dec_vocab_size', 50000, 'Size of vocabulary of the decoder in the generator.')
+tf.app.flags.DEFINE_integer('enc_vocab_size', 7500, 'Size of vocabulary of the encoder in the generator.')
 tf.app.flags.DEFINE_float('gen_lr', 0.001, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
@@ -190,6 +189,57 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
         loss = results['loss']
         if global_step == 1:
             print("The training starts with loss %s." % loss)
+            print("\n\nThe parameters: \n")
+            print(
+                'mode: %s\n'
+                'model_dir: %s\n'
+                'decoder: %s\n'
+                'steps_per_checkpoint: %s\n'
+                'batch_size: %s\n'
+                'beam_size: %s\n'
+                'coverage: %s\n'
+                'word_emb_dim: %s\n'
+                'char_emb_dim: %s\n'
+                'rand_unif_init_mag: %s\n'
+                'enc_vocab_file: %s\n'
+                'dec_vocab_file: %s\n'
+                'enc_vocab_size: %s\n'
+                'dec_vocab_size: %s\n'
+                'hidden_dim: %s\n'
+                'gen_lr: %s\n'
+                'gen_max_gradient: %s\n'
+                'max_dec_steps: %s\n'
+                'max_enc_steps: %s\n'
+                'min_dec_steps: %s\n'
+                'trunc_norm_init_std: %s\n'
+                'single_pass: %s\n'
+                'log_root: %s\n'
+                'data_path: %s\n' % (
+                    hps.mode,
+                    hps.model_dir,
+                    hps.decoder,
+                    hps.steps_per_checkpoint,
+                    hps.batch_size,
+                    hps.beam_size,
+                    hps.coverage,
+                    hps.word_emb_dim,
+                    hps.char_emb_dim,
+                    hps.rand_unif_init_mag,
+                    hps.enc_vocab_file,
+                    hps.dec_vocab_file,
+                    hps.enc_vocab_size,
+                    hps.dec_vocab_size,
+                    hps.hidden_dim,
+                    hps.gen_lr,
+                    hps.gen_max_gradient,
+                    hps.max_dec_steps,
+                    hps.max_enc_steps,
+                    hps.min_dec_steps,
+                    hps.trunc_norm_init_std,
+                    hps.single_pass,
+                    hps.log_root,
+                    hps.data_path)
+            )
 
         if hps.coverage:
             coverage_loss = results['coverage_loss']
@@ -280,7 +330,6 @@ def main(argv):
         'rand_unif_init_mag',
         'enc_vocab_file',
         'dec_vocab_file',
-        'vocab_type',
         'dec_vocab_size',
         'enc_vocab_size',
         'keep_prob',
@@ -309,7 +358,6 @@ def main(argv):
 
     hparam_dis = [
         'mode',
-        'vocab_type',
         'model_dir',
         'dis_vocab_size',
         'steps_per_checkpoint',
@@ -345,11 +393,6 @@ def main(argv):
             hps_dict[key] = val  # add it to the dict
 
     hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
-    if hps_gen.dec_vocab_file == hps_dis.dis_vocab_file:
-        assert hps_dis.vocab_type == hps_gen.vocab_type, (
-            "the vocab type of the generator and the discriminator should be the same")
-        hps_dis = hps_dis._replace(layer_size=hps_gen.char_emb_dim)
-        hps_dis = hps_dis._replace(dis_vocab_size=hps_gen.dec_vocab_size)
 
     if FLAGS.mode == "train_gan":
         hps_gen = hps_gen._replace(batch_size=hps_gen.batch_size * hps_dis.num_models)
