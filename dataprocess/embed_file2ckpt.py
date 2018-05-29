@@ -8,6 +8,7 @@ import tensorflow as tf
 from codecs import open
 from collections import defaultdict as dd
 import random
+import numpy as np
 import sys
 
 # generate checkpoint from vocab and embeddings
@@ -87,7 +88,10 @@ enc_as_op = enc_embeddings.assign(enc_emb_ph)
 dec_as_op = dec_embeddings.assign(dec_emb_ph)
 
 sess = tf.Session()
-sess.run(enc_as_op, feed_dict={enc_emb_ph: enc_emb_l})
-sess.run(dec_as_op, feed_dict={dec_emb_ph: dec_emb_l})
+enc_emb_n = np.array(enc_emb_l)
+dec_emb_n = np.array(dec_emb_l)
+
+sess.run(enc_as_op, feed_dict={enc_emb_ph: enc_emb_n})
+sess.run(dec_as_op, feed_dict={dec_emb_ph: dec_emb_n})
 save_dir = sys.argv[-1]
 saver.save(sess, save_dir)
