@@ -30,8 +30,8 @@ SENTENCE_END = '</s>'
 
 finished_files_dir = "./finished_files/"
 
-ENC_VOCAB_SIZE = 500000
-DEC_VOCAB_SIZE = 7500
+ENC_VOCAB_SIZE = 20000
+DEC_VOCAB_SIZE = 500000
 
 start = time.time()
 enc_must_include = ['[PAD]', '[UNK]']
@@ -220,8 +220,8 @@ if __name__ == '__main__':
         print("USAGE: python make_datafiles.py <source_dir>")
         sys.exit()
     source_dir = sys.argv[1]
-    enc_segment = True
-    dec_segment = False
+    enc_segment = False
+    dec_segment = True
 
     # Create some new directories
     if not os.path.exists(finished_files_dir):

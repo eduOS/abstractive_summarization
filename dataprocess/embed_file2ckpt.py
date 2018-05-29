@@ -63,8 +63,8 @@ def read_from_file(vocab_path, embed_path, vocab_size):
 
     return new_embed_l, emb_dim
 
-enc_vocab_path, enc_embed_path, enc_vocab_size = "./data/enc_vocab", "../../data/zh_emb/emb_wd/embedding.300", 500000
-dec_vocab_path, dec_embed_path, dec_vocab_size = "./data/dec_vocab", "../../data/zh_emb/emb_ch/embedding.300", 7500
+enc_vocab_path, enc_embed_path, enc_vocab_size = "./data/enc_vocab", "../../data/zh_emb/emb_ch/embedding.300", 7500
+dec_vocab_path, dec_embed_path, dec_vocab_size = "./data/dec_vocab", "../../data/zh_emb/emb_wd/embedding.300", 50000
 enc_emb_l, enc_emb_dim = read_from_file(enc_vocab_path, enc_embed_path, enc_vocab_size)
 dec_emb_l, dec_emb_dim = read_from_file(dec_vocab_path, dec_embed_path, dec_vocab_size)
 # vocab_size = 100000
@@ -89,6 +89,5 @@ dec_as_op = dec_embeddings.assign(dec_emb_ph)
 sess = tf.Session()
 sess.run(enc_as_op, feed_dict={enc_emb_ph: enc_emb_l})
 sess.run(dec_as_op, feed_dict={dec_emb_ph: dec_emb_l})
-save_path = sys.argv[-1]  # this should be file path not directory path
-
-saver.save(sess, save_path)
+save_dir = sys.argv[-1]
+saver.save(sess, save_dir)
