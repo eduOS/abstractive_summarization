@@ -425,13 +425,15 @@ def main(argv):
                 try:
                     generator.dec_emb_saver.restore(sess, ckpt)
                     print(colored("successfully restored embeddings for decoder form %s" % emb_path, 'green'))
-                except:
-                    print(colored("Failed to restore embeddings for decoder in %s" % emb_path, 'red'))
+                except Exception as ex:
+                    print(colored("Failed to restore embeddings for decoder in %s. The detailed info:\n" % emb_path, 'red'))
+                    print(ex)
                 try:
                     generator.enc_emb_saver.restore(sess, ckpt)
                     print(colored("successfully restored embeddings for encoder form %s" % emb_path, 'green'))
-                except:
-                    print(colored("Failed to restore embeddings for encoder in %s" % emb_path, 'red'))
+                except Exception as ex:
+                    print(colored("Failed to restore embeddings for encoder in %s. The detailed info:\n" % emb_path, 'red'))
+                    print(ex)
             else:
                 print(colored("No embeddings restored in %s" % emb_path, 'red'))
 
@@ -530,18 +532,7 @@ def main(argv):
                 assert np.array(n_targets_padding_mask).shape == (hps_gan.sample_num,
                                                                   hps_gen.batch_size,
                                                                   hps_gen.max_dec_steps)
-                # get rewards for the samples
-                # strip the start token and stop, the stop is masked out in
-                # calculatting the loss
-                # n_samples = [np.where(
-                #     np.less(samples, hps_gen.gen_vocab_size),
-                #     samples, np.array(
-                #         [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
-                #     for samples in n_samples_extend]
                 n_samples_extend_no_start = np.array(n_samples_extend)[:, :, 1:]
-                # for the rouge
-                # n_samples_no_start = np.array(n_samples)[:, :, 1:]
-                # for the discriminator
                 try:
                     n_rewards = rollout.get_reward(
                         hps_gan, sess, gen_vocab, dis_vocab, batch, enc_states,
