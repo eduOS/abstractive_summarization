@@ -479,13 +479,15 @@ def main(argv):
                 try:
                     generator.dec_emb_saver.restore(sess, ckpt)
                     print(colored("successfully restored embeddings for decoder form %s" % emb_path, 'green'))
-                except:
+                except Exception as ex:
                     print(colored("Failed to restore embeddings for decoder in %s" % emb_path, 'red'))
+                    print(ex)
                 try:
                     generator.enc_emb_saver.restore(sess, ckpt)
                     print(colored("successfully restored embeddings for encoder form %s" % emb_path, 'green'))
-                except:
+                except Exception as ex:
                     print(colored("Failed to restore embeddings for encoder in %s" % emb_path, 'red'))
+                    print(ex)
             else:
                 print(colored("No embeddings restored in %s" % emb_path, 'red'))
 
