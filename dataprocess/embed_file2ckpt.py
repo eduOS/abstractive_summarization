@@ -22,8 +22,8 @@ ENC_TYPE = 'word'
 DEC_TYPE = 'word'
 ENC_VOCAB_SIZE = 50000
 DEC_VOCAB_SIZE = 50000
-enc_emb_path = "../../data/zh_emb/emb_%s/embedding.300" % 'ch' if ENC_TYPE == 'char' else 'wd'
-dec_emb_path = "../../data/zh_emb/emb_%s/embedding.300" % 'ch' if DEC_TYPE == 'char' else 'wd'
+enc_emb_path = "../../data/zh_emb/emb_%s/embedding.300" % ('ch' if ENC_TYPE == 'char' else 'wd')
+dec_emb_path = "../../data/zh_emb/emb_%s/embedding.300" % ('ch' if DEC_TYPE == 'char' else 'wd')
 
 enc_vocab_path, enc_embed_path, enc_vocab_size = "./data/enc_vocab", enc_emb_path, ENC_VOCAB_SIZE
 dec_vocab_path, dec_embed_path, dec_vocab_size = "./data/dec_vocab", dec_emb_path, DEC_VOCAB_SIZE
