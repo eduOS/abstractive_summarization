@@ -38,7 +38,8 @@ tf.app.flags.DEFINE_string(
     'must be one of pretrain_gen/pretrain_dis/train_gan/decode')
 # ------------------------------------- common
 tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training.")
-tf.app.flags.DEFINE_integer('steps_per_checkpoint', 10000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
+tf.app.flags.DEFINE_integer('steps_per_checkpoint', 10000,
+                            'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decay by this rate')
 tf.app.flags.DEFINE_float('sample_rate', 0.001, 'the sample rate, should be [0, 0.5]')
 tf.app.flags.DEFINE_float('keep_prob', 0.5, 'the dropout prob')
@@ -109,13 +110,11 @@ tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max 
 tf.app.flags.DEFINE_integer('beam_size', 20, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 3, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('dec_vocab_size', 50000, 'Size of vocabulary of the decoder in the generator.')
-tf.app.flags.DEFINE_integer('enc_vocab_size', 7500, 'Size of vocabulary of the encoder in the generator.')
+tf.app.flags.DEFINE_integer('enc_vocab_size', 50000, 'Size of vocabulary of the encoder in the generator.')
 tf.app.flags.DEFINE_float('gen_lr', 0.001, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
 tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
-tf.app.flags.DEFINE_string('encoder', 'lstm_encoder', 'Name for the encoder type. Support lstm_encoder and conv_encoder so far.')
-tf.app.flags.DEFINE_string('decoder', 'lstm_decoder', 'Name for the decoder type. Support lstm_decoder and conv_decoder so far.')
 
 # Pointer-generator or baseline model
 # tf.app.flags.DEFINE_boolean('pointer_gen', True, 'If True, use pointer-generator model. If False, use baseline model.')
@@ -195,7 +194,6 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
             print(
                 'mode: %s\n'
                 'model_dir: %s\n'
-                'decoder: %s\n'
                 'steps_per_checkpoint: %s\n'
                 'batch_size: %s\n'
                 'beam_size: %s\n'
@@ -220,7 +218,6 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
                 'data_path: %s\n' % (
                     hps.mode,
                     hps.model_dir,
-                    hps.decoder,
                     hps.steps_per_checkpoint,
                     hps.batch_size,
                     hps.beam_size,
@@ -321,8 +318,6 @@ def main(argv):
     hparam_gen = [
         'mode',
         'model_dir',
-        'encoder',
-        'decoder',
         'adagrad_init_acc',
         'steps_per_checkpoint',
         'batch_size',

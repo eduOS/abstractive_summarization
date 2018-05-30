@@ -22,6 +22,13 @@ standardizor = Standardizer()
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 
+# --------------------------- options
+ENC_SEGMENT = True
+DEC_SEGMENT = True
+ENC_VOCAB_SIZE = 500000
+DEC_VOCAB_SIZE = 500000
+# ---------------------------
+
 END_TOKENS = Punctuation.SENTENCE_DELIMITERS
 
 # We use these to separate the summary sentences in the .bin datafiles
@@ -29,9 +36,6 @@ SENTENCE_START = '<s>'
 SENTENCE_END = '</s>'
 
 finished_files_dir = "./finished_files/"
-
-ENC_VOCAB_SIZE = 20000
-DEC_VOCAB_SIZE = 500000
 
 start = time.time()
 enc_must_include = ['[PAD]', '[UNK]']
@@ -220,8 +224,8 @@ if __name__ == '__main__':
         print("USAGE: python make_datafiles.py <source_dir>")
         sys.exit()
     source_dir = sys.argv[1]
-    enc_segment = False
-    dec_segment = True
+    enc_segment = ENC_SEGMENT
+    dec_segment = DEC_SEGMENT
 
     # Create some new directories
     if not os.path.exists(finished_files_dir):

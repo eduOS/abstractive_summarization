@@ -6,14 +6,29 @@ from __future__ import division
 
 import tensorflow as tf
 from codecs import open
+from os.path import join as join_path
 from collections import defaultdict as dd
 import random
 import numpy as np
 import sys
+import os
+
 
 # generate checkpoint from vocab and embeddings
-# python embed_file2ckpt.py vocab_file embed_file vocab_size out_dir
-# python dataprocess/embed_file2ckpt.py data/vocab ../../data/zh_emb/emb_wd/embedding.300 100000 ./temp/
+# python embed_file2ckpt.py out_dir
+# python dataprocess/embed_file2ckpt.py ./temp/
+
+ENC_TYPE = 'word'
+DEC_TYPE = 'word'
+ENC_VOCAB_SIZE = 50000
+DEC_VOCAB_SIZE = 50000
+enc_emb_path = "../../data/zh_emb/emb_%s/embedding.300" % 'ch' if ENC_TYPE == 'char' else 'wd'
+dec_emb_path = "../../data/zh_emb/emb_%s/embedding.300" % 'ch' if DEC_TYPE == 'char' else 'wd'
+
+enc_vocab_path, enc_embed_path, enc_vocab_size = "./data/enc_vocab", enc_emb_path, ENC_VOCAB_SIZE
+dec_vocab_path, dec_embed_path, dec_vocab_size = "./data/dec_vocab", dec_emb_path, DEC_VOCAB_SIZE
+
+assert os.path.isdir(sys.argv[-1]), "argv[-1] should be the directory under which the embedding should locate"
 
 
 def read_from_file(vocab_path, embed_path, vocab_size):
@@ -64,8 +79,7 @@ def read_from_file(vocab_path, embed_path, vocab_size):
 
     return new_embed_l, emb_dim
 
-enc_vocab_path, enc_embed_path, enc_vocab_size = "./data/enc_vocab", "../../data/zh_emb/emb_ch/embedding.300", 7500
-dec_vocab_path, dec_embed_path, dec_vocab_size = "./data/dec_vocab", "../../data/zh_emb/emb_wd/embedding.300", 50000
+
 enc_emb_l, enc_emb_dim = read_from_file(enc_vocab_path, enc_embed_path, enc_vocab_size)
 dec_emb_l, dec_emb_dim = read_from_file(dec_vocab_path, dec_embed_path, dec_vocab_size)
 # vocab_size = 100000
@@ -93,5 +107,6 @@ dec_emb_n = np.array(dec_emb_l)
 
 sess.run(enc_as_op, feed_dict={enc_emb_ph: enc_emb_n})
 sess.run(dec_as_op, feed_dict={dec_emb_ph: dec_emb_n})
-save_dir = sys.argv[-1]
+
+save_dir = join_path(sys.argv[-1], "embed_enc_%s_%s-dec_%s_%s" % (ENC_TYPE, DEC_TYPE, ENC_VOCAB_SIZE, DEC_VOCAB_SIZE))
 saver.save(sess, save_dir)
