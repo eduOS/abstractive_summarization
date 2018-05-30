@@ -109,7 +109,6 @@ class PointerGenerator(object):
           encoder.
           update: only for the evaluation and training of the generator in gan training
         """
-
         if gan_eval:
             gan = True
         feed_dict = {}
@@ -123,6 +122,7 @@ class PointerGenerator(object):
                 feed_dict[self._eval_dec_batch] = batch.dec_batch
             elif not gan:
                 feed_dict[self._dec_batch] = batch.dec_batch
+        time.sleep(2000)
         return feed_dict
 
     def _add_seq2seq(self):
@@ -170,7 +170,7 @@ class PointerGenerator(object):
             # self.attention_keys = selective_fn(self.attention_keys, self.dec_in_state)
 
             with tf.variable_scope('decoder') as decoder_scope:
-                vocab_dists, self.attn_dists, _ = self._lstm_decoder(emb_dec_inputs)
+                self.vocab_dists, self.attn_dists, _ = self._lstm_decoder(emb_dec_inputs)
                 decoder_scope.reuse_variables()
                 if self.hps.mode == "decode":
                     self.beam_search()
@@ -198,7 +198,7 @@ class PointerGenerator(object):
             with tf.variable_scope('generator_loss'):
 
                 # for training of generator
-                loss_per_step = get_loss(vocab_dists, self.target_batch, self.dec_padding_mask)
+                loss_per_step = get_loss(self.vocab_dists, self.target_batch, self.dec_padding_mask)
                 # self.loss_per_step = loss_per_step
                 eval_loss_per_step = get_loss(eval_final_dists, self.target_batch, self.dec_padding_mask)
                 # Apply padding_mask mask and get loss
@@ -225,18 +225,15 @@ class PointerGenerator(object):
 
                 self.gan_loss = tf.reduce_mean(tf.stack(k_gan_losses))
 
-        # We run decode beam search mode one decoder step at a time
-        # log_dists is a singleton list containing shape (batch_size,
-        # extended_vsize)
         if len(emb_dec_inputs) == 1:
-            assert len(vocab_dists) == 1
-            self.vocab_dists = vocab_dists[0]
+            assert len(self.vocab_dists) == 1
+            vocab_dist = self.vocab_dists[0]
             topk_probs, self._topk_ids = tf.nn.top_k(
-                self.vocab_dists, hps.beam_size * 2)
+                vocab_dist, hps.beam_size * 2)
             self._topk_log_probs = tf.log(topk_probs)
 
             # for the monte carlo searching
-            self._ran_id = tf.multinomial(tf.log(self.vocab_dists), 1)
+            self._ran_id = tf.multinomial(tf.log(vocab_dist), 1)
 
         # for the loss
         loss_to_minimize = self._total_loss if self.hps.coverage else self._loss
