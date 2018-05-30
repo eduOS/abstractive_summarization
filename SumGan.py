@@ -55,7 +55,7 @@ tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
 tf.app.flags.DEFINE_integer("dis_vocab_size", 5000, "vocabulary size.")
 tf.app.flags.DEFINE_string("dis_vocab_file", "vocab", "the path of the discriminator vocabulary.")
-tf.app.flags.DEFINE_string("vocab_type", "char", "the path of the discriminator vocabulary.")
+tf.app.flags.DEFINE_string("vocab_type", "word", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_integer("num_models", 3, "Size of each model layer. The actural size is doubled.")
 
@@ -105,7 +105,7 @@ tf.app.flags.DEFINE_integer('word_emb_dim', 300, 'Dimension of word embeddings.'
 tf.app.flags.DEFINE_integer('char_emb_dim', 300, 'Dimension of character embeddings.')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
-tf.app.flags.DEFINE_integer('max_enc_steps', 120, 'max timesteps of encoder (max source text tokens)')  # 120
+tf.app.flags.DEFINE_integer('max_enc_steps', 75, 'max timesteps of encoder (max source text tokens)')  # 120
 tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 25
 tf.app.flags.DEFINE_integer('beam_size', 20, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 3, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
