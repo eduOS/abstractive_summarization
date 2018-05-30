@@ -216,23 +216,6 @@ def lstm_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init=None,
                  keep_prob=0.5, is_training=False
                  ):
 
-    """Add a single-layer bidirectional LSTM encoder to the graph.
-
-    Args:
-        encoder_inputs: A tensor of shape [batch_size, <=max_enc_steps,
-        emb_size].
-        seq_len: Lengths of encoder_inputs (before padding). A tensor of shape
-        [batch_size].
-
-    Returns:
-        encoder_outputs:
-        A tensor of shape [batch_size, <=max_enc_steps, 2*hidden_dim]. It's
-        2*hidden_dim because it's the concatenation of the forwards and
-        backwards states.
-        fw_state, bw_state:
-        Each are LSTMStateTuples of shape
-        ([batch_size,hidden_dim],[batch_size,hidden_dim])
-    """
     encoder_outputs = tf.contrib.layers.dropout(encoder_inputs, keep_prob=keep_prob, is_training=is_training)
 
     with tf.variable_scope('encoder'):
@@ -242,14 +225,7 @@ def lstm_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init=None,
             hidden_dim, initializer=rand_unif_init, state_is_tuple=state_is_tuple)
         (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
             cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len)
-        # the sequence length of the encoder_inputs varies depending on the
-        # batch, which will make the second dimension of the
-        # encoder_outputs different in different batches
-
-        # concatenate the forwards and backwards states
         encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
-        # encoder_outputs: [batch_size * beam_size, max_time, output_size*2]
-        # fw_st & bw_st: [batch_size * beam_size, num_hidden]
 
     dec_in_state = reduce_states(
         fw_st, bw_st, hidden_dim=hidden_dim,

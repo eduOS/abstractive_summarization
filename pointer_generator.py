@@ -318,14 +318,7 @@ class PointerGenerator(object):
 
         if type(emb_dec_inputs) is not list:
             emb_dec_inputs = [emb_dec_inputs]
-        if type(dec_in_state) != LSTMStateTuple:
-            dec_in_state = LSTMStateTuple(
-                linear(dec_in_state, self.hps.hidden_dim, bias=True, scope="lstmstatetuple_c"),
-                linear(dec_in_state, self.hps.hidden_dim, bias=True, scope="lstmstatetuple_h")
-            )
         vsize = self._dec_vocab.size()  # size of the vocabulary
-        # batch_size = tf.shape(emb_dec_inputs[0])[0]
-        # Add the decoder.
         cell = tf.contrib.rnn.LSTMCell(
             self.hps.hidden_dim,
             state_is_tuple=True,
