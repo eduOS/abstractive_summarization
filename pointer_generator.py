@@ -122,7 +122,6 @@ class PointerGenerator(object):
                 feed_dict[self._eval_dec_batch] = batch.dec_batch
             elif not gan:
                 feed_dict[self._dec_batch] = batch.dec_batch
-        time.sleep(2000)
         return feed_dict
 
     def _add_seq2seq(self):
