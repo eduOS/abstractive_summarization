@@ -20,7 +20,6 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 
-import sys
 import time
 import numpy as np
 import tensorflow as tf
@@ -28,11 +27,8 @@ from termcolor import colored
 from attention_decoder import lstm_attention_decoder
 from attention_decoder import conv_attention_decoder
 from utils import lstm_encoder
-from utils import linear
-from utils import conv_encoder
 from codecs import open
 from six.moves import xrange
-from tensorflow.contrib.rnn import LSTMStateTuple
 import data
 
 FLAGS = tf.app.flags.FLAGS
@@ -255,7 +251,7 @@ class PointerGenerator(object):
             staircase=True)
 
         # Apply adagrad optimizer
-        optimizer = tf.train.AdagradOptimizer(self.learning_rate)
+        optimizer = tf.train.AdamOptimizer(self.learning_rate)
         with tf.device("/gpu:0"):
             self._train_op = optimizer.apply_gradients(
                 zip(grads, trainable_variables),
@@ -381,9 +377,8 @@ class PointerGenerator(object):
             'global_step': self.global_step,
         }
 
-        # to_return['attn_dists'] = self.attn_dists
-        # to_return['p_gens'] = self.p_gens
-        # to_return['final_dists'] = self.final_dists
+        to_return['attn_dists'] = self.attn_dists
+        to_return['vocab_dists'] = self.vocab_dists
 
         to_return['loss'] = self._eval_loss
         if gan_eval:
@@ -397,13 +392,11 @@ class PointerGenerator(object):
         if self.hps.coverage:
             to_return['coverage_loss'] = self._coverage_loss
         rsts = sess.run(to_return, feed_dict)
-        # print('attn_dists')
-        # print(rsts['attn_dists'])
-        # print('p_gens')
-        # print(rsts['p_gens'])
-        # print('final_dists')
-        # print(rsts['final_dists'])
-        # time.sleep(100*100)
+        print('attn_dists')
+        print(rsts['attn_dists'])
+        print('vocab_dists')
+        print(rsts['vocab_dists'])
+        time.sleep(100*100)
 
         return rsts
 

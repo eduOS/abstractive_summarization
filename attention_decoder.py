@@ -30,7 +30,6 @@ from utils import linear_mapping_weightnorm
 # from utils import global_selective_fn
 from utils import conv_decoder_stack
 from utils import linear
-from utils import maxout
 
 
 # Note: this function is based on tf.contrib.legacy_seq2seq_attention_decoder,
@@ -41,7 +40,7 @@ from utils import maxout
 
 def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attention_keys, initial_state,
                            cell, initial_state_attention=False, use_coverage=False,
-                           prev_coverage=None, local_attention_layers=3):
+                           prev_coverage=None):
     # can this be applied to beam repetitive batch?
     assert type(decoder_inputs) == list, "decoder inputs should be list, but % given" % type(decoder_inputs)
     with variable_scope.variable_scope("attention_decoder"):
