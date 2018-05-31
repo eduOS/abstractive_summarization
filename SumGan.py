@@ -113,7 +113,7 @@ tf.app.flags.DEFINE_integer('enc_vocab_size', 500000, 'Size of vocabulary of the
 tf.app.flags.DEFINE_float('gen_lr', 0.001, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
-tf.app.flags.DEFINE_float('gen_max_gradient', 2.0, 'for gradient clipping')
+tf.app.flags.DEFINE_float('gen_max_gradient', 5.0, 'for gradient clipping')
 tf.app.flags.DEFINE_string('encoder', 'lstm_encoder', 'Name for the encoder type. Support lstm_encoder and conv_encoder so far.')
 tf.app.flags.DEFINE_string('decoder', 'lstm_decoder', 'Name for the decoder type. Support lstm_decoder and conv_decoder so far.')
 

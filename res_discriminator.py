@@ -147,11 +147,7 @@ class Seq2ClassModel(object):
       # (batch_size, 2*hidden_dim)
 
     with tf.variable_scope("dis_loss"):
-      # prob = tf.reduce_sum(tf.multiply(condition_emb, input_emb), axis=1) / (tf.norm(condition_emb, axis=1) * tf.norm(input_emb, axis=1))
-      # normalized_condition_emb = tf.nn.l2_normalize(condition_emb, dim=1)
-      # normalized_input_emb = tf.nn.l2_normalize(input_emb, dim=1)
       dot_product = tf.reduce_sum(tf.multiply(input_emb, condition_emb), axis=1)
-      # loss = tf.reduce_mean(tf.where(tf.equal(targets, 1), -tf.log(prob), -tf.log(1-prob)))
       loss = tf.nn.weighted_cross_entropy_with_logits(logits=dot_product, labels=targets, pos_weight=2)
       prob = tf.sigmoid(dot_product)
       pred = tf.where(tf.less(tf.fill(tf.shape(prob), 0.5), prob),
