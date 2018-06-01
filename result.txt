@@ -1,5 +1,5 @@
 
-vocab: 100000:7500, new_bs_2, 150000
-The average rouge_1 is 0.260020411031
-The average rouge_2 is 0.153240552025
-The average rouge_l is 0.239239770441
+vocab: 7500:50000, new_bs_2, 100000 * 16
+The average rouge_1 is 0.160897943046
+The average rouge_2 is 0.0394374918762
+The average rouge_l is 0.153111395209
