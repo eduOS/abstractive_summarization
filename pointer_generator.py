@@ -20,7 +20,6 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 
-import sys
 import time
 import numpy as np
 import tensorflow as tf
@@ -29,7 +28,6 @@ from attention_decoder import lstm_attention_decoder
 from attention_decoder import conv_attention_decoder
 from utils import lstm_encoder
 from utils import linear
-from utils import conv_encoder
 from codecs import open
 from six.moves import xrange
 from tensorflow.contrib.rnn import LSTMStateTuple
@@ -170,7 +168,7 @@ class PointerGenerator(object):
             # self.attention_keys = selective_fn(self.attention_keys, self.dec_in_state)
 
             with tf.variable_scope('decoder') as decoder_scope:
-                vocab_dists, self.attn_dists, _ = self._lstm_decoder(emb_dec_inputs)
+                vocab_dists, self.attn_dists, self._dec_out_state = self._lstm_decoder(emb_dec_inputs)
                 decoder_scope.reuse_variables()
                 if self.hps.mode == "decode":
                     self.beam_search()
