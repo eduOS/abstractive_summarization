@@ -65,6 +65,7 @@ def load_ckpt(saver, sess, dire, mode="train", force=False, lastest_filename="ch
                 elif mode == "train":
                     print("Failed to load checkpoint from %s Sleeping %s munites to waite." % (second_ckpt_dir, 10))
                     time.sleep(10 * 60)
+        time.sleep(60)
 
 
 def initialize_uninitialized(sess):
@@ -211,8 +212,7 @@ def red_print(message, color='red'):
     print(colored(message, color))
 
 
-def lstm_encoder(encoder_inputs, seq_len, hidden_dim,
-                 att_head_num=4, rand_unif_init=None,
+def lstm_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init=None,
                  state_is_tuple=True, trunc_norm_init_std=1e-4,
                  keep_prob=0.5, is_training=False
                  ):

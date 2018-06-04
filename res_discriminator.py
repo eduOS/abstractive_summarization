@@ -41,7 +41,6 @@ class Seq2ClassModel(object):
     self.hps = hps
     self.is_decoding = ('gan' in hps.mode)
     # self.is_decoding = True
-    self.vocab_size = hps.dis_vocab_size
     with tf.variable_scope("OptimizeLoss"):
       self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(hps.dis_lr))
     self.cell_type = hps.cell_type
@@ -104,7 +103,7 @@ class Seq2ClassModel(object):
             accuracy.append(acy)
             loss_cv.append(loss)
     loss_train = sum(loss_train) / len(loss_train)
-    loss_cv = tf.reduce_mean(tf.concat(loss_cv, 0))
+    loss_cv = sum(loss_cv) / len(loss_cv)
     self.accuracy = sum(accuracy) / len(accuracy)
     self.indicator = loss_cv
     self.loss = loss_train
@@ -153,8 +152,8 @@ class Seq2ClassModel(object):
       with tf.variable_scope("dis_loss"):
           dot_product = tf.reduce_sum(tf.multiply(input_emb, condition_emb), axis=1)
           # loss = tf.nn.weighted_cross_entropy_with_logits(logits=dot_product, labels=targets, pos_weight=2)
-          loss = tf.reduce_mean(tf.boolean_mask(dot_product, targets)) - \
-              tf.reduce_mean(tf.boolean_mask(dot_product, tf.logical_not(targets)))
+          loss = tf.reduce_mean(tf.boolean_mask(dot_product, tf.cast(targets, tf.bool))) - \
+              tf.reduce_mean(tf.boolean_mask(dot_product, tf.logical_not(tf.cast(targets, tf.bool))))
 
           prob = tf.sigmoid(dot_product)
           pred = tf.where(tf.less(tf.fill(tf.shape(prob), 0.5), prob),

@@ -19,8 +19,8 @@ class Rollout(object):
         self.update_rate = update_rate
         # TODO: for the variables update
         self._gen_hps = self.generator.hps
-        self.g_embeddings = self.generator.embeddings
-        start_tokens = np.array([self.generator._vocab.word2id(data.START_DECODING)] * self._gen_hps.batch_size)
+        self.g_embeddings = self.generator.dec_embeddings
+        start_tokens = np.array([self.generator.dec_vocab.word2id(data.START_DECODING)] * self._gen_hps.batch_size)
         emb_start_token = tf.nn.embedding_lookup(self.g_embeddings, start_tokens)
         next_input = emb_start_token
         #######################################################################
@@ -33,7 +33,7 @@ class Rollout(object):
         self.cell_h = tf.placeholder(
             tf.float32, shape=[self._gen_hps.batch_size, self._gen_hps.hidden_dim], name="cell_h")
         self.given_num = tf.placeholder(tf.int32, name="given_num")
-        # self.enc_states = tf.placeholder(
+        # self.attention_keys = tf.placeholder(
         #     tf.float32, shape=[self._gen_hps.batch_size, self._gen_hps.max_enc_steps,
         #                        self._gen_hps.hidden_dim])
         # this should be changed
@@ -75,13 +75,7 @@ class Rollout(object):
             def recurrence_rollout(i, dec_input, dec_in_state, rollout_sample_ar):
                 output_id, new_state = self.generator.decode_onestep([dec_input], dec_in_state)
                 rollout_sample_ar = rollout_sample_ar.write(i, output_id)
-                next_input_id_without_oovs = tf.where(
-                    tf.less(output_id, self._gen_hps.gen_vocab_size),
-                    output_id, tf.constant(
-                        [self.generator._vocab.word2id(data.UNKNOWN_TOKEN)] * self._gen_hps.batch_size))
-                # will tf.fill and tf.expand_dims be better to do this?
-                # https://stackoverflow.com/a/36189235/3552975
-                next_input_emb = tf.nn.embedding_lookup(self.g_embeddings, next_input_id_without_oovs)
+                next_input_emb = tf.nn.embedding_lookup(self.g_embeddings, output_id)
                 return i+1, next_input_emb, new_state, rollout_sample_ar
 
             _, _, _, self.rollout_sample_ar = control_flow_ops.while_loop(
@@ -94,18 +88,17 @@ class Rollout(object):
         # self.rollout_sample_ar = tf.stop_gradient(self.rollout_sample_ar)
         # batch_size x seq_length
 
-    def get_reward(self, hps_gan, sess, gen_vocab, dis_vocab, source_batch,
-                   enc_states, dec_in_state, k_samples, discriminator):
+    def get_reward(self, hps_gan, sess, gen_vocab, source_batch,
+                   attention_keys, dec_in_state, k_samples, discriminator):
         # dec_in_state is [batch_size, hidden_dim * 2] and that should be
         # changed to [batch_size, hidden_dim] for the attention_decoder
         rollout_num = hps_gan.rollout_num
         rouge_ratio = hps_gan.rouge_reward_ratio
         dis_ratio = hps_gan.dis_reward_ratio
 
-        articles_extend = source_batch.enc_batch_extend_vocab
         articles = source_batch.enc_batch
         article_lens = source_batch.enc_lens
-        batch_size = int(articles_extend.shape[0])
+        batch_size = int(articles.shape[0])
         emb_articles = sess.run(
             self.generator.temp_embedded_seq,
             feed_dict={self.generator.temp_batch: articles})
@@ -123,22 +116,14 @@ class Rollout(object):
                     # this is the source
                     # feed_dict[self.generator.enc_lens] = source_batch.enc_lens
                     feed_dict[self.given_num] = given_num
-                    feed_dict[self.generator.enc_states] = enc_states
+                    feed_dict[self.generator.attention_keys] = attention_keys
                     feed_dict[self.generator.enc_padding_mask] = source_batch.enc_padding_mask
                     feed_dict[self.cell_c] = dec_in_state.c
                     feed_dict[self.cell_h] = dec_in_state.h
-                    feed_dict[self.generator.enc_batch_extend_vocab] = articles_extend
-                    feed_dict[self.generator.max_art_oovs] = source_batch.max_art_oovs
                     # how to deal with the coverage?
 
                     # the unique feature for the pointer gen is the
-                    # enc_batch_extend_vocab and the max_art_oovs
-                    rollout_samples_extend = sess.run(self.rollout_sample, feed_dict)
-                    rollout_samples = np.where(
-                        np.less(samples, self._gen_hps.gen_vocab_size),
-                        rollout_samples_extend, np.array(
-                            [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * self._gen_hps.max_dec_steps
-                             ] * self._gen_hps.batch_size))
+                    rollout_samples = sess.run(self.rollout_sample, feed_dict)
                     # how about multiple generators for one discriminator?
                     if dis_ratio:
                         emb_rollout_samples = sess.run(
@@ -156,7 +141,7 @@ class Rollout(object):
                             dis_rewards[given_num-1] += ypred_for_auc
 
                     if rouge_ratio:
-                        rpred = rouge_l(strip_pads(rollout_samples_extend.tolist(), gen_vocab.word2id(STOP_DECODING)),
+                        rpred = rouge_l(strip_pads(rollout_samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
                                         strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), beta=0.5)
                         rouge_rewards[given_num] += np.array(rpred)
 

@@ -31,7 +31,7 @@ class Hypothesis(object):
     """Class to represent a hypothesis during beam search. Holds all the
     information needed for the hypothesis."""
 
-    def __init__(self, tokens, log_probs, state, attn_dists, p_gens, coverage):
+    def __init__(self, tokens, log_probs, state, attn_dists, coverage):
         """Hypothesis constructor.
 
         Args:
@@ -42,9 +42,6 @@ class Hypothesis(object):
           state: Current state of the decoder, a LSTMStateTuple.
           attn_dists: List, same length as tokens, of numpy arrays with shape
           (attn_length). These are the attention distributions so far.
-          p_gens: List, same length as tokens, of floats, or None if not using
-          pointer-generator model. The values of the generation probability so
-          far.
           coverage: Numpy array of shape (attn_length), or None if not using
           coverage. The current coverage vector.
         """
@@ -52,13 +49,12 @@ class Hypothesis(object):
         self.log_probs = log_probs
         self.state = state
         self.attn_dists = attn_dists
-        self.p_gens = p_gens
         self.coverage = coverage
 
     def __len__(self):
         return len(self._tokens)
 
-    def extend(self, token, log_prob, state, attn_dist, p_gen, coverage):
+    def extend(self, token, log_prob, state, attn_dist, coverage):
         """Return a NEW hypothesis, extended with the information from the
         latest step of beam search.
 
@@ -68,9 +64,6 @@ class Hypothesis(object):
           state: Current decoder state, a LSTMStateTuple.
           attn_dist: Attention distribution from latest step. Numpy array shape
           (attn_length).
-          p_gen: Generation probability on latest step. Float.
-          coverage: Latest coverage vector. Numpy array shape (attn_length), or
-          None if not using coverage.
         Returns:
           New Hypothesis for next step.
         """
@@ -80,7 +73,6 @@ class Hypothesis(object):
             log_probs=self.log_probs + [log_prob],
             state=state,
             attn_dists=self.attn_dists + [attn_dist],
-            p_gens=self.p_gens + [p_gen],
             coverage=coverage
         )
 
@@ -176,7 +168,7 @@ def run_beam_search(sess, model, dec_vocab, batch, top_k=1):
                 attn_dists, new_coverage
             ) = model.run_decode_onestep(
                 sess=sess, latest_tokens=latest_tokens,
-                enc_states=enc_states_, enc_padding_mask=enc_padding_mask,
+                attention_keys=enc_states_, enc_padding_mask=enc_padding_mask,
                 dec_init_states=states, prev_coverage=prev_coverage,
             )
             # the attn_dists seems wrong, they are all the same

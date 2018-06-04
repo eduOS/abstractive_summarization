@@ -107,7 +107,6 @@ def run_monte_carlo_search(sess, model, vocab, batch, s_num=10):
     for k in xrange(batch_size):
         hyps = batch_hyps[k]
         assert len(hyps) == s_num
-        enc_batch_extend_vocab = np.tile(batch.enc_batch_extend_vocab[k], (s_num, 1))
         enc_padding_mask = np.tile(batch.enc_padding_mask[k], (s_num, 1))
         enc_states_ = np.tile(enc_states[k], (s_num, 1, 1))
         steps = 0
@@ -134,10 +133,9 @@ def run_monte_carlo_search(sess, model, vocab, batch, s_num=10):
             # Run one step of the decoder to get the new info, it is the same either
             # in decoding or in gan
 
-            ran_id, _, new_states, _, _, new_coverage = model.run_decode_onestep(
-                sess=sess, enc_batch_extend_vocab=enc_batch_extend_vocab,
-                max_art_oovs=batch.max_art_oovs, latest_tokens=latest_tokens,
-                enc_states=enc_states_, enc_padding_mask=enc_padding_mask,
+            ran_id, _, new_states, _, new_coverage = model.run_decode_onestep(
+                sess=sess, latest_tokens=latest_tokens,
+                attention_keys=enc_states_, enc_padding_mask=enc_padding_mask,
                 dec_init_states=states, prev_coverage=prev_coverage,
                 method="mc"
             )

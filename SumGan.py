@@ -99,9 +99,9 @@ tf.app.flags.DEFINE_string('dec_dir', '', 'Where to generate the decode results.
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in adirectory with this name, under log_root.')
 
 # Hyperparameters
-tf.app.flags.DEFINE_integer('hidden_dim', 500, 'Dimension of RNN hidden states')
-tf.app.flags.DEFINE_integer('word_emb_dim', 500, 'Dimension of word embeddings.')
-tf.app.flags.DEFINE_integer('char_emb_dim', 500, 'Dimension of character embeddings.')
+tf.app.flags.DEFINE_integer('hidden_dim', 512, 'Dimension of RNN hidden states')
+tf.app.flags.DEFINE_integer('word_emb_dim', 300, 'Dimension of word embeddings.')
+tf.app.flags.DEFINE_integer('char_emb_dim', 300, 'Dimension of character embeddings.')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
 tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 120
@@ -109,7 +109,7 @@ tf.app.flags.DEFINE_integer('max_dec_steps', 25, 'max timesteps of decoder (max 
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('dec_vocab_size', 7500, 'Size of vocabulary of the decoder in the generator.')
-tf.app.flags.DEFINE_integer('enc_vocab_size', 500000, 'Size of vocabulary of the encoder in the generator.')
+tf.app.flags.DEFINE_integer('enc_vocab_size', 100000, 'Size of vocabulary of the encoder in the generator.')
 tf.app.flags.DEFINE_float('gen_lr', 0.001, 'learning rate')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
@@ -218,45 +218,6 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
                             coverage_loss if coverage_loss else "not set")
 
 
-def pretrain_discriminator(sess, model, batcher_val, dis_vocab, batcher, saver):
-    """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
-    # TODO: load two pretained model: the generator and the embedding
-    eval_loss_best = sys.float_info.max
-    hps = model.hps
-    # This is the training loop.
-    step_time, loss = 0.0, 0.0
-    current_step = 0
-    train_accuracies = []
-    while True:
-        start_time = time.time()
-        batch = batcher.next_batch()
-        inputs, conditions, targets = data.prepare_dis_pretraining_batch(batch)
-        if inputs.shape[0] != hps.batch_size * hps.num_models * 2:
-            print("The expected batch_size is %s but given %s, escape.." %
-                  (hps.batch_size * hps.num_models, inputs.shape[0]))
-            continue
-        results = model.run_one_batch(sess, inputs, conditions, targets)
-        train_accuracies.append(results["accuracy"])
-        step_time += (time.time() - start_time) / hps.steps_per_checkpoint
-        loss += results["loss"] / hps.steps_per_checkpoint
-        current_step += 1
-
-        # Once in a while, we save checkpoint, print statistics, and run evals.
-        if current_step % hps.steps_per_checkpoint == 0:
-            # Print statistics for the previous epoch.
-            eval_accuracy, eval_loss, stop_flag, eval_loss_best = dump_chpt(
-                batcher_val, hps, model, sess, saver, eval_loss_best, hps.early_stop)
-            if stop_flag:
-                break
-            print_dashboard("Discriminator", results["global_step"], hps.batch_size,
-                            hps.dis_vocab_size, loss, eval_loss, 0.0, step_time)
-            print(colored("training accuracy: %.4f; eval_accuracy: %.4f"
-                  % (results['accuracy'], eval_accuracy), "green"))
-            step_time, loss = 0.0, 0.0
-            if current_step >= hps.max_steps:
-                break
-
-
 def main(argv):
     tf.set_random_seed(111)  # a seed value for randomness
 
@@ -360,9 +321,6 @@ def main(argv):
             print("Building generator graph ...")
             gen_decoder_scope = generator.build_graph()
 
-    if FLAGS.mode not in ["pretrain_gen", 'decode']:
-        print("Building vocabulary for discriminator ...")
-        dis_vocab = Vocab(join_path(hps_dis.data_path, hps_dis.dis_vocab_file), hps_dis.dis_vocab_size)
     if FLAGS.mode in ['train_gan', 'pretrain_dis']:
         with tf.variable_scope("discriminator"), tf.device("/gpu:0"):
             discriminator = Seq2ClassModel(hps_dis)
@@ -478,33 +436,12 @@ def main(argv):
     if FLAGS.mode == "train_gan":
         gan_batcher_val = GenBatcher("mini_val", "val", enc_vocab, dec_vocab, hps_gen)
 
-    if FLAGS.mode == "pretrain_dis":
-        dis_val_batch_size = hps_dis.batch_size * hps_dis.num_models \
-            if hps_dis.mode == "train_gan" else hps_dis.batch_size * hps_dis.num_models * 2
-        dis_batcher_val = DisBatcher(
-            hps_dis.data_path, "eval", gen_vocab, dis_vocab,
-            dis_val_batch_size, single_pass=True,
-            max_art_steps=hps_dis.max_enc_steps, max_abs_steps=hps_dis.max_dec_steps,
-        )
-
     if FLAGS.mode == "pretrain_gen":
         # get reload the
         print('Going to pretrain the generator')
         try:
             with tf.device("/gpu:0"):
                 pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, gen_saver, gen_val_saver)
-        except KeyboardInterrupt:
-            tf.logging.info("Caught keyboard interrupt on worker....")
-
-    elif FLAGS.mode == "pretrain_dis":
-        print('Going to pretrain the discriminator')
-        dis_batcher = DisBatcher(
-            hps_dis.data_path, "decode", gen_vocab, dis_vocab,
-            hps_dis.batch_size * hps_dis.num_models, single_pass=hps_dis.single_pass,
-            max_art_steps=hps_dis.max_enc_steps, max_abs_steps=hps_dis.max_dec_steps,
-        )
-        try:
-            pretrain_discriminator(sess, discriminator, dis_batcher_val, dis_vocab, dis_batcher, dis_saver)
         except KeyboardInterrupt:
             tf.logging.info("Caught keyboard interrupt on worker....")
 
@@ -524,19 +461,19 @@ def main(argv):
                 batch = gen_batcher_train.next_batch()
 
                 # generate samples
-                enc_states, dec_in_state, n_samples_extend, n_targets_padding_mask = decoder.mc_generate(
+                enc_states, dec_in_state, n_samples, n_targets_padding_mask = decoder.mc_generate(
                     batch, s_num=hps_gan.sample_num)
-                assert np.array(n_samples_extend).shape == (hps_gan.sample_num,
-                                                            hps_gen.batch_size,
-                                                            hps_gen.max_dec_steps + 1)
+                assert np.array(n_samples).shape == (hps_gan.sample_num,
+                                                     hps_gen.batch_size,
+                                                     hps_gen.max_dec_steps + 1)
                 assert np.array(n_targets_padding_mask).shape == (hps_gan.sample_num,
                                                                   hps_gen.batch_size,
                                                                   hps_gen.max_dec_steps)
-                n_samples_extend_no_start = np.array(n_samples_extend)[:, :, 1:]
+                n_samples_no_start = np.array(n_samples)[:, :, 1:]
                 try:
                     n_rewards = rollout.get_reward(
-                        hps_gan, sess, gen_vocab, dis_vocab, batch, enc_states,
-                        dec_in_state, n_samples_extend_no_start, discriminator)
+                        hps_gan, sess, dec_vocab, batch, enc_states,
+                        dec_in_state, n_samples_no_start, discriminator)
                 except:
                     print('enc_states')
                     print(enc_states)
@@ -549,14 +486,9 @@ def main(argv):
                     raise
 
                 # fine tune the generator
-                n_sample_targets = np.array(n_samples_extend)[:, :, 1:]
-                n_samples_extend = np.array(n_samples_extend)[:, :, :-1]
+                n_sample_targets = np.array(n_samples)[:, :, 1:]
+                n_samples = np.array(n_samples)[:, :, :-1]
                 # sample_target_padding_mask = pad_sample(sample_target, gen_vocab, hps_gen)
-                n_samples = [np.where(
-                    np.less(samples, hps_gen.gen_vocab_size),
-                    samples, np.array(
-                        [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * hps_gen.max_dec_steps] * hps_gen.batch_size))
-                    for samples in n_samples_extend]
                 results = generator.run_gan_batch(
                     sess, batch, n_samples, n_sample_targets, n_targets_padding_mask, n_rewards)
 
@@ -586,7 +518,8 @@ def main(argv):
                         "\nDashboard for " + colored("GAN Generator", 'green') + " updated %s, "
                         "finished steps:\t%s\n"
                         "\tBatch size:\t%s\n"
-                        "\tVocabulary size:\t%s\n"
+                        "\tDecoder vocabulary size:\t%s\n"
+                        "\tEncoder vocabulary size:\t%s\n"
                         "\tCurrent speed:\t%.4f seconds/article\n"
                         "\tAverage GAN training loss:\t%.4f; "
                         "eval loss:\t%.4f\n"
@@ -594,7 +527,8 @@ def main(argv):
                             datetime.datetime.now().strftime("on %m-%d at %H:%M"),
                             gen_global_step,
                             hps_gen.batch_size,
-                            hps_gen.gen_vocab_size,
+                            hps_gen.dec_vocab_size,
+                            hps_gen.enc_vocab_size,
                             current_speed,
                             everage_g_loss,
                             gen_eval_loss.item(),
@@ -610,18 +544,14 @@ def main(argv):
                 print('Going to train the discriminator.')
             for d_gan in range(gan_dis_iter):
                 batch = gen_batcher_train.next_batch()
-                _, _, n_samples_extend, _ = decoder.mc_generate(
+                _, _, n_samples, _ = decoder.mc_generate(
                     batch, s_num=hps_gan.sample_num)
-                assert np.array(n_samples_extend).shape == (hps_gan.sample_num,
-                                                            hps_gen.batch_size,
-                                                            hps_gen.max_dec_steps + 1)
-                n_samples_extend_no_start = np.array(n_samples_extend)[:, :, 1:]
+                assert np.array(n_samples).shape == (hps_gan.sample_num,
+                                                     hps_gen.batch_size,
+                                                     hps_gen.max_dec_steps + 1)
+                n_samples_no_start = np.array(n_samples)[:, :, 1:]
                 # shuould first tanslate to words to avoid unk
-                n_samples = [np.where(
-                    np.less(samples, hps_gen.gen_vocab_size),
-                    samples, np.array(
-                        [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * (hps_gen.max_dec_steps)] * hps_gen.batch_size))
-                    for samples in n_samples_extend_no_start]
+                n_samples = [samples for samples in n_samples_no_start]
                 for samples in n_samples:
                     emb_dec_batch = sess.run(
                         generator.temp_embedded_seq,
@@ -684,7 +614,7 @@ def main(argv):
                                     results["loss"].item(), 0.00, 0.00, 0.00)
                     print("Average training accuracy: \t%.4f" % ave_dis_acc)
 
-                if ave_dis_acc > 0.8:
+                if ave_dis_acc > 0.9:
                     break
 
     # --------------- decoding samples ---------------
