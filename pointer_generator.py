@@ -31,6 +31,7 @@ from utils import linear
 from codecs import open
 from six.moves import xrange
 from tensorflow.contrib.rnn import LSTMStateTuple
+from utils import selective_fn
 import data
 
 FLAGS = tf.app.flags.FLAGS
@@ -157,7 +158,7 @@ class PointerGenerator(object):
             self.attention_keys, self.dec_in_state = attention_keys, dec_in_state
 
             # selective encoding: http://arxiv.org/abs/1704.07073
-            # self.attention_keys = selective_fn(self.attention_keys, self.dec_in_state)
+            self.attention_keys = selective_fn(self.attention_keys, self.dec_in_state)
 
             with tf.variable_scope('decoder') as decoder_scope:
                 vocab_dists, self.attn_dists, self._dec_out_state = self._lstm_decoder(emb_dec_inputs, self.dec_in_state)

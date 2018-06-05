@@ -152,13 +152,13 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
   The average rouge_2 is 0.223
   The average rouge_l is 0.313
 
-# experiments
-Leaky relu in reduce_state:
-  The average rouge_1 is 0.308239391886
-  The average rouge_2 is 0.193852374149
-  The average rouge_l is 0.283870910598
-
 Selective encoding: 
   The average rouge_1 is 0.3156018304
   The average rouge_2 is 0.199779098326
   The average rouge_l is 0.290672398488
+
+# improvements
+1. cntk, disable HMM
+2. dropout 0.9
+3. extend encoder vocab from 10k to 50k
+4. add the selective function
