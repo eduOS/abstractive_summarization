@@ -6,8 +6,9 @@ from tensorflow.python.ops import tensor_array_ops, control_flow_ops
 # from tensorflow.python.ops import variable_scope
 import numpy as np
 from data import strip_pads
+import time
 import data
-from gan_utils import rouge_l
+from check_rouge import calc_rouge
 PAD_TOKEN = "[PAD]"
 START_DECODING = '[START]'
 STOP_DECODING = '[STOP]'
@@ -141,8 +142,10 @@ class Rollout(object):
                             dis_rewards[given_num-1] += ypred_for_auc
 
                     if rouge_ratio:
-                        rpred = rouge_l(strip_pads(rollout_samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
-                                        strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), beta=0.5)
+                        _outputs = [" ".join(s) for s in data.outputsids2words(strip_pads(rollout_samples.tolist(), gen_vocab.word2id(STOP_DECODING)), self._vocab)]
+                        _reference = [" ".join(s) for s in data.outputsids2words(strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), self._vocab)]
+
+                        _, _, rpred = calc_rouge(_outputs, _reference)
                         rouge_rewards[given_num] += np.array(rpred)
 
                 if dis_ratio:
@@ -162,8 +165,10 @@ class Rollout(object):
                     else:
                         dis_rewards[self._gen_hps.max_dec_steps-1] += ypred_for_auc
                 if rouge_ratio:
-                    rpred = rouge_l(strip_pads(samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
-                                    strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), beta=0.5)
+                    _outputs = [" ".join(s) for s in data.outputsids2words(strip_pads(samples.tolist(), gen_vocab.word2id(STOP_DECODING)), self._vocab)]
+                    _reference = [" ".join(s) for s in data.outputsids2words(strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), self._vocab)]
+
+                    _, _, rpred = calc_rouge(_outputs, _reference)
                     rouge_rewards[self._gen_hps.max_dec_steps] += np.array(rpred)
 
             if rouge_ratio:

@@ -22,9 +22,7 @@ from __future__ import absolute_import
 from __future__ import division
 
 import os
-from gan_utils import rouge_l
 from data import strip_pads
-import pprint
 import time
 import tensorflow as tf
 from random import randint
@@ -33,6 +31,7 @@ import monte_carlo_search
 import data
 import json
 from codecs import open
+from check_rouge import calc_rouge
 # import pyrouge
 # import gen_utils
 import numpy as np
@@ -227,12 +226,11 @@ class Decoder(object):
                             decoded_outputs.append(decoded_output)
 
                 if not save2file:
-                    rouges = rouge_l(
-                        strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING)),
-                        strip_pads(batch.dec_batch.tolist(),
-                                   self._vocab.word2id(STOP_DECODING))
-                        )
-                    rouge_scores += rouges
+                    _outputs = [" ".join(s) for s in data.outputsids2words(strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING)), self._vocab)]
+                    _reference = [" ".join(s) for s in data.outputsids2words(strip_pads(batch.dec_batch.tolist(), self._vocab.word2id(STOP_DECODING)), self._vocab)]
+
+                    _, _, rouges_l = calc_rouge(_outputs, _reference)
+                    rouge_scores += rouges_l
                     continue
 
                 counter += 1  # this is how many examples we've decoded
@@ -294,13 +292,6 @@ class Decoder(object):
                         dec_f.close()
                         ove_f.close()
                         return
-                    # print(
-                    #     "Output has been saved in %s and %s. \
-                    #     Now starting ROUGE eval..." % (
-                    #         self._rouge_ref_dir, self._rouge_dec_dir))
-                    # results_dict = rouge_eval(
-                    #     self._rouge_ref_dir, self._rouge_dec_dir)
-                    # rouge_log(results_dict, self._decode_dir)
 
                 _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
                 # is the beam_size here 1?
@@ -317,7 +308,7 @@ class Decoder(object):
                     if sample == 1:
                         print()
                     decoded_words_list = data.outputsids2words(
-                        outputs_ids, self._vocab, art_oovs)
+                        outputs_ids, self._vocab)
 
                     decoded_outputs = []
 
@@ -338,21 +329,13 @@ class Decoder(object):
                             decoded_outputs.append(decoded_output)
 
                 if not save2file:
-                    rouges = rouge_l(
-                        strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING)),
-                        strip_pads(batch.dec_batch.tolist(),
-                                   self._vocab.word2id(STOP_DECODING))
-                        )
-                    rouge_scores += rouges
+                    _outputs = [" ".join(s) for s in data.outputsids2words(strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING)), self._vocab)]
+                    _reference = [" ".join(s) for s in data.outputsids2words(strip_pads(batch.dec_batch.tolist(), self._vocab.word2id(STOP_DECODING)), self._vocab)]
+
+                    _, _, rouges_l = calc_rouge(_outputs, _reference)
+                    rouge_scores += rouges_l
                     continue
 
-                # articles_withunks = data.show_art_oovs(original_articles, self._vocab)
-                # abstracts_withunks = data.show_abs_oovs(original_abstracts, self._vocab, art_oovs)
-
-                # write ref summary and decoded summary to file, to eval with
-                # pyrouge later
-                # self.write_for_discriminator(
-                #     original_articles, original_abstracts, decoded_outputs)
                 counter += 1  # this is how many examples we've decoded
                 if counter % 10000 == 0:
                     print("Have decoded %s samples." % (counter * FLAGS.batch_size))
@@ -366,22 +349,6 @@ class Decoder(object):
                     ove_f.write("reference: "+refe+"\n")
                     ove_f.write("hypothesis: "+hypo+"\n")
                     ove_f.write("\n")
-                #     print_results(articles_withunks, abstracts_withunks, decoded_outputs)
-                #     # log output to screen
-                #     self.write_for_attnvis(articles_withunks, abstracts_withunks,
-                #                            decoded_words, best_hyps.attn_dists, best_hyps.p_gens)
-                    # write info to .json file for visualization tool
-
-                    # Check if SECS_UNTIL_NEW_CKPT has elapsed; if so return so we
-                    # can load a new checkpoint
-                    # t1 = time.time()
-                    # if t1-t0 > SECS_UNTIL_NEW_CKPT:
-                    #     tf.logging.info(
-                    #         'We\'ve been decoding with same checkpoint for %i \
-                    #         seconds. Time to load new checkpoint',
-                    #         t1-t0)
-                    #     _ = gen_utils.load_ckpt(self._saver, self._sess) # NOQA
-                    #     t0 = time.time()
         except KeyboardInterrupt as exc:
             print(exc)
             print("Have decoded %s samples." % (counter * FLAGS.batch_size))

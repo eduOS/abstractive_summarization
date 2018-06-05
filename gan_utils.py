@@ -27,56 +27,6 @@ def check_rouge(sess, decoder, best_rouge, val_batcher, val_path, val_saver, glo
     return ave_rouge, best_rouge, saved
 
 
-def my_lcs(string, sub):
-    """
-    Calculates longest common subsequence for a pair of tokenized strings
-    :param string : list of str : tokens from a string split using whitespace
-    :param sub : list of str : shorter string, also split using whitespace
-    :returns: length (list of int): length of the longest common subsequence between the two strings
-
-    Note: my_lcs only gives length of the longest common subsequence, not the actual LCS
-    """
-    if(len(string) < len(sub)):
-        sub, string = string, sub
-
-    lengths = [[0 for i in range(0, len(sub)+1)] for j in range(0, len(string)+1)]
-
-    for j in range(1, len(sub)+1):
-        for i in range(1, len(string)+1):
-            if(string[i-1] == sub[j-1]):
-                lengths[i][j] = lengths[i-1][j-1] + 1
-            else:
-                lengths[i][j] = max(lengths[i-1][j], lengths[i][j-1])
-
-    return lengths[len(string)][len(sub)]
-
-
-def rouge_l(samples, references, beta=1.2):
-    """
-    samples: list of list,
-    references: list of list
-    """
-    prec = []
-    rec = []
-    scores = []
-    for n, (s, r) in enumerate(zip(samples, references)):
-        if len(s) == 0 or len(r) == 0:
-            prec.append(0)
-            rec.append(0)
-            continue
-        lcs = my_lcs(s, r)
-        prec.append(lcs/float(len(s)))
-        rec.append(lcs/float(len(r)))
-
-    for p, r in zip(prec, rec):
-        if(p != 0 and r != 0):
-            score = ((1 + beta**2) * p * r) / float(r + beta**2 * p)
-        else:
-            score = 0.0
-        scores.append(score)
-    return scores
-
-
 def save_ckpt(sess, model, decoder, best_loss, best_rouge, model_dir, model_saver,
               loss_batcher, rouge_batcher, rouge_dir, rouge_saver, global_step, sample_rate):
     """

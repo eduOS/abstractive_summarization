@@ -31,7 +31,6 @@ class Seq2ClassModel(object):
       batch_size: the size of the batches used during training;
         the model construction is independent of batch_size, so it can be
         changed after initialization if this is convenient, e.g., for decoding.
-      learning_rate: learning rate to start with.
       learning_rate_decay_factor: decay learning rate by this much when needed.
       cell_type: choose between LSTM cells and GRU cells.
       is_decoding: if set, we do decoding instead of training.
@@ -41,8 +40,6 @@ class Seq2ClassModel(object):
     self.hps = hps
     self.is_decoding = ('gan' in hps.mode)
     # self.is_decoding = True
-    with tf.variable_scope("OptimizeLoss"):
-      self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(hps.dis_lr))
     self.cell_type = hps.cell_type
     self.global_step = tf.Variable(0, trainable=False)
     self.mode = hps.mode
@@ -74,6 +71,14 @@ class Seq2ClassModel(object):
     self.rand_unif_init = tf.random_uniform_initializer(-self.hps.rand_unif_init_mag, self.hps.rand_unif_init_mag, seed=123)
 
   def build_graph(self):
+
+    self.learning_rate = tf.train.exponential_decay(
+        self.hps.dis_lr,
+        self.global_step * self.hps.batch_size,
+        20000,
+        0.95,
+        staircase=True)
+
     self._add_placeholders()
     # build the buckets
     # self.outputs, self.losses, self.updates, self.indicators = [], [], [], []
@@ -102,8 +107,8 @@ class Seq2ClassModel(object):
             loss_train.append(loss)
             accuracy.append(acy)
             loss_cv.append(loss)
-    loss_train = sum(loss_train) / len(loss_train)
-    loss_cv = sum(loss_cv) / len(loss_cv)
+    loss_train = tf.reduce_mean(tf.stack(loss_train))
+    loss_cv = tf.reduce_mean(tf.stack(loss_cv))
     self.accuracy = sum(accuracy) / len(accuracy)
     self.indicator = loss_cv
     self.loss = loss_train
@@ -143,18 +148,12 @@ class Seq2ClassModel(object):
           condition_emb = tf.concat(values=[condition_emb.c, condition_emb.h], axis=1)
           with tf.variable_scope("conduction_projection"):
               condition_emb = tf.matmul(condition_emb, condition_weights)
-          # (batch_size, 2*hidden_dim)
-          # self.d_rmsprop = tf.train.RMSPropOptimizer(learning_rate=5e-5)\
-          #     .minimize(self.d_loss_reg, var_list=self.d_net.vars)
-          # self.g_rmsprop = tf.train.RMSPropOptimizer(learning_rate=5e-5)\
-          #     .minimize(self.g_loss_reg, var_list=self.g_net.vars)
 
       with tf.variable_scope("dis_loss"):
           dot_product = tf.reduce_sum(tf.multiply(input_emb, condition_emb), axis=1)
-          # loss = tf.nn.weighted_cross_entropy_with_logits(logits=dot_product, labels=targets, pos_weight=2)
-          loss = tf.reduce_mean(tf.boolean_mask(dot_product, tf.cast(targets, tf.bool))) - \
-              tf.reduce_mean(tf.boolean_mask(dot_product, tf.logical_not(tf.cast(targets, tf.bool))))
-
+          # loss = - tf.reduce_mean(tf.boolean_mask(dot_product, tf.cast(targets, tf.bool))) + \
+          #     tf.reduce_mean(tf.boolean_mask(dot_product, tf.logical_not(tf.cast(targets, tf.bool))))
+          loss = tf.nn.weighted_cross_entropy_with_logits(logits=dot_product, targets=targets, pos_weight=2)
           prob = tf.sigmoid(dot_product)
           pred = tf.where(tf.less(tf.fill(tf.shape(prob), 0.5), prob),
                           tf.fill(tf.shape(prob), 1.0), tf.fill(tf.shape(prob), 0.0))

@@ -19,10 +19,8 @@ from gen_utils import calc_running_avg_loss
 from gen_utils import get_best_loss_from_chpt
 from gen_utils import save_ckpt as gen_save_ckpt
 from gan_utils import save_ckpt as gan_save_ckpt
-from tensorflow.python import debug as tf_debug
 from utils import sattolo_cycle
 from utils import print_dashboard
-from dis_utils import dump_chpt
 import math
 from termcolor import colored
 from data import POSITIVE_LABEL, NEGATIVE_LABEL
@@ -52,14 +50,13 @@ tf.app.flags.DEFINE_integer("pool_layers", 2, "Number of pooling layers in the m
 tf.app.flags.DEFINE_integer("kernel_size", 3, "the kernel size of the conv")
 tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
-tf.app.flags.DEFINE_integer("dis_vocab_size", 5000, "vocabulary size.")
 tf.app.flags.DEFINE_string("dis_vocab_file", "vocab", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_string("vocab_type", "char", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_integer("num_models", 3, "Size of each model layer. The actural size is doubled.")
 
 # Training parameters
-tf.app.flags.DEFINE_float("dis_lr", 0.0001, "Learning rate.")
+tf.app.flags.DEFINE_float("dis_lr", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_float("lr_decay_factor", 0.5, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("dis_max_gradient", 2.0, "Clip gradients to this norm.")
 # TODO: how much thould this be?
@@ -141,7 +138,7 @@ tf.app.flags.DEFINE_string("gan_dir", "gan", "Training directory.")
 tf.app.flags.DEFINE_integer('sample_num', 2, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_float('gan_lr', 0.0005, 'learning rate for the gen in GAN training')
 tf.app.flags.DEFINE_float('rouge_reward_ratio', 0, 'The importance of rollout in calculating the reward.')
-tf.app.flags.DEFINE_float('dis_reward_ratio', 0, 'The importance of rollout in calculating the reward.')
+tf.app.flags.DEFINE_float('dis_reward_ratio', 1, 'The importance of rollout in calculating the reward.')
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -272,7 +269,6 @@ def main(argv):
         'mode',
         'vocab_type',
         'model_dir',
-        'dis_vocab_size',
         'steps_per_checkpoint',
         'learning_rate_decay_factor',
         'dis_vocab_file',
@@ -310,7 +306,6 @@ def main(argv):
         assert hps_dis.vocab_type == hps_gen.vocab_type, (
             "the vocab type of the generator and the discriminator should be the same")
         hps_dis = hps_dis._replace(layer_size=hps_gen.char_emb_dim)
-        hps_dis = hps_dis._replace(dis_vocab_size=hps_gen.dec_vocab_size)
 
     if FLAGS.mode == "train_gan":
         hps_gen = hps_gen._replace(batch_size=hps_gen.batch_size * hps_dis.num_models)
@@ -446,9 +441,10 @@ def main(argv):
             tf.logging.info("Caught keyboard interrupt on worker....")
 
     elif FLAGS.mode == "train_gan":
-        best_rouge = 0.2
+        best_rouge = 0
         gen_best_loss = get_best_loss_from_chpt(val_dir)
         gen_global_step = 0
+        gan_gen_iter = hps_gan.gan_gen_iter
         print('Going to tune the two using Gan')
         for i_gan in range(hps_gan.gan_iter):
             # Train the generator for one step
@@ -456,7 +452,7 @@ def main(argv):
             current_speed = []
             # for it in range(0):
             # print('Going to train the generator.')
-            for it in range(hps_gan.gan_gen_iter):
+            for it in range(gan_gen_iter):
                 start_time = time.time()
                 batch = gen_batcher_train.next_batch()
 
@@ -503,7 +499,7 @@ def main(argv):
                 current_speed.append(time.time() - start_time)
 
             # Test
-            if hps_gan.gan_gen_iter and (i_gan % 50 == 0 or i_gan == hps_gan.gan_iter - 1):
+            if gan_gen_iter and (i_gan % 50 == 0 or i_gan == hps_gan.gan_iter - 1):
                 print('Going to test the loss of the generator.')
                 current_speed = (float(sum(current_speed)) + epsilon) / (int(len(current_speed)) * hps_gen.batch_size + epsilon)
                 everage_g_loss = (float(sum(g_losses)) + epsilon) / float(len(g_losses) + epsilon)
@@ -602,19 +598,44 @@ def main(argv):
                             print(condition_lens[p])
                             print('targets[p]')
                             print(targets[p])
-                            break
+                            time.sleep(100)
 
                 ave_dis_acc = sum(dis_accuracies) / len(dis_accuracies)
-                if d_gan % 50 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
+                if d_gan % 500 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
                     if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:
                         dis_best_loss = sum(dis_losses) / len(dis_losses)
                         checkpoint_path = ensure_exists(join_path(hps_dis.model_dir, "discriminator")) + "/model.ckpt"
                         dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
-                    print_dashboard("GAN Discriminator", results["global_step"].item(), hps_dis.batch_size, hps_dis.dis_vocab_size,
-                                    results["loss"].item(), 0.00, 0.00, 0.00)
-                    print("Average training accuracy: \t%.4f" % ave_dis_acc)
+
+                    print(
+                        "\nDashboard for %s updated %s, finished steps:\t%s\n"
+                        "\tBatch size:\t%s, current learning rate:\t%s\n"
+                        "\tTraining loss:\t%.4f. Average training accuracy: \t%.4f" % (
+                            "GAN Discriminator",
+                            datetime.datetime.now().strftime("on %m-%d at %H:%M"),
+                            results["global_step"].item(),
+                            hps_dis.batch_size,
+                            results['learning_rate'],
+                            results["loss"].item(),
+                            ave_dis_acc,
+                            )
+                    )
 
                 if ave_dis_acc > 0.9:
+                    print(
+                        "\nDashboard for %s updated %s, finished steps:\t%s\n"
+                        "\tBatch size:\t%s, current learning rate:\t%s\n"
+                        "\tTraining loss:\t%.4f. Average training accuracy: \t%.4f" % (
+                            "GAN Discriminator",
+                            datetime.datetime.now().strftime("on %m-%d at %H:%M"),
+                            results["global_step"].item(),
+                            hps_dis.batch_size,
+                            results['learning_rate'],
+                            results["loss"].item(),
+                            ave_dis_acc,
+                            )
+                    )
+                    gan_gen_iter = 5
                     break
 
     # --------------- decoding samples ---------------
