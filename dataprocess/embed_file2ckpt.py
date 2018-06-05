@@ -89,5 +89,6 @@ dec_as_op = dec_embeddings.assign(dec_emb_ph)
 sess = tf.Session()
 sess.run(enc_as_op, feed_dict={enc_emb_ph: enc_emb_l})
 sess.run(dec_as_op, feed_dict={dec_emb_ph: dec_emb_l})
-save_dir = sys.argv[-1]
-saver.save(sess, save_dir)
+save_path = sys.argv[-1]  # this should be file path not directory path
+
+saver.save(sess, save_path)
