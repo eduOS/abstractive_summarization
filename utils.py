@@ -214,7 +214,7 @@ def red_print(message, color='red'):
 
 def lstm_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init=None,
                  state_is_tuple=True, trunc_norm_init_std=1e-4,
-                 keep_prob=0.5, is_training=False
+                 keep_prob=0.9, is_training=False
                  ):
     """Add a single-layer bidirectional LSTM encoder to the graph.
 
