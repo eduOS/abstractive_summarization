@@ -601,7 +601,7 @@ def main(argv):
                             time.sleep(100)
 
                 ave_dis_acc = sum(dis_accuracies) / len(dis_accuracies)
-                if d_gan % 500 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
+                if d_gan % 100 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
                     if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:
                         dis_best_loss = sum(dis_losses) / len(dis_losses)
                         checkpoint_path = ensure_exists(join_path(hps_dis.model_dir, "discriminator")) + "/model.ckpt"
@@ -609,13 +609,14 @@ def main(argv):
 
                     print(
                         "\nDashboard for %s updated %s, finished steps:\t%s\n"
-                        "\tBatch size:\t%s, current learning rate:\t%s\n"
+                        "\tBatch size:\t%s, learning rate:\t%s\n, model nums: \t%s\n"
                         "\tTraining loss:\t%.4f. Average training accuracy: \t%.4f" % (
                             "GAN Discriminator",
                             datetime.datetime.now().strftime("on %m-%d at %H:%M"),
                             results["global_step"].item(),
                             hps_dis.batch_size,
                             results['learning_rate'],
+                            hps_dis.num_models,
                             results["loss"].item(),
                             ave_dis_acc,
                             )
