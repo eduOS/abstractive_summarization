@@ -369,11 +369,11 @@ def main(argv):
         # temp_saver = tf.train.Saver(
         #     var_list=[v for v in all_variables if "generator" in v.name and "Adagrad" not in v.name])
         ckpt_path = utils.load_ckpt(gen_saver, sess, gen_dir, mode="train")
-        print('going to restore embeddings from checkpoint')
         if not ckpt_path:
             emb_path = join_path(FLAGS.model_dir, "generator", "init_embed")
             ckpt_state = tf.train.get_checkpoint_state(emb_path)
             if ckpt_state:
+                print('going to restore embeddings from checkpoint')
                 ckpt = ckpt_state.model_checkpoint_path
                 try:
                     generator.dec_emb_saver.restore(sess, ckpt)
