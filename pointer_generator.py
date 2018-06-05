@@ -168,6 +168,7 @@ class PointerGenerator(object):
                     self.beam_search()
 
                 self.final_dists = final_dists
+                self.topk_log_probs, self.indices = tf.nn.top_k(tf.log(final_dists[0]), self.hps.beam_size * 2)
 
                 eval_final_dists = self._conv_decoder(emb_eval_dec_inputs)
 
@@ -428,24 +429,14 @@ class PointerGenerator(object):
         return results
 
     def run_encoder(self, sess, batch):
-        """For beam search decoding. Run the encoder on the batch and return the
-        encoder states and decoder initial state.
-
-        Args:
-          sess: Tensorflow session.
-          batch: Batch object that is the same example repeated across the batch
-          (for beam search)
-
-        Returns:
-          attention_keys: The encoder states. A tensor of shape [batch_size,
-          <=max_enc_steps, 2*hidden_dim].
-        """
         feed_dict = self._make_feed_dict(batch, just_enc=True)
-        # feed the batch into the placeholders
-        attention_keys = sess.run(self.attention_keys, feed_dict)  # run the encoder
-        # attention_keys: [batch_size * beam_size, <=max_enc_steps, 2*hidden_dim]
+        to_return = {
+            "attention_values": self.attention_values,
+            "attention_keys": self.attention_keys,
+        }
+        results = sess.run(to_return, feed_dict)
 
-        return attention_keys
+        return results['attention_keys'], results['attention_values']
 
     def decode_onestep(self, emb_dec_inputs, dec_in_state):
         """
@@ -463,59 +454,23 @@ class PointerGenerator(object):
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
         return output_id, new_states
 
-    def run_decode_onestep(self, sess, cur_input, attention_keys, enc_padding_mask):
-        """
-        For beam search decoding. Run the decoder for one step.
-
-        Args:
-          sess: Tensorflow session.
-          enc_batch_extend_vocab: the encode batch with extended vocabulary
-          max_art_oovs: the max article out of vocabulary
-          latest_tokens: Tokens to be fed as input into the decoder for this
-          timestep
-          attention_keys: The encoder states.
-          dec_init_states: List of beam_size LSTMStateTuples; the decoder states
-          from the previous timestep
-          prev_coverage: List of np arrays. The coverage vectors from the
-          previous timestep. List of None if not using coverage.
-          method: can be bs standing for beam search and mc representing monte carlo
-
-        Returns:
-          ids: top 2k ids. shape [beam_size, 2*beam_size]
-          probs: top 2k log probabilities. shape [beam_size, 2*beam_size]
-          new_states: new states of the decoder. a list length beam_size
-          containing
-            LSTMStateTuples each of shape ([hidden_dim,],[hidden_dim,])
-          attn_dists: List length beam_size containing lists length attn_length.
-          p_gens: Generation probabilities for this step. A list length
-          beam_size. List of None if in baseline mode.
-          new_coverage: Coverage vectors for this step. A list of arrays. List
-          of None if coverage is not turned on.
-        """
+    def run_decode_onestep(self, sess, dec_inputs, attention_keys, attention_values, enc_padding_mask):
 
         feed = {
+            self._dec_batch: dec_inputs,
             self.attention_keys: attention_keys,
+            self.attention_values: attention_values,
             self.enc_padding_mask: enc_padding_mask,
-            self._dec_batch: cur_input,
         }
 
         to_return = {
-          "attn_dists": self.attn_dists,
-          "ids": self._topk_ids,
-          "probs": self._topk_log_probs,
+          "topk_log_probs": self.topk_log_probs,
+          "indices": self.indices,
         }
 
-        results = sess.run(to_return, feed_dict=feed)  # run the decoder step
+        results = sess.run(to_return, feed_dict=feed)
 
-        sample_ids = results["ids"]
-        probs = results["probs"]
-        states = results["states"]
-
-        # Convert singleton list containing a tensor to a list of k arrays
-        assert len(results['attn_dists']) == 1
-        attn_dists = results['attn_dists'][0].tolist()
-
-        return sample_ids, probs, states, attn_dists
+        return results['topk_log_probs'], results['indices']
 
     def g_optimizer(self, *args, **kwargs):
         return tf.train.AdamOptimizer(*args, **kwargs)
