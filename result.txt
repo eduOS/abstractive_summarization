@@ -1,5 +1,10 @@
 
-# vocab word:char 500000:7500, new_bs_2
+# vocab word:char 500000:7500, new_bs_2, 4200000
 The average rouge_1 is 0.400317217143
 The average rouge_2 is 0.2918077304
 The average rouge_l is 0.3829562984
+
+# vocab word:char 500000:7500, old_bs_2, 4200000
+The average rouge_1 is 0.432169863049
+The average rouge_2 is 0.321548944854
+The average rouge_l is 0.412794904293
