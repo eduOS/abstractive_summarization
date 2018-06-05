@@ -162,7 +162,7 @@ class PointerGenerator(object):
                 ]
 
             attention_keys, dec_in_state = lstm_encoder(
-                self._emb_enc_inputs, self.enc_lens, hps.hidden_dim, self.rand_unif_init, hps.keep_prob, self.is_training)
+                self._emb_enc_inputs, self.enc_lens, hps.hidden_dim, rand_unif_init=self.rand_unif_init, keep_prob=hps.keep_prob, is_training=self.is_training)
 
             self.attention_keys, self.dec_in_state = attention_keys, dec_in_state
 
@@ -259,7 +259,7 @@ class PointerGenerator(object):
             staircase=True)
 
         # Apply adagrad optimizer
-        optimizer = tf.train.AdagradOptimizer(self.learning_rate)
+        optimizer = tf.train.AdamOptimizer(self.learning_rate)
         with tf.device("/gpu:0"):
             self._train_op = optimizer.apply_gradients(
                 zip(grads, trainable_variables),
