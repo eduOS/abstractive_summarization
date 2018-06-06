@@ -65,6 +65,7 @@ def load_ckpt(saver, sess, dire, mode="train", force=False, lastest_filename="ch
                 elif mode == "train":
                     print("Failed to load checkpoint from %s Sleeping %s munites to waite." % (second_ckpt_dir, 10))
                     time.sleep(10 * 60)
+        time.sleep(60)
 
 
 def initialize_uninitialized(sess):
@@ -211,10 +212,9 @@ def red_print(message, color='red'):
     print(colored(message, color))
 
 
-def lstm_encoder(encoder_inputs, seq_len, hidden_dim,
-                 att_head_num=4, rand_unif_init=None,
+def lstm_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init=None,
                  state_is_tuple=True, trunc_norm_init_std=1e-4,
-                 keep_prob=0.5, is_training=False
+                 keep_prob=0.9, is_training=False
                  ):
     """Add a single-layer bidirectional LSTM encoder to the graph.
 
@@ -385,10 +385,11 @@ def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_in
         return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
 
 
-def selective_fn(encoder_states, dec_in_state):
-    enc_states = tf.transpose(encoder_states, perm=[1, 0, 2])
-    dynamic_enc_steps = tf.shape(enc_states)[0]
-    output_dim = encoder_states.get_shape()[-1]
+def selective_fn(encoder_outputs, dec_in_state):
+    enc_outputs = tf.transpose(encoder_outputs, perm=[1, 0, 2])
+    dynamic_enc_steps = tf.shape(enc_outputs)[0]
+    batch_size = encoder_outputs.get_shape().as_list()[0]
+    output_dim = encoder_outputs.get_shape()[-1].value
     sele_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
 
     with tf.variable_scope('selective'):
@@ -400,15 +401,15 @@ def selective_fn(encoder_states, dec_in_state):
             sGate = tf.sigmoid(
                 linear(inputs[i], output_dim, True, scope="w") +
                 linear([dec_in_state.h, dec_in_state.c], output_dim, True, scope="u"))
-            _h = inputs[i] * sGate
-            sele_ar = sele_ar.write(i, _h)
+            sele_ar = sele_ar.write(i, inputs[i] * sGate)
             if i == tf.constant(0, dtype=tf.int32):
                 tf.get_variable_scope().reuse_variables()
             return inputs, i+1, sele_ar
 
         _, _, sele_ar = tf.while_loop(
             cond, mask_fn, (enc_outputs, tf.constant(0, dtype=tf.int32), sele_ar))
-        new_enc_outputs = tf.transpose(sele_ar.stack(), perm=[1, 0, 2])
+        new_enc_outputs = tf.transpose(tf.squeeze(sele_ar.stack()), perm=[1, 0, 2])
+        new_enc_outputs = tf.reshape(new_enc_outputs, [batch_size, -1, output_dim])
     return new_enc_outputs
 
 
@@ -629,3 +630,13 @@ def transpose_batch_time(x):
         tensor_shape.TensorShape(
             [x_static_shape[1].value, x_static_shape[0].value]).concatenate(x_static_shape[2:]))
     return x_t
+
+
+def label_sentence_num(sentence, stop_ids):
+    _label = [0] * len(sentence)
+    count = 0
+    for i, c in enumerate(sentence):
+        _label[i] = count
+        if c in stop_ids:
+            count += 1
+    return _label

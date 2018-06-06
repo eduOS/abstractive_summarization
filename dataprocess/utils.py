@@ -4,25 +4,27 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 
-from cntk.tokenizer import JiebaTokenizer
+from cntk.tokenizer import JiebaTokenizer, text2charlist
 from cntk.cleanser import Cleanser
 from cntk.standardizer import Standardizer
 
 tokenizer = JiebaTokenizer()
-standardizor = Standardizer()
+standardizer = Standardizer()
 cleanser = Cleanser()
 
 punc_kept = u" ；;。!！,：(（）:?)《》、？，%~"
 
 
-def sourceline2words(line, with_digits=True):
-    words = tokenizer.sentence2words(line)
-    line = " ".join(words)
-    # line = standardizor.set_sentence(line).to_lowercase(verbose=False).fwidth2hwidth(verbose=True).digits(verbose=True).sentence
+def sourceline2wordsorchars(line, _char=False, with_digits=True):
     if with_digits:
-        line = standardizor.set_sentence(line).to_lowercase().sentence
+        line = standardizer.set_sentence(line).fwidth2hwidth().to_lowercase().sentence
     else:
-        line = standardizor.set_sentence(line).to_lowercase().digits().sentence
+        line = standardizer.set_sentence(line).fwidth2hwidth().to_lowercase().digits().sentence
+    if _char:
+        words_chars = text2charlist(line)
+    else:
+        words_chars = tokenizer.sentence2words(line)
+    line = " ".join(words_chars)
     line = cleanser.set_sentence(line).delete_useless().sentence
-    words = [w for w in line.split() if w]
-    return words
+    words_chars = [w for w in line.split() if w]
+    return words_chars
