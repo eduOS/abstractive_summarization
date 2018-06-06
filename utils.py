@@ -385,10 +385,10 @@ def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_in
         return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
 
 
-def selective_fn(encoder_states, dec_in_state):
-    enc_states = tf.transpose(encoder_states, perm=[1, 0, 2])
-    dynamic_enc_steps = tf.shape(enc_states)[0]
-    output_dim = encoder_states.get_shape()[-1]
+def selective_fn(encoder_outputs, dec_in_state):
+    enc_outputs = tf.transpose(encoder_outputs, perm=[1, 0, 2])
+    dynamic_enc_steps = tf.shape(enc_outputs)[0]
+    output_dim = encoder_outputs.get_shape()[-1]
     sele_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
 
     with tf.variable_scope('selective'):
@@ -400,15 +400,14 @@ def selective_fn(encoder_states, dec_in_state):
             sGate = tf.sigmoid(
                 linear(inputs[i], output_dim, True, scope="w") +
                 linear([dec_in_state.h, dec_in_state.c], output_dim, True, scope="u"))
-            _h = inputs[i] * sGate
-            sele_ar = sele_ar.write(i, _h)
+            sele_ar = sele_ar.write(i, inputs[i] * sGate)
             if i == tf.constant(0, dtype=tf.int32):
                 tf.get_variable_scope().reuse_variables()
             return inputs, i+1, sele_ar
 
         _, _, sele_ar = tf.while_loop(
             cond, mask_fn, (enc_outputs, tf.constant(0, dtype=tf.int32), sele_ar))
-        new_enc_outputs = tf.transpose(sele_ar.stack(), perm=[1, 0, 2])
+        new_enc_outputs = tf.transpose(tf.squeeze(sele_ar.stack()), perm=[1, 0])
     return new_enc_outputs
 
 
