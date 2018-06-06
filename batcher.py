@@ -80,7 +80,7 @@ class Example(object):
         abstract_words = abstract.split()  # list of strings
         # list of word ids; OOVs are represented by the id for UNK token
         if len(abstract_words) > hps.max_dec_steps:
-            abstract_words = article_words[:hps.max_dec_steps]
+            abstract_words = abstract_words[:hps.max_dec_steps]
         self.abs_ids = [vocab.word2id(w) for w in abstract_words]
 
         # Get the decoder input sequence and target sequence
