@@ -159,6 +159,7 @@ Selective encoding:
 
 # improvements
 1. cntk, disable HMM.... What are the words like which appear in the file processed with HMM open but not appear with HMM disabled? Are they mostly numbers?
+  open the HMM but delete all digits ahead
 2. dropout 0.9
 3. extend encoder vocab from 10k to 50k
 4. add the selective function
