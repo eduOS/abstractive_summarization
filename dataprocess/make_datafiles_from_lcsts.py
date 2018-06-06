@@ -11,8 +11,8 @@ import collections
 # from tensorflow.core.example import example_pb2
 import os.path
 from codecs import open
-from cntk.tokenizer import JiebaTokenizer, text2charlist
-from utils import sourceline2words
+from cntk.tokenizer import JiebaTokenizer
+from utils import sourceline2wordsorchars
 from cntk.constants.punctuation import Punctuation
 from cntk.standardizer import Standardizer
 import numpy as np
@@ -27,6 +27,7 @@ ENC_SEGMENT = True
 DEC_SEGMENT = False
 ENC_VOCAB_SIZE = 500000
 DEC_VOCAB_SIZE = 7500
+WITH_DIGITS = False
 # -----------------------------------
 
 END_TOKENS = Punctuation.SENTENCE_DELIMITERS
@@ -50,8 +51,8 @@ def read_text_file(text_file):
     return lines
 
 
-def process_line(line, with_digits=False):
-    return sourceline2words(line, with_digits=with_digits)
+def process_line(line, _char=False, with_digits=WITH_DIGITS):
+    return sourceline2wordsorchars(line, _char=_char, with_digits=with_digits)
 
 
 len_art = []
@@ -84,9 +85,9 @@ def get_pairs_from_lcsts(filePath, enc_segment=False, dec_segment=False):
             flag = 1
 
             if dec_segment:
-                summary = process_line(summary)
+                summary = process_line(summary, False)
             else:
-                summary = text2charlist(summary)
+                summary = process_line(summary, True)
 
             line = f.readline().strip()
 
@@ -101,9 +102,9 @@ def get_pairs_from_lcsts(filePath, enc_segment=False, dec_segment=False):
             flag = 0
 
             if enc_segment:
-                text = process_line(text)
+                text = process_line(text, False)
             else:
-                text = text2charlist(text)
+                text = process_line(text, True)
             line = f.readline().strip()
 
         else:
