@@ -49,15 +49,6 @@ class Example(object):
         return self.enc_len
 
     def __init__(self, article, abstract, enc_vocab, dec_vocab, hps):
-        """Initializes the Example, performing tokenization and truncation to
-        produce the encoder, decoder and target sequences, which are stored in
-        self.
-
-        Args:
-          article: source text; a string. each token is separated by a single
-          space.
-          hps: hyperparameters
-        """
         self.hps = hps
 
         # Get ids of special tokens
@@ -77,7 +68,7 @@ class Example(object):
         abstract_words = abstract.split()  # list of strings
         # list of word ids; OOVs are represented by the id for UNK token
         if len(abstract_words) > hps.max_dec_steps:
-            abstract_words = article_words[:hps.max_dec_steps]
+            abstract_words = abstract_words[:hps.max_dec_steps]
         self.abs_ids = [dec_vocab.word2id(w) for w in abstract_words]
 
         # Get the decoder input sequence and target sequence
