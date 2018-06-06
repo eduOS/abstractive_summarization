@@ -33,7 +33,8 @@ import os
 from collections import defaultdict as dd
 from cntk.tokenizer import text2charlist
 from codecs import open
-from utils import red_assert, red_print
+from utils import red_assert, red_print, label_sentence_num
+from cntk.constants.punctuation import STOPS
 
 
 def fopen(filename, mode='r'):
@@ -50,6 +51,7 @@ class Example(object):
 
     def __init__(self, article, abstract, enc_vocab, dec_vocab, hps):
         self.hps = hps
+        self.stop_ids = [enc_vocab.word2id(s) for s in STOPS if s in enc_vocab.word_keys]
 
         # Get ids of special tokens
         start_decoding = dec_vocab.word2id(data.START_DECODING)
@@ -124,6 +126,7 @@ class Example(object):
         """Pad the encoder input sequence with pad_id up to max_len."""
         while len(self.enc_input) < max_len:
             self.enc_input.append(pad_id)
+        self.enc_sent_num = label_sentence_num(self.enc_input, self.stop_ids)
 
 
 class Batch(object):
@@ -176,13 +179,13 @@ class Batch(object):
         # Pad the encoder input sequences up to the length of the longest
         # sequence
         for ex in example_list:
-            ex.pad_encoder_input(max_enc_seq_len, self.pad_id)
+            ex.pad_encoder_input(max_enc_seq_len, ex.pad_id)
 
         # Initialize the numpy arrays
         # Note: our enc_batch can have different length (second dimension) for
         # each batch because we use dynamic_rnn for the encoder.
         self.enc_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
-        self.padded_enc_batch = np.zeros((hps.batch_size, hps.max_enc_steps), dtype=np.int32)
+        self.enc_sent_label = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
         self.padded_abs_ids = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
         self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
         self.enc_padding_mask = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.float32)
@@ -190,9 +193,10 @@ class Batch(object):
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):
             i_enc_input = ex.enc_input[:]
+            i_enc_sent_num = ex.enc_sent_num[:]
             i_abs_ids = ex.abs_ids[:]
             self.enc_batch[i, :] = i_enc_input
-            self.padded_enc_batch[i, :len(i_enc_input)] = i_enc_input
+            self.enc_sent_label[i, :] = i_enc_sent_num
             self.padded_abs_ids[i, :len(i_abs_ids)] = i_abs_ids
             self.enc_lens[i] = ex.enc_len
             for j in range(ex.enc_len):

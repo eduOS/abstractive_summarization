@@ -64,6 +64,7 @@ class PointerGenerator(object):
         self.temp_batch = tf.placeholder(tf.int32, [batch_size, None], name='temp_batch_for_embedding')
         self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
         self.enc_padding_mask = tf.placeholder(tf.float32, [batch_size, None], name='enc_padding_mask')
+        self.enc_sent_label = tf.placeholder(tf.float32, [batch_size, None], name='enc_sent_label')
         self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch_extend_vocab')
 
         # decoder part
@@ -105,6 +106,7 @@ class PointerGenerator(object):
         feed_dict[self.enc_batch] = batch.enc_batch
         feed_dict[self.enc_lens] = batch.enc_lens
         feed_dict[self.enc_padding_mask] = batch.enc_padding_mask
+        feed_dict[self.enc_sent_label] = batch.enc_sent_label
         if not just_enc:
             feed_dict[self.target_batch] = batch.target_batch
             feed_dict[self.dec_padding_mask] = batch.dec_padding_mask
@@ -158,8 +160,8 @@ class PointerGenerator(object):
             self.attention_keys, self.dec_in_state = attention_keys, dec_in_state
 
             # selective encoding: http://arxiv.org/abs/1704.07073
-            attention_keys = tf.reshape(self.attention_keys, [hps.batch_size, -1, self.attention_keys.get_shape()[-1].value])
-            self.attention_keys = selective_fn(attention_keys, self.dec_in_state)
+            # attention_keys = tf.reshape(self.attention_keys, [hps.batch_size, -1, self.attention_keys.get_shape()[-1].value])
+            # self.attention_keys = selective_fn(attention_keys, self.dec_in_state)
 
             with tf.variable_scope('decoder') as decoder_scope:
                 vocab_dists, self.attn_dists, self._dec_out_state = self._lstm_decoder(emb_dec_inputs, self.dec_in_state)
@@ -305,6 +307,7 @@ class PointerGenerator(object):
         """
         if not enc_padding_mask:
             enc_padding_mask = self.enc_padding_mask
+            enc_sent_label = self.enc_sent_label
             attention_keys = self.attention_keys
 
         if type(emb_dec_inputs) is not list:
@@ -325,7 +328,7 @@ class PointerGenerator(object):
         prev_coverage = self.prev_coverage if self.hps.coverage and self.hps.mode in ["train_gan", "decode"] else None
 
         outputs, out_state, attn_dists = lstm_attention_decoder(
-            emb_dec_inputs, enc_padding_mask, attention_keys, dec_in_state, cell,
+            emb_dec_inputs, enc_sent_label, enc_padding_mask, attention_keys, dec_in_state, cell,
             initial_state_attention=(len(emb_dec_inputs) == 1),
             use_coverage=self.hps.coverage, prev_coverage=prev_coverage)
 
