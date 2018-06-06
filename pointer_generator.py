@@ -158,7 +158,8 @@ class PointerGenerator(object):
             self.attention_keys, self.dec_in_state = attention_keys, dec_in_state
 
             # selective encoding: http://arxiv.org/abs/1704.07073
-            self.attention_keys = selective_fn(self.attention_keys, self.dec_in_state)
+            attention_keys = tf.reshape(self.attention_keys, [hps.batch_size, -1, self.attention_keys.get_shape()[-1].value])
+            self.attention_keys = selective_fn(attention_keys, self.dec_in_state)
 
             with tf.variable_scope('decoder') as decoder_scope:
                 vocab_dists, self.attn_dists, self._dec_out_state = self._lstm_decoder(emb_dec_inputs, self.dec_in_state)
