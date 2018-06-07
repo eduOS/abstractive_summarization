@@ -33,7 +33,7 @@ epsilon = sys.float_info.epsilon
 # tf.logging.set_verbosity(tf.logging.ERROR)
 tf.app.flags.DEFINE_string(
     'mode', 'train',
-    'must be one of pretrain_gen/pretrain_dis/train_gan/decode')
+    'must be one of pretrain_gen/train_gan/decode')
 # ------------------------------------- common
 tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training.")
 tf.app.flags.DEFINE_integer('steps_per_checkpoint', 10000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
@@ -142,7 +142,7 @@ tf.app.flags.DEFINE_float('dis_reward_ratio', 1, 'The importance of rollout in c
 
 FLAGS = tf.app.flags.FLAGS
 
-assert FLAGS.mode in ["pretrain_gen", "pretrain_dis", "train_gan", "decode", "test"]
+assert FLAGS.mode in ["pretrain_gen", "train_gan", "decode", "test"]
 assert FLAGS.sample_rate >= 0 and FLAGS.sample_rate <= 0.5, "sample rate should be [0, 0.5]"
 
 if FLAGS.mode == "train_gan":
@@ -310,13 +310,12 @@ def main(argv):
     if FLAGS.mode == "train_gan":
         hps_gen = hps_gen._replace(batch_size=hps_gen.batch_size * hps_dis.num_models)
 
-    if FLAGS.mode != "pretrain_dis":
-        with tf.variable_scope("generator"), tf.device("/gpu:0"):
-            generator = PointerGenerator(hps_gen, enc_vocab, dec_vocab)
-            print("Building generator graph ...")
-            gen_decoder_scope = generator.build_graph()
+    with tf.variable_scope("generator"), tf.device("/gpu:0"):
+        generator = PointerGenerator(hps_gen, enc_vocab, dec_vocab)
+        print("Building generator graph ...")
+        gen_decoder_scope = generator.build_graph()
 
-    if FLAGS.mode in ['train_gan', 'pretrain_dis']:
+    if FLAGS.mode in ['train_gan']:
         with tf.variable_scope("discriminator"), tf.device("/gpu:0"):
             discriminator = Seq2ClassModel(hps_dis)
             print("Building discriminator graph ...")
@@ -411,17 +410,17 @@ def main(argv):
         utils.load_ckpt(dec_saver, sess, model_dir, mode="val", force=True)
         decoder = Decoder(sess, generator, dec_vocab)
 
-    if FLAGS.mode == "pretrain_dis" or (FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1):
+    if FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1:
         dis_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "discriminator" in v.name])
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
-        mode = "train" if FLAGS.mode == "pretrain_dis" else "val"
+        mode = "val"
         # ckpt = utils.load_ckpt(dis_saver, sess, dis_dir, mode=mode, force=(FLAGS.mode == "train_gan"))
         ckpt = utils.load_ckpt(dis_saver, sess, dis_dir, mode=mode, force=False)
         del mode
 
     # --------------- train models ---------------
-    if FLAGS.mode not in ["pretrain_dis", "decode"]:
+    if FLAGS.mode != "decode":
         gen_batcher_train = GenBatcher("train", "train", enc_vocab, dec_vocab, hps_gen)
         gen_batcher_val = GenBatcher("val", "val", enc_vocab, dec_vocab, hps_gen)
 

@@ -39,34 +39,47 @@ def get_config():
 def load_ckpt(saver, sess, dire, mode="train", force=False, lastest_filename="checkpoint"):
     """Load checkpoint from the train directory and restore it to saver and sess,
     waiting 10 secs in the case of failure. Also returns checkpoint name."""
-    while True:
-        try:
-            first_ckpt_dir = dire
-            ckpt_state = tf.train.get_checkpoint_state(first_ckpt_dir, lastest_filename)
-            print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
-            saver.restore(sess, ckpt_state.model_checkpoint_path)
-            return ckpt_state.model_checkpoint_path
-        except Exception as ex:
-            print(colored("Failed to load checkpoint from %s. " % first_ckpt_dir, 'red'))
+    while(1):
+        first_ckpt_dir = dire
+        first_ckpt_state = tf.train.get_checkpoint_state(first_ckpt_dir, lastest_filename)
+
+        if mode == "train":
+            second_ckpt_dir = os.path.join(dire, "val")
+        else:
+            second_ckpt_dir = os.path.split(dire)[0]
+
+        second_ckpt_state = tf.train.get_checkpoint_state(second_ckpt_dir, lastest_filename)
+        if not second_ckpt_state and not first_ckpt_state:
+            print(colored("Failed to load checkpoint from two directories. Training from scratch..", 'red'))
+            return None
+        elif mode == "train":
+
+            first_step_num = int(first_ckpt_state.model_checkpoint_path.split('-')[-1])
+            second_step_num = int(second_ckpt_state.model_checkpoint_path.split('-')[-1])
+            ckpt_state = first_ckpt_state if first_step_num > second_step_num else second_ckpt_state
             try:
-                if mode == "train":
-                    second_ckpt_dir = os.path.join(dire, "val")
-                else:
-                    second_ckpt_dir = os.path.split(dire)[0]
-                ckpt_state = tf.train.get_checkpoint_state(second_ckpt_dir, lastest_filename)
+                print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
+                saver.restore(sess, )
+                return ckpt_state.model_checkpoint_path
+            except Exception as ex:
+                print(ex)
+                print(colored("Failed to load checkpoint from %s. Training from scratch.." % (second_ckpt_dir), 'red'))
+                return None
+        elif mode == "val":
+            ckpt_state = first_ckpt_state if first_ckpt_state else second_ckpt_state
+            ckpt_dir = first_ckpt_dir if first_ckpt_state else second_ckpt_dir
+            try:
                 print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
                 saver.restore(sess, ckpt_state.model_checkpoint_path)
                 return ckpt_state.model_checkpoint_path
             except Exception as ex:
                 print(ex)
-                if not force:
-                    print(colored("Failed to load checkpoint from %s also. Training from scratch.." % (second_ckpt_dir), 'red'))
+                if force:
+                    print(colored("Failed to load checkpoint from %s... Please put the ckpt under it." % (ckpt_dir), 'red'))
+                else:
+                    print(colored("Failed to load checkpoint from %s..." % (ckpt_dir), 'red'))
                     return None
-                elif mode == "train":
-                    print("Failed to load checkpoint from %s Sleeping %s munites to waite." % (second_ckpt_dir, 10))
-                    time.sleep(10 * 60)
-        time.sleep(60)
-
+        time.sleep(2*60)
 
 def initialize_uninitialized(sess):
     global_vars = tf.global_variables()
