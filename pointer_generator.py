@@ -316,9 +316,10 @@ class PointerGenerator(object):
                     beam_symbols[j-1] = tf.gather(beam_symbols[j-1], real_path)
                     log_beam_probs[j-1] = tf.gather(log_beam_probs[j-1], real_path)
 
-        dec_input = tf.fill([batch_size], self._dec_vocab.word2id(data.START_DECODING))
-        dec_input = tf.nn.embedding_lookup(self.dec_embeddings, dec_input)
-        dec_input = tf.expand_dims(dec_input, axis=1)
+        start_token = tf.fill([batch_size, 1], self._dec_vocab.word2id(data.START_DECODING))
+        start_token = tf.nn.embedding_lookup(self.dec_embeddings, start_token)
+        dec_input = start_token
+        start_token = tf.tile(start_token, [beam_size, 1, 1])
 
         for i in range(num_steps):
             if i == 0:
@@ -332,7 +333,8 @@ class PointerGenerator(object):
             vocab_dists = self._conv_decoder(dec_input, attention_keys, attention_values, enc_padding_mask)
             beam_search(vocab_dists[0], i+1, tf.log)
             dec_input = tf.nn.embedding_lookup(self.dec_embeddings, tf.stack(values=beam_symbols, axis=1))
-            dec_input = tf.reshape(dec_input, [batch_size*beam_size, len(beam_symbols), self.hps.char_emb_dim])
+            dec_input = tf.concat([start_token, dec_input], axis=1)
+            dec_input = tf.reshape(dec_input, [batch_size*beam_size, len(beam_symbols)+1, self.hps.char_emb_dim])
 
         best_seq = tf.stack(values=beam_symbols, axis=1)
         self.best_seq = tf.reshape(best_seq, [batch_size, beam_size, num_steps])
@@ -343,7 +345,8 @@ class PointerGenerator(object):
         best_seq = sess.run(self.best_seq, feed_dict)  # run the encoder
         return best_seq
 
-    def _conv_decoder(self, emb_dec_inputs, attention_keys=None, attention_values=None, enc_padding_mask=None):
+    def _conv_decoder(self, emb_dec_inputs,
+                      attention_keys=None, attention_values=None, enc_padding_mask=None):
         if attention_keys is None:
             enc_padding_mask = self.enc_padding_mask
             attention_keys = self.attention_keys
@@ -438,21 +441,21 @@ class PointerGenerator(object):
 
         return results['attention_keys'], results['attention_values']
 
-    def decode_onestep(self, emb_dec_inputs, dec_in_state):
+    def decode_onestep(self, emb_dec_inputs):
         """
         function: decode onestep for rollout
         inputs:
             the embedded input
         """
         # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
-        _, _, _, final_dists, new_states = getattr(self, "_" + self.hps.decoder)(emb_dec_inputs, dec_in_state)
+        final_dists = self._conv_decoder(emb_dec_inputs)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         # final_dists_sliced = tf.slice(final_dists[0], [0, 0], [-1, self._vocab.size()])
         final_dists = final_dists[0]
         # final_dists += tf.ones_like(final_dists) * sys.float_info.epsilon
         output_id = tf.squeeze(tf.cast(tf.reshape(tf.multinomial(tf.log(final_dists), 1), [self.hps.batch_size]), tf.int32))
         # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
-        return output_id, new_states
+        return output_id
 
     def run_decode_onestep(self, sess, dec_inputs, attention_keys, attention_values, enc_padding_mask):
 
