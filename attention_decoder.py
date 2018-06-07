@@ -56,6 +56,7 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
         encoder_features = nn_ops.conv2d(encoder_states, W_h, [1, 1, 1, 1], "SAME")
 
         v = variable_scope.get_variable("v", [attention_vec_size])
+        w = variable_scope.get_variable("w", [attention_vec_size])
 
         if use_coverage:
             with variable_scope.variable_scope("coverage"):
@@ -72,12 +73,12 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
 
                 def masked_attention(e):
                     """Take softmax of e then apply enc_padding_mask and re-normalize"""
-                    e *= enc_padding_mask  # apply mask
-                    attn_dist = nn_ops.softmax(e)  # take softmax. shape (batch_size, attn_length)
-                    masked_sums = tf.reduce_sum(attn_dist, axis=1)  # shape (batch_size)
-                    return attn_dist
+                    attn_dist = nn_ops.softmax(e)
+                    attn_dist *= enc_padding_mask
+                    masked_sums = tf.reduce_sum(attn_dist, axis=1)
+                    return attn_dist / tf.reshape(masked_sums, [-1, 1])
 
-                def sent_attn():
+                def get_new_attn_dis():
                     batch_nums = tf.range(0, limit=batch_size)
                     batch_nums = tf.expand_dims(batch_nums, 1)
                     attn_len = tf.shape(enc_sent_label)[1]
@@ -86,12 +87,12 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
                     masked_enc_features = encoder_features*tf.expand_dims(enc_padding_mask, axis=-1)
                     max_sent_num = tf.reduce_max(sent_nums)+1
                     shape = [batch_size, max_sent_num, tf.shape(encoder_features)[-1]]
-                    sent_features = tf.scatter_nd(sent_nums, masked_enc_features, shape)
-                    new_encoder_features = tf.gather(sent_nums)
+                    sent_features = v * (tf.scatter_nd(sent_nums, masked_enc_features, shape) + decoder_features)
+                    new_encoder_features = tf.gather_nd(sent_features, sent_nums)
                     e = math_ops.reduce_sum(
-                        v * math_ops.tanh(new_encoder_features),
+                        w * math_ops.tanh(new_encoder_features + encoder_features + decoder_features),
                         [2, 3])  # calculate e
-                    attn_dist = nn_ops.softmax(e)
+                    return masked_attention(e)
 
                 if use_coverage and coverage is not None:
                     coverage_features = nn_ops.conv2d(coverage, w_c, [1, 1, 1, 1], "SAME")
@@ -103,10 +104,11 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
                     attn_dist = masked_attention(e)
                     coverage += array_ops.reshape(attn_dist, [batch_size, -1, 1, 1])
                 else:
-                    e = math_ops.reduce_sum(
-                        v * math_ops.tanh(encoder_features + decoder_features),
-                        [2, 3])  # calculate e
-                    attn_dist = masked_attention(e)
+                    # e = math_ops.reduce_sum(
+                    #     v * math_ops.tanh(encoder_features + decoder_features),
+                    #     [2, 3])  # calculate e
+                    # attn_dist = masked_attention(e)
+                    attn_dist = get_new_attn_dis()
 
                     if use_coverage:  # first step of training
                         coverage = tf.expand_dims(tf.expand_dims(attn_dist, 2), 2)
