@@ -104,8 +104,8 @@ def lstm_attention_decoder(decoder_inputs, enc_padding_mask, attention_keys, ini
 
                 def masked_attention(e):
                     """Take softmax of e then apply enc_padding_mask and re-normalize"""
-                    e *= enc_padding_mask  # apply mask
                     attn_dist = nn_ops.softmax(e)  # take softmax. shape (batch_size, attn_length)
+                    e *= enc_padding_mask  # apply mask
                     masked_sums = tf.reduce_sum(attn_dist, axis=1)  # shape (batch_size)
                     return attn_dist / tf.reshape(masked_sums, [-1, 1])  # re-normalize
 
