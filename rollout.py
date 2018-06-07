@@ -32,24 +32,28 @@ class Rollout(object):
 
         ######################################################################
 
+        self.rollout_sample_emb_ar = tensor_array_ops.TensorArray(
+            dtype=tf.int32, size=max_dec_steps, dynamic_size=False, infer_shape=True)
         self.rollout_sample_ar = tensor_array_ops.TensorArray(
             dtype=tf.int32, size=max_dec_steps, dynamic_size=False, infer_shape=True)
 
         with tf.variable_scope(decoder_scope, reuse=True):
 
-            def recurrence_rollout(i, dec_input, rollout_sample_ar):
+            def recurrence_rollout(i, dec_input, rollout_sample_ar, rollout_sample_emb_ar):
                 output_id = self.generator.decode_onestep(dec_input)
                 rollout_sample_ar = rollout_sample_ar.write(i, output_id)
-                next_input = tf.concat([rollout_sample_ar.stack(), output_id], axis=1)
-                next_input_emb = tf.nn.embedding_lookup(self.g_embeddings, next_input)
-                return i+1, next_input_emb, rollout_sample_ar
+                output_id_emb = tf.nn.embedding_lookup(self.g_embeddings, output_id)
+                rollout_sample_emb_ar = rollout_sample_emb_ar.write(i, output_id_emb)
+                next_input_emb = tf.concat([rollout_sample_emb_ar.stack(), output_id_emb], axis=1)
+                return i+1, next_input_emb, rollout_sample_ar, rollout_sample_emb_ar
 
-            _, _, self.rollout_sample_ar = control_flow_ops.while_loop(
-                cond=lambda i, _1, _2: i < max_dec_steps-self.given_num,
+            _, _, self.rollout_sample_ar, self.rollout_sample_emb_ar = control_flow_ops.while_loop(
+                cond=lambda i, _1, _2, _3: i < max_dec_steps-self.given_num,
                 body=recurrence_rollout,
-                loop_vars=(0, init_start_emb, self.rollout_sample_ar))
+                loop_vars=(0, init_start_emb, self.rollout_sample_ar, self.rollout_sample_emb_ar))
 
-        self.rollout_sample = tf.concat([init_start, self.rollout_sample_ar.stack()], axis=1)  # seq_length x batch_size
+        self.rollout_samples_emb = self.rollout_sample_emb_ar.stack()
+        self.rollout_samples = self.rollout_sample_ar.stack()
 
     def get_reward(self, hps_gan, sess, gen_vocab, dis_vocab, source_batch,
                    enc_states, dec_in_state, k_samples, discriminator):
@@ -78,30 +82,13 @@ class Rollout(object):
 
                     feed_dict = {}
                     feed_dict[self.sample] = samples
-                    # this is the source
-                    # feed_dict[self.generator.enc_lens] = source_batch.enc_lens
                     feed_dict[self.given_num] = given_num
-                    feed_dict[self.generator.enc_states] = enc_states
                     feed_dict[self.generator.enc_padding_mask] = source_batch.enc_padding_mask
-                    feed_dict[self.cell_c] = dec_in_state.c
-                    feed_dict[self.cell_h] = dec_in_state.h
-                    feed_dict[self.generator.enc_batch_extend_vocab] = articles_extend
-                    feed_dict[self.generator.max_art_oovs] = source_batch.max_art_oovs
-                    # how to deal with the coverage?
+                    feed_dict[self.generator.attention_keys] = enc_states
 
-                    # the unique feature for the pointer gen is the
-                    # enc_batch_extend_vocab and the max_art_oovs
-                    rollout_samples_extend = sess.run(self.rollout_sample, feed_dict)
-                    rollout_samples = np.where(
-                        np.less(samples, self._gen_hps.gen_vocab_size),
-                        rollout_samples_extend, np.array(
-                            [[gen_vocab.word2id(data.UNKNOWN_TOKEN)] * max_dec_steps
-                             ] * self._gen_hps.batch_size))
+                    rollout_samples, emb_rollout_samples = sess.run([self.rollout_samples, self.rollout_samples_emb], feed_dict)
                     # how about multiple generators for one discriminator?
                     if dis_ratio:
-                        emb_rollout_samples = sess.run(
-                            self.generator.temp_embedded_seq,
-                            feed_dict={self.generator.temp_batch: rollout_samples})
 
                         feed = {
                             discriminator.inputs: emb_rollout_samples,
@@ -114,7 +101,7 @@ class Rollout(object):
                             dis_rewards[given_num-1] += ypred_for_auc
 
                     if rouge_ratio:
-                        rpred = rouge_l(strip_pads(rollout_samples_extend.tolist(), gen_vocab.word2id(STOP_DECODING)),
+                        rpred = rouge_l(strip_pads(rollout_samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
                                         strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), beta=0.5)
                         rouge_rewards[given_num] += np.array(rpred)
 
