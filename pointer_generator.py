@@ -303,7 +303,7 @@ class PointerGenerator(object):
             output log distribution
             new state
         """
-        if not enc_padding_mask:
+        if enc_padding_mask is None:
             enc_padding_mask = self.enc_padding_mask
             attention_keys = self.attention_keys
 
