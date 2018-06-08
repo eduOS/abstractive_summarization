@@ -121,7 +121,6 @@ def print_dashboard(type, step, batch_size, enc_vocab_size, dec_vocab_size,
     )
 
 
-
 def pad_sample(best_samples, vocab, hps):
     sample_padding_mask = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.float32)
 
