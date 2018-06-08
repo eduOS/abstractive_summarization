@@ -168,7 +168,7 @@ class PointerGenerator(object):
                 decoder_scope.reuse_variables()
                 self.final_dists = final_dists
                 self.topk_log_probs, self.indices = tf.nn.top_k(tf.log(final_dists[0]), self.hps.beam_size * 2)
-                self._ran_id = tf.multinomial(tf.log(self.final_dists), 1)
+                self._ran_id = tf.multinomial(tf.log(self.final_dists[0]), 1)
 
                 eval_final_dists = self._conv_decoder(emb_eval_dec_inputs, is_training=True)
 

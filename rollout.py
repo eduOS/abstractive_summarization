@@ -6,7 +6,6 @@ from tensorflow.python.ops import tensor_array_ops, control_flow_ops
 # from tensorflow.python.ops import variable_scope
 import numpy as np
 from data import strip_pads
-import data
 from gan_utils import rouge_l
 PAD_TOKEN = "[PAD]"
 START_DECODING = '[START]'
@@ -19,23 +18,22 @@ class Rollout(object):
         self.update_rate = update_rate
         # TODO: for the variables update
         self._gen_hps = self.generator.hps
-        self.g_embeddings = self.generator.embeddings
+        self.g_embeddings = self.generator.dec_embeddings
         max_dec_steps = self._gen_hps.max_dec_steps
         #######################################################################
 
-        self.sample = tf.placeholder(
-            tf.int32, shape=[self._gen_hps.batch_size, max_dec_steps], name="sample")
-        init_start, _ = tf.split(self.sample, [self.given_num, max_dec_steps-self.given_num], axis=1)
-        self.emb_sample = tf.nn.embedding_lookup(self.g_embeddings, self.sample)
         self.given_num = tf.placeholder(tf.int32, name="given_num")
-        init_start_emb, _ = tf.split(self.emb_sample, [self.given_num, max_dec_steps-self.given_num], axis=1)
+        self.sample = tf.placeholder(
+            tf.int32, shape=[self._gen_hps.batch_size, max_dec_steps+1], name="sample")
+        self.emb_sample = tf.nn.embedding_lookup(self.g_embeddings, self.sample)
+        init_start_emb = tf.slice(self.emb_sample, [0, 0, 0], [-1, self.given_num, -1])
 
         ######################################################################
 
         self.rollout_sample_emb_ar = tensor_array_ops.TensorArray(
-            dtype=tf.int32, size=max_dec_steps, dynamic_size=False, infer_shape=True)
+            dtype=tf.int32, size=max_dec_steps-self.given_num, dynamic_size=False, infer_shape=True)
         self.rollout_sample_ar = tensor_array_ops.TensorArray(
-            dtype=tf.int32, size=max_dec_steps, dynamic_size=False, infer_shape=True)
+            dtype=tf.int32, size=max_dec_steps-self.given_num, dynamic_size=False, infer_shape=True)
 
         with tf.variable_scope(decoder_scope, reuse=True):
 
@@ -73,7 +71,7 @@ class Rollout(object):
 
         for k, samples in enumerate(k_samples):
             dis_rewards = []
-            rouge_rewards = np.zeros((max_dec_steps+1, batch_size))
+            rouge_rewards = np.zeros((max_dec_steps, batch_size))
             for ir in range(rollout_num):
                 for given_num in range(hps_gan.rollout_start, max_dec_steps):
 
@@ -98,8 +96,8 @@ class Rollout(object):
                             dis_rewards[given_num-1] += ypred_for_auc
 
                     if rouge_ratio:
-                        rpred = rouge_l(strip_pads(rollout_samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
-                                        strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), beta=0.5)
+                        rpred = rouge_l(strip_pads(rollout_samples.tolist(), dec_vocab.word2id(STOP_DECODING)),
+                                        strip_pads(source_batch.dec_batch.tolist(), dec_vocab.word2id(PAD_TOKEN)), beta=0.5)
                         rouge_rewards[given_num] += np.array(rpred)
 
                 if dis_ratio:
@@ -119,8 +117,8 @@ class Rollout(object):
                     else:
                         dis_rewards[max_dec_steps-1] += ypred_for_auc
                 if rouge_ratio:
-                    rpred = rouge_l(strip_pads(samples.tolist(), gen_vocab.word2id(STOP_DECODING)),
-                                    strip_pads(source_batch.dec_batch.tolist(), gen_vocab.word2id(PAD_TOKEN)), beta=0.5)
+                    rpred = rouge_l(strip_pads(samples.tolist(), dec_vocab.word2id(STOP_DECODING)),
+                                    strip_pads(source_batch.dec_batch.tolist(), dec_vocab.word2id(PAD_TOKEN)), beta=0.5)
                     rouge_rewards[max_dec_steps] += np.array(rpred)
 
             if rouge_ratio:

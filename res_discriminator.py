@@ -41,7 +41,6 @@ class Seq2ClassModel(object):
     self.hps = hps
     self.is_decoding = ('gan' in hps.mode)
     # self.is_decoding = True
-    self.vocab_size = hps.dis_vocab_size
     with tf.variable_scope("OptimizeLoss"):
       self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(hps.dis_lr))
     self.cell_type = hps.cell_type
@@ -152,7 +151,7 @@ class Seq2ClassModel(object):
       # normalized_input_emb = tf.nn.l2_normalize(input_emb, dim=1)
       dot_product = tf.reduce_sum(tf.multiply(input_emb, condition_emb), axis=1)
       # loss = tf.reduce_mean(tf.where(tf.equal(targets, 1), -tf.log(prob), -tf.log(1-prob)))
-      loss = tf.nn.weighted_cross_entropy_with_logits(logits=dot_product, labels=targets, pos_weight=2)
+      loss = tf.nn.weighted_cross_entropy_with_logits(logits=dot_product, targets=targets, pos_weight=2)
       prob = tf.sigmoid(dot_product)
       pred = tf.where(tf.less(tf.fill(tf.shape(prob), 0.5), prob),
                       tf.fill(tf.shape(prob), 1.0), tf.fill(tf.shape(prob), 0.0))

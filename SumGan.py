@@ -52,8 +52,6 @@ tf.app.flags.DEFINE_integer("pool_layers", 2, "Number of pooling layers in the m
 tf.app.flags.DEFINE_integer("kernel_size", 3, "the kernel size of the conv")
 tf.app.flags.DEFINE_integer("pool_size", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_string("cell_type", "GRU", "Cell type")
-tf.app.flags.DEFINE_integer("dis_vocab_size", 5000, "vocabulary size.")
-tf.app.flags.DEFINE_string("dis_vocab_file", "vocab", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_string("vocab_type", "char", "the path of the discriminator vocabulary.")
 tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_integer("num_models", 3, "Size of each model layer. The actural size is doubled.")
@@ -80,7 +78,6 @@ tf.app.flags.DEFINE_string("enc_vocab_file", "enc_vocab", "the path of the gener
 tf.app.flags.DEFINE_string("dec_vocab_file", "dec_vocab", "the path of the generator vocabulary.")
 
 #  data_path/gen_vocab: vocabulary for the generator
-#  data_path/dis_vocab: vocabulary for the generator
 #  data_path/[decode/eval]_[positive/negative/source]: the data for the discriminator
 #  data_path/[train/val/test]_\d+.bin: the data for the generator
 
@@ -132,7 +129,7 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 
 
 # ------------------------------------- gan
-tf.app.flags.DEFINE_integer('rollout_start', 0, 'how many times to run the gan')
+tf.app.flags.DEFINE_integer('rollout_start', 1, 'how many times to run the gan')
 tf.app.flags.DEFINE_integer('gan_iter', 200000, 'how many times to run the gan')
 tf.app.flags.DEFINE_integer('gan_gen_iter', 5, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('gan_dis_iter', 10**8, 'in each gan step run how many times the generator')
@@ -326,10 +323,8 @@ def main(argv):
         'mode',
         'vocab_type',
         'model_dir',
-        'dis_vocab_size',
         'steps_per_checkpoint',
         'learning_rate_decay_factor',
-        'dis_vocab_file',
         'num_class',
         'layer_size',
         'conv_layers',
@@ -360,11 +355,6 @@ def main(argv):
             hps_dict[key] = val  # add it to the dict
 
     hps_dis = namedtuple("HParams4Dis", hps_dict.keys())(**hps_dict)
-    if hps_gen.dec_vocab_file == hps_dis.dis_vocab_file:
-        assert hps_dis.vocab_type == hps_gen.vocab_type, (
-            "the vocab type of the generator and the discriminator should be the same")
-        hps_dis = hps_dis._replace(layer_size=hps_gen.char_emb_dim)
-        hps_dis = hps_dis._replace(dis_vocab_size=hps_gen.dec_vocab_size)
 
     if FLAGS.mode == "train_gan":
         hps_gen = hps_gen._replace(batch_size=hps_gen.batch_size * hps_dis.num_models)
@@ -374,9 +364,6 @@ def main(argv):
         print("Building generator graph ...")
         gen_decoder_scope = generator.build_graph()
 
-    if FLAGS.mode not in ["pretrain_gen", 'decode']:
-        print("Building vocabulary for discriminator ...")
-        dis_vocab = Vocab(join_path(hps_dis.data_path, hps_dis.dis_vocab_file), hps_dis.dis_vocab_size)
     if FLAGS.mode == 'train_gan':
         with tf.variable_scope("discriminator"), tf.device("/gpu:0"):
             discriminator = Seq2ClassModel(hps_dis)
