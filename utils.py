@@ -13,6 +13,7 @@ import os
 from termcolor import colored
 from tensorflow.python import pywrap_tensorflow
 from tensorflow.python.framework import tensor_shape
+# from tensorflow.contrib.cudnn_rnn import CudnnLSTM as lstm
 from tensorflow.python.ops import array_ops
 import datetime
 import tensorflow as tf
@@ -53,13 +54,12 @@ def load_ckpt(saver, sess, dire, mode="train", force=False, lastest_filename="ch
             print(colored("Failed to load checkpoint from two directories. Training from scratch..", 'red'))
             return None
         elif mode == "train":
-
-            first_step_num = int(first_ckpt_state.model_checkpoint_path.split('-')[-1])
+            first_step_num = int(first_ckpt_state.model_checkpoint_path.split('-')[-1]) if first_ckpt_state else 0
             second_step_num = int(second_ckpt_state.model_checkpoint_path.split('-')[-1])
             ckpt_state = first_ckpt_state if first_step_num > second_step_num else second_ckpt_state
             try:
                 print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
-                saver.restore(sess, )
+                saver.restore(sess, ckpt_state.model_checkpoint_path)
                 return ckpt_state.model_checkpoint_path
             except Exception as ex:
                 print(ex)
@@ -255,14 +255,7 @@ def lstm_encoder(encoder_inputs, seq_len, hidden_dim, rand_unif_init=None,
             hidden_dim, initializer=rand_unif_init, state_is_tuple=state_is_tuple)
         (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
             cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len)
-        # the sequence length of the encoder_inputs varies depending on the
-        # batch, which will make the second dimension of the
-        # encoder_outputs different in different batches
-
-        # concatenate the forwards and backwards states
         encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
-        # encoder_outputs: [batch_size * beam_size, max_time, output_size*2]
-        # fw_st & bw_st: [batch_size * beam_size, num_hidden]
 
     dec_in_state = reduce_states(
         fw_st, bw_st, hidden_dim=hidden_dim,
@@ -393,8 +386,6 @@ def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_in
         new_h = tf.nn.relu(_h) - alpha * tf.nn.relu(-_h)
         # new_c = activation_fn(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
         # new_h = activation_fn(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
-        new_c = tf.contrib.layers.dropout(new_c, keep_prob=keep_prob, is_training=is_training)
-        new_h = tf.contrib.layers.dropout(new_h, keep_prob=keep_prob, is_training=is_training)
         return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
 
 
