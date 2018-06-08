@@ -86,7 +86,7 @@ class Decoder(object):
 
     def mc_generate(self, batch, s_num=4):
         # Run beam search to get best Hypothesis
-        enc_states, dec_in_state, n_hyps_batch = monte_carlo_search.run_monte_carlo_search(
+        attention_keys, n_hyps_batch = monte_carlo_search.run_monte_carlo_search(
             self._sess, self._model, self._vocab, batch, s_num=s_num)
 
         padded_n_hyps = []
@@ -114,7 +114,7 @@ class Decoder(object):
             for i in np.split(padding_mask, padding_mask.shape[1], 1)]
         assert len(outputs_ids) == s_num
 
-        return enc_states, dec_in_state, outputs_ids, padding_mask
+        return attention_keys, outputs_ids, padding_mask
 
     def multinomial_decode(self, sess, model, batch, vocab):
         batch_size = len(batch.enc_batch_extend_vocab)

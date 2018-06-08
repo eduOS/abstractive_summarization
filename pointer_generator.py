@@ -162,20 +162,25 @@ class PointerGenerator(object):
                 ) + self._emb_enc_inputs) * tf.sqrt(0.5)
 
             with tf.variable_scope('decoder') as decoder_scope:
-                final_dists = self._conv_decoder(emb_dec_inputs)
+                # is_training = self.hps.mode in ["pretrain_gen", "train_gan"]
+                is_training = False if self.hps.mode in ["train_gan", 'decode'] else True
+                final_dists = self._conv_decoder(emb_dec_inputs, is_training=is_training)
                 decoder_scope.reuse_variables()
-                if self.hps.mode == "decode":
-                    self.beam_search()
-
                 self.final_dists = final_dists
                 self.topk_log_probs, self.indices = tf.nn.top_k(tf.log(final_dists[0]), self.hps.beam_size * 2)
+                self._ran_id = tf.multinomial(tf.log(self.final_dists), 1)
 
-                eval_final_dists = self._conv_decoder(emb_eval_dec_inputs)
+                eval_final_dists = self._conv_decoder(emb_eval_dec_inputs, is_training=True)
 
-                k_sample_final_dists_ls = []
-                for emb_samples in k_emb_samples_ls:
-                    sample_final_dists = self._conv_decoder(emb_samples)
-                    k_sample_final_dists_ls.append(sample_final_dists)
+                if self.hps.mode == "train_gan":
+                    decoder_scope.reuse_variables()
+                    k_sample_final_dists_ls = []
+                    for emb_samples in k_emb_samples_ls:
+                        sample_final_dists = self._conv_decoder(emb_samples, is_training=True)
+                        k_sample_final_dists_ls.append(sample_final_dists)
+
+                # if self.hps.mode == "decode":
+                #     self.beam_search()
 
             def get_loss(final_dists, target_batch, padding_mask, rewards=None):
                 batch_nums = tf.range(0, limit=tf.shape(target_batch)[0])
@@ -330,7 +335,7 @@ class PointerGenerator(object):
                 attention_keys = _attention_keys
                 attention_values = _attention_values
                 enc_padding_mask = _enc_padding_mask
-            vocab_dists = self._conv_decoder(dec_input, attention_keys, attention_values, enc_padding_mask)
+            vocab_dists = self._conv_decoder(dec_input, attention_keys, attention_values, enc_padding_mask, is_training=False)
             beam_search(vocab_dists[0], i+1, tf.log)
             dec_input = tf.nn.embedding_lookup(self.dec_embeddings, tf.stack(values=beam_symbols, axis=1))
             dec_input = tf.concat([start_token, dec_input], axis=1)
@@ -346,16 +351,12 @@ class PointerGenerator(object):
         return best_seq
 
     def _conv_decoder(self, emb_dec_inputs,
-                      attention_keys=None, attention_values=None, enc_padding_mask=None):
+                      attention_keys=None, attention_values=None, enc_padding_mask=None, is_training=True):
         if attention_keys is None:
             enc_padding_mask = self.enc_padding_mask
             attention_keys = self.attention_keys
             attention_values = self.attention_values
         vsize = self.hps.dec_vocab_size
-        is_training = self.hps.mode in ["pretrain_gen", "train_gan"]
-        # emb_enc_dim = self._emb_enc_inputs.get_shape().as_list()[-1]
-        # attention_states = linear_mapping_weightnorm(self.attention_keys, emb_enc_dim) + self._emb_enc_inputs
-        # outputs, out_state, attn_dists, p_gens, coverage
         logits = conv_attention_decoder(
             emb_dec_inputs, enc_padding_mask, attention_keys, attention_values, vsize, is_training)
 
@@ -448,7 +449,7 @@ class PointerGenerator(object):
             the embedded input
         """
         # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
-        final_dists = self._conv_decoder(emb_dec_inputs)
+        final_dists = self._conv_decoder(emb_dec_inputs, is_training=False)
         # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
         # final_dists_sliced = tf.slice(final_dists[0], [0, 0], [-1, self._vocab.size()])
         final_dists = final_dists[0]
@@ -469,11 +470,12 @@ class PointerGenerator(object):
         to_return = {
           "topk_log_probs": self.topk_log_probs,
           "indices": self.indices,
+          "ran_id": self._ran_id,
         }
 
         results = sess.run(to_return, feed_dict=feed)
 
-        return results['topk_log_probs'], results['indices']
+        return results['topk_log_probs'], results['indices'], results['indices']
 
     def g_optimizer(self, *args, **kwargs):
         return tf.train.AdamOptimizer(*args, **kwargs)

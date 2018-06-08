@@ -86,7 +86,7 @@ def run_beam_search(sess, model, vocab, batch, top_k=1):
 
         while steps < model.hps.max_dec_steps and len(results) < beam_size:
             dec_inputs = np.array([h.tokens for h in hyps])
-            topk_log_probs, topk_ids = model.run_decode_onestep(
+            topk_log_probs, topk_ids, _ = model.run_decode_onestep(
                     sess, dec_inputs, attention_key, attention_value, enc_padding_mask,
                 )
 

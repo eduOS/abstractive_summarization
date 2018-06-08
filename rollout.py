@@ -55,10 +55,7 @@ class Rollout(object):
         self.rollout_samples_emb = self.rollout_sample_emb_ar.stack()
         self.rollout_samples = self.rollout_sample_ar.stack()
 
-    def get_reward(self, hps_gan, sess, gen_vocab, dis_vocab, source_batch,
-                   enc_states, dec_in_state, k_samples, discriminator):
-        # dec_in_state is [batch_size, hidden_dim * 2] and that should be
-        # changed to [batch_size, hidden_dim] for the attention_decoder
+    def get_reward(self, hps_gan, sess, dec_vocab, source_batch, enc_states, k_samples, discriminator):
         rollout_num = hps_gan.rollout_num
         rouge_ratio = hps_gan.rouge_reward_ratio
         dis_ratio = hps_gan.dis_reward_ratio
