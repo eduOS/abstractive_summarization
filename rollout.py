@@ -27,6 +27,8 @@ class Rollout(object):
             tf.int32, shape=[self._gen_hps.batch_size, max_dec_steps+1], name="sample")
         self.emb_sample = tf.nn.embedding_lookup(self.g_embeddings, self.sample)
         init_start_emb = tf.slice(self.emb_sample, [0, 0, 0], [-1, self.given_num, -1])
+        input_shape = init_start_emb.get_shape().as_list()
+        print(input_shape)
 
         ######################################################################
 
@@ -38,6 +40,8 @@ class Rollout(object):
         with tf.variable_scope(decoder_scope, reuse=True):
 
             def recurrence_rollout(i, dec_input, rollout_sample_ar, rollout_sample_emb_ar):
+                input_shape = dec_input.get_shape().as_list()
+                print(input_shape)
                 output_id = self.generator.decode_onestep(dec_input)
                 rollout_sample_ar = rollout_sample_ar.write(i, output_id)
                 output_id_emb = tf.nn.embedding_lookup(self.g_embeddings, output_id)
