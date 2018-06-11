@@ -99,6 +99,7 @@ def save_ckpt(sess, model, best_loss, model_dir, model_saver,
             losses.append(loss_eval)
         else:
             print(colored("Encountered a NAN.", 'red'))
+            raise Exception('NAN occurs in evaluation..')
     eval_loss = sum(losses) / (len(losses) + sys.float_info.epsilon)
     if best_loss is None or eval_loss < best_loss:
         sess.run(model.least_val_loss.assign(eval_loss))

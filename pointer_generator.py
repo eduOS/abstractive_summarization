@@ -372,8 +372,6 @@ class PointerGenerator(object):
         return sess.run(self.learning_rate)
 
     def run_one_batch(self, sess, batch, update=True, gan_eval=False):
-        """Runs one training iteration. Returns a dictionary containing train
-        op, summaries, loss, global_step and (optionally) coverage loss."""
         if gan_eval:
             update = False
 
@@ -381,13 +379,9 @@ class PointerGenerator(object):
 
         to_return = {
             'global_step': self.global_step,
+            'loss':  self._eval_loss,
         }
 
-        # to_return['attn_dists'] = self.attn_dists
-        # to_return['p_gens'] = self.p_gens
-        # to_return['final_dists'] = self.final_dists
-
-        to_return['loss'] = self._eval_loss
         if gan_eval:
             to_return['loss'] = self._eval_loss
         else:
@@ -399,13 +393,6 @@ class PointerGenerator(object):
         if self.hps.coverage:
             to_return['coverage_loss'] = self._coverage_loss
         rsts = sess.run(to_return, feed_dict)
-        # print('attn_dists')
-        # print(rsts['attn_dists'])
-        # print('p_gens')
-        # print(rsts['p_gens'])
-        # print('final_dists')
-        # print(rsts['final_dists'])
-        # time.sleep(100*100)
 
         return rsts
 
