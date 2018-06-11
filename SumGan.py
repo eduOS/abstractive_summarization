@@ -198,7 +198,7 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
             # check if it is the best checkpoint so far
             eval_loss, best_loss = gen_save_ckpt(
                 sess, model, best_loss, model_dir, model_saver,
-                batcher_val, val_dir, val_saver, global_step, gan_eval=False)
+                batcher_val, val_dir, val_saver, global_step)
             last_ten_eval_loss.append(eval_loss)
             if len(last_ten_eval_loss) == 15 and min(last_ten_eval_loss) == last_ten_eval_loss[0] and eval_save_steps > 5000:
                 last_ten_eval_loss = deque(maxlen=10)
