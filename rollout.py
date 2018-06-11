@@ -45,10 +45,9 @@ class Rollout(object):
                 rollout_sample_ar = rollout_sample_ar.write(i, output_id)
                 output_id_emb = tf.nn.embedding_lookup(self.g_embeddings, output_id)
                 rollout_sample_emb_ar = rollout_sample_emb_ar.write(i, output_id_emb)
-                previous = tf.unstack(tf.reshape(
+                next_input_emb = tf.reshape(
                     tf.transpose(rollout_sample_emb_ar.stack(), [1, 0, 2]),
-                    [self._gen_hps.batch_size, self.given_num+i+1, self._gen_hps.char_emb_dim]))
-                next_input_emb = tf.concat(previous.append(output_id_emb), axis=1)
+                    [self._gen_hps.batch_size, self.given_num+i+1, self._gen_hps.char_emb_dim])
                 return i+1, next_input_emb, rollout_sample_ar, rollout_sample_emb_ar
 
             _, _, self.rollout_sample_ar, self.rollout_sample_emb_ar = control_flow_ops.while_loop(
@@ -57,7 +56,7 @@ class Rollout(object):
                 loop_vars=(0, init_start_emb, self.rollout_sample_ar, self.rollout_sample_emb_ar))
 
         self.rollout_samples_emb = tf.transpose(self.rollout_sample_emb_ar.stack(), [1, 0, 2])
-        self.rollout_samples = tf.transpose(self.rollout_sample_ar.stack(), [1, 0, 2])
+        self.rollout_samples = tf.transpose(self.rollout_sample_ar.stack(), [1, 0])
 
     def get_reward(self, hps_gan, sess, dec_vocab, source_batch, enc_states, k_samples, discriminator):
         rollout_num = hps_gan.rollout_num
