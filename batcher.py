@@ -34,7 +34,7 @@ from collections import defaultdict as dd
 from cntk.tokenizer import text2charlist
 from codecs import open
 from utils import red_assert, red_print, label_sentence_num
-from cntk.constants.punctuation import STOPS
+from cntk.constants.punctuation import Punctuation
 
 
 def fopen(filename, mode='r'):
@@ -51,7 +51,7 @@ class Example(object):
 
     def __init__(self, article, abstract, enc_vocab, dec_vocab, hps):
         self.hps = hps
-        self.stop_ids = [enc_vocab.word2id(s) for s in STOPS if s in enc_vocab.word_keys]
+        self.stop_ids = [enc_vocab.word2id(s) for s in Punctuation.STOPS if s in enc_vocab.word_keys]
 
         # Get ids of special tokens
         start_decoding = dec_vocab.word2id(data.START_DECODING)
