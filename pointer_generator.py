@@ -138,7 +138,7 @@ class PointerGenerator(object):
                     'dec_embeddings', [self._dec_vocab.size(), hps.char_emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
                 self.enc_emb_saver = tf.train.Saver({"enc_embeddings": self.enc_embeddings})
                 self.dec_emb_saver = tf.train.Saver({"dec_embeddings": self.dec_embeddings})
-                self._emb_enc_inputs = tf.nn.embedding_lookup(self.enc_embeddings, self.enc_batch)
+                self.emb_enc_inputs = tf.nn.embedding_lookup(self.enc_embeddings, self.enc_batch)
                 self.temp_embedded_seq = tf.nn.embedding_lookup(self.enc_embeddings, self.temp_batch)
                 # for gen training(mode is pretrain_gen) and
                 # beam searching(mode is decode or train_gan)
@@ -152,14 +152,14 @@ class PointerGenerator(object):
                 ]
 
             attention_keys, dec_in_state = conv_encoder(
-                self._emb_enc_inputs,
+                self.emb_enc_inputs,
                 self.enc_lens, hps.mode in ["pretrain_gen", "train_gan"])
 
             self.attention_keys = attention_keys
             self.attention_values = (
                 linear_mapping_weightnorm(
-                    self.attention_keys, self._emb_enc_inputs.get_shape()[-1].value, var_scope_name="attention_key2value"
-                ) + self._emb_enc_inputs) * tf.sqrt(0.5)
+                    self.attention_keys, self.emb_enc_inputs.get_shape()[-1].value, var_scope_name="attention_key2value"
+                ) + self.emb_enc_inputs) * tf.sqrt(0.5)
 
             with tf.variable_scope('decoder') as decoder_scope:
                 # is_training = self.hps.mode in ["pretrain_gen", "train_gan"]
@@ -427,9 +427,6 @@ class PointerGenerator(object):
         if update:
             to_return['updates'] = self.g_updates
         results = sess.run(to_return, feed_dict)
-        # print("results['loss_per']")
-        # print(results['loss_per'])
-        # print('----------------------\n\n')
         return results
 
     def run_encoder(self, sess, batch):

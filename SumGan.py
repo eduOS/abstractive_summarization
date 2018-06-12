@@ -513,7 +513,7 @@ def main(argv):
                 n_samples_no_start = np.array(n_samples)[:, :, 1:]
                 try:
                     n_rewards = rollout.get_reward(
-                        hps_gan, sess, dec_vocab, batch, enc_states, n_samples_no_start, discriminator)
+                        hps_gan, sess, dec_vocab, batch, enc_states, n_samples, discriminator)
                 except:
                     print('enc_states')
                     print(enc_states)

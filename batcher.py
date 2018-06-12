@@ -452,10 +452,6 @@ class GenBatcher(object):
         """Watch example queue and batch queue threads and restart if dead."""
         while True:
             time.sleep(60)
-            # self._minutes += 1
-            # if 0 and self._minutes % 30 == 0:
-            #     for fn, count in self._files_name_dict.iteritems():
-            #         print(fn, count, count/sum(self._files_name_dict.values()))
             for idx, t in enumerate(self._example_q_threads):
                 if not t.is_alive():  # if the thread is dead
                     print('Found example queue thread dead. Restarting.')
@@ -477,19 +473,15 @@ class GenBatcher(object):
             filelist = glob.glob(self._data_path)  # get the list of datafiles
             if self._mode in ["val", 'test']:
                 assert len(filelist) == 1, \
-                    "in val mode the len should be 1 but %s given." % len(filelist)
+                    "in val mode the len should be 1 but %s given. the path is %s" % (len(filelist), self._data_path)
             red_assert(filelist, 'Error: Empty filelist at %s' % self._data_path)
             if self._mode == "train":
                 random.shuffle(filelist)
             for ff in filelist:
-                # print("opening file %s" % ff)
                 f = open(ff, "r", 'utf-8')
                 while True:
                     art_abs = f.readline().strip().split("\t")
                     if len(art_abs) != 2:
-                        # print(
-                        #     "file %s reaches the end of the data file %s"
-                        #     % (f.name, datetime.datetime.now().strftime("on %m-%d at %H:%M")))
                         if self._mode == "val":
                             f.seek(0)
                             yield (None, None)

@@ -27,6 +27,8 @@ class Rollout(object):
             tf.int32, shape=[self._gen_hps.batch_size, max_dec_steps+1], name="sample")
         self.emb_sample = tf.nn.embedding_lookup(self.g_embeddings, self.sample)
         init_start_emb = tf.slice(self.emb_sample, [0, 0, 0], [-1, self.given_num, -1])
+        _init_start_emb = tf.slice(self.emb_sample, [0, 1, 0], [-1, self.given_num, -1])
+        _init_start = tf.slice(self.sample, [0, 1], [-1, self.given_num])
         init_start_emb = tf.reshape(
             init_start_emb,
             [self._gen_hps.batch_size, self.given_num, self._gen_hps.char_emb_dim])
@@ -35,6 +37,7 @@ class Rollout(object):
 
         self.rollout_sample_emb_ar = tensor_array_ops.TensorArray(
             dtype=tf.float32, size=max_dec_steps-self.given_num, dynamic_size=False, infer_shape=True)
+        self.sample_emb_ls = []
         self.rollout_sample_ar = tensor_array_ops.TensorArray(
             dtype=tf.int32, size=max_dec_steps-self.given_num, dynamic_size=False, infer_shape=True)
 
@@ -45,9 +48,10 @@ class Rollout(object):
                 rollout_sample_ar = rollout_sample_ar.write(i, output_id)
                 output_id_emb = tf.nn.embedding_lookup(self.g_embeddings, output_id)
                 rollout_sample_emb_ar = rollout_sample_emb_ar.write(i, output_id_emb)
-                next_input_emb = tf.reshape(
-                    tf.transpose(rollout_sample_emb_ar.stack(), [1, 0, 2]),
-                    [self._gen_hps.batch_size, self.given_num+i+1, self._gen_hps.char_emb_dim])
+                self.sample_emb_ls.append(output_id_emb)
+
+                next_input_emb = tf.concat([init_start_emb, tf.stack(self.sample_emb_ls, axis=1)], axis=1)
+                # [self._gen_hps.batch_size, self.given_num+i+1, self._gen_hps.char_emb_dim])
                 return i+1, next_input_emb, rollout_sample_ar, rollout_sample_emb_ar
 
             _, _, self.rollout_sample_ar, self.rollout_sample_emb_ar = control_flow_ops.while_loop(
@@ -55,8 +59,8 @@ class Rollout(object):
                 body=recurrence_rollout,
                 loop_vars=(0, init_start_emb, self.rollout_sample_ar, self.rollout_sample_emb_ar))
 
-        self.rollout_samples_emb = tf.transpose(self.rollout_sample_emb_ar.stack(), [1, 0, 2])
-        self.rollout_samples = tf.transpose(self.rollout_sample_ar.stack(), [1, 0])
+        self.rollout_samples_emb = tf.concat([_init_start_emb, tf.transpose(self.rollout_sample_emb_ar.stack(), [1, 0, 2])], axis=1)
+        self.rollout_samples = tf.concat([_init_start, tf.transpose(self.rollout_sample_ar.stack(), [1, 0])], axis=1)
 
     def get_reward(self, hps_gan, sess, dec_vocab, source_batch, enc_states, k_samples, discriminator):
         rollout_num = hps_gan.rollout_num
@@ -64,10 +68,9 @@ class Rollout(object):
         dis_ratio = hps_gan.dis_reward_ratio
         max_dec_steps = self._gen_hps.max_dec_steps
 
-        articles_extend = source_batch.enc_batch_extend_vocab
         articles = source_batch.enc_batch
         article_lens = source_batch.enc_lens
-        batch_size = int(articles_extend.shape[0])
+        batch_size = int(articles.shape[0])
         emb_articles = sess.run(
             self.generator.temp_embedded_seq,
             feed_dict={self.generator.temp_batch: articles})
@@ -79,12 +82,14 @@ class Rollout(object):
             rouge_rewards = np.zeros((max_dec_steps, batch_size))
             for ir in range(rollout_num):
                 for given_num in range(hps_gan.rollout_start, max_dec_steps):
+                    self.sample_emb_ls = []
 
                     feed_dict = {}
                     feed_dict[self.sample] = samples
                     feed_dict[self.given_num] = given_num
                     feed_dict[self.generator.enc_padding_mask] = source_batch.enc_padding_mask
                     feed_dict[self.generator.attention_keys] = enc_states
+                    feed_dict[self.generator.emb_enc_inputs] = emb_articles
 
                     rollout_samples, emb_rollout_samples = sess.run([self.rollout_samples, self.rollout_samples_emb], feed_dict)
                     # how about multiple generators for one discriminator?
@@ -112,7 +117,7 @@ class Rollout(object):
 
                     # the last token reward
                     feed = {
-                        discriminator.inputs: emb_samples,
+                        discriminator.inputs: emb_samples[:, 1:, :],
                         discriminator.conditions: emb_articles,
                         discriminator.condition_lens: article_lens
                     }

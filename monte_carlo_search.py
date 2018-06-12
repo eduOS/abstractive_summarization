@@ -14,13 +14,13 @@ FLAGS = tf.app.flags.FLAGS
 
 class Hypothesis(object):
 
-    def __init__(self, tokens, state, coverage):
+    def __init__(self, tokens):
         self._tokens = tokens
 
     def __len__(self):
         return len(self.tokens)
 
-    def extend(self, token, state, coverage):
+    def extend(self, token):
         if not token:
             return Hypothesis(
                 tokens=self._tokens,
