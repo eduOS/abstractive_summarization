@@ -225,12 +225,11 @@ class Decoder(object):
                             decoded_outputs.append(decoded_output)
 
                 if not save2file:
-                    rouges = rouge_l(
-                        strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING)),
-                        strip_pads(batch.dec_batch.tolist(),
-                                   self._vocab.word2id(STOP_DECODING))
-                        )
-                    rouge_scores += rouges
+                    summaries = strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING))
+                    references = strip_pads(batch.dec_batch.tolist(), self._vocab.word2id(STOP_DECODING))
+                    for s, r in zip(summaries, references):
+                        rouges = rouge_l(s, r)
+                        rouge_scores.append(rouges)
                     continue
 
                 counter += 1  # this is how many examples we've decoded

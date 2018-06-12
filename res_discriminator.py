@@ -41,8 +41,6 @@ class Seq2ClassModel(object):
     self.hps = hps
     self.is_decoding = ('gan' in hps.mode)
     # self.is_decoding = True
-    with tf.variable_scope("OptimizeLoss"):
-      self.learning_rate = tf.get_variable("learning_rate", [], trainable=False, initializer=tf.constant_initializer(hps.dis_lr))
     self.cell_type = hps.cell_type
     self.global_step = tf.Variable(0, trainable=False)
     self.mode = hps.mode
@@ -80,11 +78,13 @@ class Seq2ClassModel(object):
     probs = []
     #  ------------------ for evaluation ----------------------
     # return tf.nn.softmax(logits), loss, accuracy
+    f1 = []
     for m in xrange(self.num_models):
       with tf.variable_scope("model"+str(m)):
-        prob, _, _ = self._seq2class_model(
+        prob, _, _, _, _ = self._seq2class_model(
             self.inputs, self.conditions, self.condition_lens, self.targets)
         probs.append(prob)
+        f1.append(f1)
         # print(prob.get_shape())
     self.dis_ypred_for_auc = tf.reduce_mean(tf.cast(tf.stack(probs, 1), tf.float32), 1)
     # would this lead the value run out to be a list of only one two
@@ -93,21 +93,32 @@ class Seq2ClassModel(object):
     loss_train = []
     loss_cv = []
     self.loaders = []
-    accuracy = []
+    f1 = []
+    pre = []
+    rec = []
     for m in xrange(self.num_models):
       with tf.variable_scope("model"+str(m), reuse=True):
-        _, loss, acy = self._seq2class_model(
+        _, loss, _pre, _rec, _f1 = self._seq2class_model(
             self.inputs_splitted[m], self.conditions_splitted[m],
             self.condition_lens_splitted[m], self.targets_splitted[m])
         loss_train.append(tf.expand_dims(loss, 0))
-        accuracy.append(acy)
         loss_cv.append(tf.expand_dims(loss, 0))
+        f1.append(_f1)
+        pre.append(_pre)
+        rec.append(_rec)
     loss_train = tf.reduce_mean(tf.concat(loss_train, 0))
     loss_cv = tf.reduce_mean(tf.concat(loss_cv, 0))
-    self.accuracy = sum(accuracy) / len(accuracy)
     self.indicator = loss_cv
     self.loss = loss_train
-    # dis_utils.params_decay(1.0 - self.learning_rate)
+    self.learning_rate = tf.train.exponential_decay(
+        self.hps.dis_lr,               # Base learning rate.
+        self.global_step * self.hps.batch_size,  # Current index into the dataset.
+        100000,             # Decay step.
+        0.95,                # Decay rate.
+        staircase=True)
+    self.f1 = sum(f1) / len(f1)
+    self.p = sum(pre) / len(pre)
+    self.r = sum(rec) / len(rec)
     self.update = tf.contrib.layers.optimize_loss(
         self.loss, self.global_step, tf.identity(self.learning_rate),
         'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
@@ -151,12 +162,20 @@ class Seq2ClassModel(object):
       # normalized_input_emb = tf.nn.l2_normalize(input_emb, dim=1)
       dot_product = tf.reduce_sum(tf.multiply(input_emb, condition_emb), axis=1)
       # loss = tf.reduce_mean(tf.where(tf.equal(targets, 1), -tf.log(prob), -tf.log(1-prob)))
-      loss = tf.nn.weighted_cross_entropy_with_logits(logits=dot_product, targets=targets, pos_weight=2)
+      loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=dot_product, labels=targets)
       prob = tf.sigmoid(dot_product)
       pred = tf.where(tf.less(tf.fill(tf.shape(prob), 0.5), prob),
                       tf.fill(tf.shape(prob), 1.0), tf.fill(tf.shape(prob), 0.0))
-      accuracy = tf.count_nonzero(tf.equal(pred, targets)) / tf.cast(tf.shape(pred)[0], tf.int64)
-    return prob, loss, accuracy
+
+      TP = tf.count_nonzero(pred * targets)
+      # TN = tf.count_nonzero((pred - 1) * (targets - 1))
+      FP = tf.count_nonzero(pred * (targets - 1))
+      FN = tf.count_nonzero((pred - 1) * targets)
+
+      precision = TP / (TP + FP)
+      recall = TP / (TP + FN)
+      f1 = 2 * precision * recall / (precision + recall)
+    return prob, loss, precision, recall, f1
 
   def run_one_batch(self, sess, inputs, conditions, condition_lens, targets, update=True, do_profiling=False):
     """Run a step of the model feeding the given inputs.
@@ -193,12 +212,16 @@ class Seq2ClassModel(object):
     # Output feed.
     if update:
       to_return["loss"] = self.loss
-      to_return["accuracy"] = self.accuracy
+      to_return["f1"] = self.f1
+      to_return["precision"] = self.p
+      to_return["recall"] = self.r
       to_return["update"] = self.update
 
     else:
       to_return["loss"] = self.indicator
-      to_return["accuracy"] = self.accuracy
+      to_return["f1"] = self.f1
+      to_return["precision"] = self.p
+      to_return["recall"] = self.r
 
     if do_profiling:
       self.run_metadata = tf.RunMetadata()

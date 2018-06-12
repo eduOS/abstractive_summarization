@@ -51,7 +51,7 @@ def my_lcs(string, sub):
     return lengths[len(string)][len(sub)]
 
 
-def rouge_l(samples, references, beta=1.2):
+def rouge_l_small(samples, references, beta=1.2):
     """
     samples: list of list,
     references: list of list
@@ -75,6 +75,54 @@ def rouge_l(samples, references, beta=1.2):
             score = 0.0
         scores.append(score)
     return scores
+
+
+def lcs(a, b):
+    longer = a
+    base = b
+    if len(longer) < len(base):
+        longer, base = base, longer
+
+    if len(base) == 0:
+        return 0
+
+    row = [0] * len(base)
+    for c_a in longer:
+        left = 0
+        upper_left = 0
+        for i, c_b in enumerate(base):
+            up = row[i]
+            if c_a == c_b:
+                value = upper_left + 1
+            else:
+                value = max(left, up)
+            row[i] = value
+            left = value
+            upper_left = up
+
+    return left
+
+
+def _calc_f1(matches, count_for_recall, count_for_precision, alpha):
+    def safe_div(x1, x2):
+        return 0 if x2 == 0 else x1 / x2
+    recall = safe_div(matches, count_for_recall)
+    precision = safe_div(matches, count_for_precision)
+    denom = (1.0 - alpha) * precision + alpha * recall
+    return safe_div(precision * recall, denom)
+
+
+def rouge_l(summary, references, alpha=0.5):
+    assert not isinstance(summary[0], list), "summary should be a 1-d list"
+    matches = 0
+    count_for_recall = 0
+    _refs = references if isinstance(references[0], list) else [references]
+    for r in _refs:
+        matches += lcs(r, summary)
+        count_for_recall += len(r)
+    count_for_prec = len(_refs) * len(summary)
+    f1 = _calc_f1(matches, count_for_recall, count_for_prec, alpha)
+    return f1
 
 
 def save_ckpt(sess, model, decoder, best_loss, best_rouge, model_dir, model_saver,

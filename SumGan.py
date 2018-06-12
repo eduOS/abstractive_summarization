@@ -57,7 +57,7 @@ tf.app.flags.DEFINE_integer("num_class", 2, "num of output classes.")
 tf.app.flags.DEFINE_integer("num_models", 3, "Size of each model layer. The actural size is doubled.")
 
 # Training parameters
-tf.app.flags.DEFINE_float("dis_lr", 0.0001, "Learning rate.")
+tf.app.flags.DEFINE_float("dis_lr", 0.0005, "Learning rate.")
 tf.app.flags.DEFINE_float("lr_decay_factor", 0.5, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("dis_max_gradient", 2.0, "Clip gradients to this norm.")
 # TODO: how much thould this be?
@@ -487,7 +487,7 @@ def main(argv):
             tf.logging.info("Caught keyboard interrupt on worker....")
 
     elif FLAGS.mode == "train_gan":
-        best_rouge = 0.2
+        best_rouge = 0
         gen_best_loss = get_best_loss_from_chpt(val_dir)
         gen_global_step = 0
         print('Going to tune the two using Gan')
@@ -496,8 +496,130 @@ def main(argv):
             g_losses = []
             current_speed = []
             # for it in range(0):
+            gan_gen_iter = hps_gan.gan_gen_iter
+
+            # Train the discriminator
+            dis_best_loss = 1000
+            dis_losses = []
+            gan_dis_iter = hps_gan.gan_dis_iter if hps_gan.rouge_reward_ratio != 1 else 0
+            if gan_dis_iter:
+                print('Going to train the discriminator.')
+            for d_gan in range(gan_dis_iter):
+                f1 = []
+                pre = []
+                rec = []
+                batch = gen_batcher_train.next_batch()
+                _, n_samples, _ = decoder.mc_generate(
+                    batch, s_num=hps_gan.sample_num)
+                assert np.array(n_samples).shape == (hps_gan.sample_num,
+                                                     hps_gen.batch_size,
+                                                     hps_gen.max_dec_steps + 1)
+                n_samples_no_start = np.array(n_samples)[:, :, 1:]
+                # shuould first tanslate to words to avoid unk
+                n_samples = [samples for samples in n_samples_no_start]
+                for samples in n_samples:
+                    emb_dec_batch = sess.run(
+                        generator.temp_embedded_seq,
+                        feed_dict={generator.temp_batch: batch.padded_abs_ids})
+                    emb_conditions = sess.run(
+                        generator.temp_embedded_seq,
+                        feed_dict={generator.temp_batch: batch.enc_batch})
+                    # feed_dict={generator.temp_batch: batch.padded_enc_batch})
+                    _range = range(len(emb_dec_batch))
+                    sattolo_cycle(_range)
+                    indices = np.array(_range)
+
+                    emb_samples = sess.run(
+                        generator.temp_embedded_seq,
+                        feed_dict={generator.temp_batch: samples})
+
+                    emb_samples1, emb_samples2 = np.split(emb_samples, 2)
+                    emb_dec_batch1, emb_dec_batch2 = np.split(emb_dec_batch[indices], 2)
+                    emb_conditions1, emb_conditions2 = np.split(emb_conditions, 2)
+                    enc_lens1, enc_lens2 = np.split(batch.enc_lens, 2)
+
+                    inputs = np.concatenate([emb_samples1, emb_dec_batch, emb_dec_batch2], 0)
+                    conditions = np.concatenate([emb_conditions1, emb_conditions, emb_conditions2], 0)
+                    condition_lens = np.concatenate([enc_lens1, batch.enc_lens, enc_lens2], 0)
+                    targets = [NEGATIVE_LABEL for _ in emb_samples1] + [POSITIVE_LABEL for _ in emb_dec_batch] + [NEGATIVE_LABEL for _ in emb_dec_batch2]
+                    targets = np.array(targets)
+                    assert len(inputs) == len(conditions) == len(condition_lens) == len(targets)
+
+                    # randomize the samples
+                    _range = range(len(inputs))
+                    sattolo_cycle(_range)
+                    indices = np.array(_range)
+
+                    parts = 2
+                    inputs = np.split(inputs[indices], parts)
+                    conditions = np.split(conditions[indices], parts)
+                    condition_lens = np.split(condition_lens[indices], parts)
+                    targets = np.split(targets[indices], parts)
+
+                    for p in range(parts):
+                        results = discriminator.run_one_batch(sess, inputs[p], conditions[p], condition_lens[p], targets[p])
+                        d_loss = results["loss"]
+                        if not math.isnan(d_loss):
+                            dis_losses.append(float(d_loss))
+                            f1.append(results["f1"].item())
+                            pre.append(results["precision"].item())
+                            rec.append(results["recall"].item())
+                        else:
+                            print(colored('a nan in dis loss', 'red'))
+                            print('inputs[p]')
+                            print(inputs[p])
+                            print('conditions[p]')
+                            print(conditions[p])
+                            print('condition_lens[p]')
+                            print(condition_lens[p])
+                            print('targets[p]')
+                            print(targets[p])
+                            raise
+
+                _f1 = sum(f1) / len(f1)
+                _recall = sum(rec) / len(rec)
+                _precision = sum(pre) / len(pre)
+                if d_gan % 100 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
+                    if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:
+                        dis_best_loss = sum(dis_losses) / len(dis_losses)
+                        checkpoint_path = ensure_exists(join_path(hps_dis.model_dir, "discriminator")) + "/model.ckpt"
+                        dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
+
+                    print(
+                        "\nDashboard for %s updated %s, finished steps:\t%s\n"
+                        "\tBatch size:\t%s, learning rate:\t%s, model nums: \t%s\n"
+                        "\tTraining loss:\t%.4f. Average training f1: \t%.4f\n"
+                        "\tAverage training recall:\t%.4f. Average training precision: \t%.4f" % (
+                            "GAN Discriminator",
+                            datetime.datetime.now().strftime("on %m-%d at %H:%M"),
+                            results["global_step"].item(),
+                            hps_dis.batch_size,
+                            results['learning_rate'],
+                            hps_dis.num_models,
+                            results["loss"].item(),
+                            _f1, _recall, _precision
+                            ))
+
+                if not math.isnan(_f1) and _f1 > 0.9:
+                    print(
+                        "\nDashboard for %s updated %s, finished steps:\t%s\n"
+                        "\tBatch size:\t%s, learning rate:\t%s, model nums: \t%s\n"
+                        "\tTraining loss:\t%.4f. Average training f1: \t%.4f\n"
+                        "\tAverage training recall:\t%.4f. Average training precision: \t%.4f" % (
+                            "GAN Discriminator",
+                            datetime.datetime.now().strftime("on %m-%d at %H:%M"),
+                            results["global_step"].item(),
+                            hps_dis.batch_size,
+                            results['learning_rate'],
+                            hps_dis.num_models,
+                            results["loss"].item(),
+                            _f1, _recall, _precision
+                            ))
+                    gan_gen_iter = 5
+                    break
+
             # print('Going to train the generator.')
-            for it in range(hps_gan.gan_gen_iter):
+            for it in range(gan_gen_iter):
                 start_time = time.time()
                 batch = gen_batcher_train.next_batch()
 
@@ -541,7 +663,7 @@ def main(argv):
                 current_speed.append(time.time() - start_time)
 
             # Test
-            if hps_gan.gan_gen_iter and (i_gan % 50 == 0 or i_gan == hps_gan.gan_iter - 1):
+            if gan_gen_iter and (i_gan % 50 == 0 or i_gan == hps_gan.gan_iter - 1):
                 print('Going to test the loss of the generator.')
                 current_speed = (float(sum(current_speed)) + epsilon) / (int(len(current_speed)) * hps_gen.batch_size + epsilon)
                 everage_g_loss = (float(sum(g_losses)) + epsilon) / float(len(g_losses) + epsilon)
@@ -572,114 +694,6 @@ def main(argv):
                             gen_eval_loss.item(),
                             eval_rouge, best_rouge
                             ))
-
-            # Train the discriminator
-            dis_best_loss = 1000
-            dis_losses = []
-            dis_accuracies = []
-            gan_dis_iter = hps_gan.gan_dis_iter if hps_gan.rouge_reward_ratio != 1 else 0
-            if gan_dis_iter:
-                print('Going to train the discriminator.')
-            for d_gan in range(gan_dis_iter):
-                batch = gen_batcher_train.next_batch()
-                _, _, n_samples, _ = decoder.mc_generate(
-                    batch, s_num=hps_gan.sample_num)
-                assert np.array(n_samples).shape == (hps_gan.sample_num,
-                                                     hps_gen.batch_size,
-                                                     hps_gen.max_dec_steps + 1)
-                n_samples_no_start = np.array(n_samples)[:, :, 1:]
-                # shuould first tanslate to words to avoid unk
-                n_samples = [samples for samples in n_samples_no_start]
-                for samples in n_samples:
-                    emb_dec_batch = sess.run(
-                        generator.temp_embedded_seq,
-                        feed_dict={generator.temp_batch: batch.padded_abs_ids})
-                    emb_conditions = sess.run(
-                        generator.temp_embedded_seq,
-                        feed_dict={generator.temp_batch: batch.enc_batch})
-                    # feed_dict={generator.temp_batch: batch.padded_enc_batch})
-                    emb_samples = sess.run(
-                        generator.temp_embedded_seq,
-                        feed_dict={generator.temp_batch: samples})
-
-                    _range = range(len(emb_dec_batch))
-                    sattolo_cycle(_range)
-                    indices = np.array(_range)
-
-                    inputs = np.concatenate([emb_samples, emb_dec_batch, emb_dec_batch[indices]], 0)
-                    conditions = np.concatenate([emb_conditions, emb_conditions, emb_conditions], 0)
-                    condition_lens = np.concatenate([batch.enc_lens, batch.enc_lens, batch.enc_lens], 0)
-                    targets = [NEGATIVE_LABEL for _ in samples] + [POSITIVE_LABEL for _ in emb_dec_batch] + [NEGATIVE_LABEL for _ in emb_dec_batch]
-                    targets = np.array(targets)
-                    assert len(inputs) == len(conditions) == len(condition_lens) == len(targets)
-
-                    # randomize the samples
-                    _range = range(len(inputs))
-                    sattolo_cycle(_range)
-                    indices = np.array(_range)
-
-                    parts = 3
-                    inputs = np.split(inputs[indices], parts)
-                    conditions = np.split(conditions[indices], parts)
-                    condition_lens = np.split(condition_lens[indices], parts)
-                    targets = np.split(targets[indices], parts)
-
-                    for p in range(parts):
-                        results = discriminator.run_one_batch(sess, inputs[p], conditions[p], condition_lens[p], targets[p])
-                        d_loss = results["loss"]
-                        if not math.isnan(d_loss):
-                            dis_losses.append(float(d_loss))
-                            dis_accuracies.append(results["accuracy"].item())
-                        else:
-                            print(colored('a nan in dis loss', 'red'))
-                            print('inputs[p]')
-                            print(inputs[p])
-                            print('conditions[p]')
-                            print(conditions[p])
-                            print('condition_lens[p]')
-                            print(condition_lens[p])
-                            print('targets[p]')
-                            print(targets[p])
-                            time.sleep(100)
-
-                ave_dis_acc = sum(dis_accuracies) / len(dis_accuracies)
-                if d_gan % 100 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
-                    if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:
-                        dis_best_loss = sum(dis_losses) / len(dis_losses)
-                        checkpoint_path = ensure_exists(join_path(hps_dis.model_dir, "discriminator")) + "/model.ckpt"
-                        dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
-
-                    print(
-                        "\nDashboard for %s updated %s, finished steps:\t%s\n"
-                        "\tBatch size:\t%s, learning rate:\t%s\n, model nums: \t%s\n"
-                        "\tTraining loss:\t%.4f. Average training accuracy: \t%.4f" % (
-                            "GAN Discriminator",
-                            datetime.datetime.now().strftime("on %m-%d at %H:%M"),
-                            results["global_step"].item(),
-                            hps_dis.batch_size,
-                            results['learning_rate'],
-                            hps_dis.num_models,
-                            results["loss"].item(),
-                            ave_dis_acc,
-                            )
-                    )
-
-                if ave_dis_acc > 0.9:
-                    print(
-                        "\nDashboard for %s updated %s, finished steps:\t%s\n"
-                        "\tBatch size:\t%s, current learning rate:\t%s\n"
-                        "\tTraining loss:\t%.4f. Average training accuracy: \t%.4f" % (
-                            "GAN Discriminator",
-                            datetime.datetime.now().strftime("on %m-%d at %H:%M"),
-                            results["global_step"].item(),
-                            hps_dis.batch_size,
-                            results['learning_rate'],
-                            results["loss"].item(),
-                            ave_dis_acc,
-                            )
-                    )
-                    hps_gan.gan_gen_iter = 5
-                    break
 
     # --------------- decoding samples ---------------
     elif FLAGS.mode == "decode":
