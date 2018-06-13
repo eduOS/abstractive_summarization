@@ -64,7 +64,7 @@ class PointerGenerator(object):
         self.temp_batch = tf.placeholder(tf.int32, [batch_size, None], name='temp_batch_for_embedding')
         self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
         self.enc_padding_mask = tf.placeholder(tf.float32, [batch_size, None], name='enc_padding_mask')
-        self.enc_sent_label = tf.placeholder(tf.float32, [batch_size, None], name='enc_sent_label')
+        self.enc_sent_label = tf.placeholder(tf.int32, [batch_size, None], name='enc_sent_label')
         self.enc_batch_extend_vocab = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch_extend_vocab')
 
         # decoder part

@@ -179,7 +179,7 @@ class Batch(object):
         # Pad the encoder input sequences up to the length of the longest
         # sequence
         for ex in example_list:
-            ex.pad_encoder_input(max_enc_seq_len, ex.pad_id)
+            ex.pad_encoder_input(max_enc_seq_len, self.pad_id)
 
         # Initialize the numpy arrays
         # Note: our enc_batch can have different length (second dimension) for

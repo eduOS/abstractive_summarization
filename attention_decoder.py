@@ -84,7 +84,8 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
                     attn_len = tf.shape(enc_sent_label)[1]
                     batch_nums = tf.tile(batch_nums, [1, attn_len])
                     sent_nums = tf.stack((batch_nums, enc_sent_label), axis=2)
-                    masked_enc_features = encoder_features*tf.expand_dims(enc_padding_mask, axis=-1)
+
+                    masked_enc_features = tf.squeeze(encoder_features, axis=2)*tf.expand_dims(enc_padding_mask, axis=-1)
                     max_sent_num = tf.reduce_max(sent_nums)+1
                     shape = [batch_size, max_sent_num, tf.shape(encoder_features)[-1]]
                     sent_features = v * (tf.scatter_nd(sent_nums, masked_enc_features, shape) + decoder_features)
