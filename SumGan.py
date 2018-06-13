@@ -40,7 +40,7 @@ tf.app.flags.DEFINE_string(
 tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training.")
 tf.app.flags.DEFINE_integer('steps_per_checkpoint', 10000, 'Restore the best model in the eval/ dir and save it in the train/ dir, ready to be used for further training. Useful for early stopping, or if your training checkpoint has become corrupted with e.g. NaN values.')
 tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decay by this rate')
-tf.app.flags.DEFINE_float('sample_rate', 0.001, 'the sample rate, should be [0, 0.5]')
+tf.app.flags.DEFINE_float('sample_rate', 0.01, 'the sample rate, should be [0, 0.5]')
 tf.app.flags.DEFINE_float('keep_prob', 0.5, 'the dropout prob')
 
 # ------------------------------------- discriminator
@@ -503,7 +503,7 @@ def main(argv):
             dis_losses = []
             gan_dis_iter = hps_gan.gan_dis_iter if hps_gan.rouge_reward_ratio != 1 else 0
             if gan_dis_iter:
-                print('Going to train the discriminator.')
+                print('\nGoing to train the discriminator.')
             for d_gan in range(gan_dis_iter):
                 f1 = []
                 pre = []
@@ -579,7 +579,7 @@ def main(argv):
                 _f1 = sum(f1) / len(f1)
                 _recall = sum(rec) / len(rec)
                 _precision = sum(pre) / len(pre)
-                if d_gan % 500 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
+                if d_gan % 300 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
                     if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:
                         dis_best_loss = sum(dis_losses) / len(dis_losses)
                         checkpoint_path = ensure_exists(join_path(hps_dis.model_dir, "discriminator")) + "/model.ckpt"
@@ -618,7 +618,8 @@ def main(argv):
                     gan_gen_iter = 5
                     break
 
-            print('Going to train the generator, %s times.' % gan_gen_iter)
+            if gan_dis_iter:
+                print('Going to train the generator, %s times.' % gan_gen_iter)
             for it in range(gan_gen_iter):
                 start_time = time.time()
                 batch = gen_batcher_train.next_batch()
@@ -664,7 +665,7 @@ def main(argv):
 
             # Test
             if gan_gen_iter and (i_gan % 10 == 0 or i_gan == hps_gan.gan_iter - 1):
-                print('Going to test the loss of the generator.')
+                print('\nGoing to test the loss of the generator.')
                 current_speed = (float(sum(current_speed)) + epsilon) / (int(len(current_speed)) * hps_gen.batch_size + epsilon)
                 everage_g_loss = (float(sum(g_losses)) + epsilon) / float(len(g_losses) + epsilon)
                 # one more process hould be opened for the evaluation
