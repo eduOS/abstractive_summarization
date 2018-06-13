@@ -82,6 +82,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 66. cnn in decoder
 67. decorator practice: https://wiki.python.org/moin/PythonDecoratorLibrary
 68. generate at once like the way conv encoder decodes, or block by block
+69. unsupervised pre-training using language model
 
 # problems
 1. cannot end

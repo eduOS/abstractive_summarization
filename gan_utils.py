@@ -117,6 +117,12 @@ def rouge_l(summary, references, alpha=0.5):
     matches = 0
     count_for_recall = 0
     _refs = references if isinstance(references[0], list) else [references]
+    if not isinstance(summary, list):
+        rfs = []
+        summary = summary.strip().split()
+        for _r in _refs:
+            rfs.append(_r.strip().split())
+        _refs = rfs
     for r in _refs:
         matches += lcs(r, summary)
         count_for_recall += len(r)
