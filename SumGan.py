@@ -579,7 +579,7 @@ def main(argv):
                 _f1 = sum(f1) / len(f1)
                 _recall = sum(rec) / len(rec)
                 _precision = sum(pre) / len(pre)
-                if d_gan % 100 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
+                if d_gan % 500 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
                     if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:
                         dis_best_loss = sum(dis_losses) / len(dis_losses)
                         checkpoint_path = ensure_exists(join_path(hps_dis.model_dir, "discriminator")) + "/model.ckpt"
@@ -618,7 +618,7 @@ def main(argv):
                     gan_gen_iter = 5
                     break
 
-            # print('Going to train the generator.')
+            print('Going to train the generator, %s times.' % gan_gen_iter)
             for it in range(gan_gen_iter):
                 start_time = time.time()
                 batch = gen_batcher_train.next_batch()
@@ -663,7 +663,7 @@ def main(argv):
                 current_speed.append(time.time() - start_time)
 
             # Test
-            if gan_gen_iter and (i_gan % 50 == 0 or i_gan == hps_gan.gan_iter - 1):
+            if gan_gen_iter and (i_gan % 10 == 0 or i_gan == hps_gan.gan_iter - 1):
                 print('Going to test the loss of the generator.')
                 current_speed = (float(sum(current_speed)) + epsilon) / (int(len(current_speed)) * hps_gen.batch_size + epsilon)
                 everage_g_loss = (float(sum(g_losses)) + epsilon) / float(len(g_losses) + epsilon)
