@@ -172,10 +172,11 @@ class PointerGenerator(object):
 
                 eval_final_dists, eval_attn_dists, _ = self._lstm_decoder(emb_eval_dec_inputs, self.dec_in_state)
 
-                k_sample_final_dists_ls = []
-                for emb_samples in k_emb_samples_ls:
-                    sample_final_dists, _, _ = self._lstm_decoder(emb_samples, self.dec_in_state)
-                    k_sample_final_dists_ls.append(sample_final_dists)
+                if hps.mode == "train_gan":
+                    k_sample_final_dists_ls = []
+                    for emb_samples in k_emb_samples_ls:
+                        sample_final_dists, _, _ = self._lstm_decoder(emb_samples, self.dec_in_state)
+                        k_sample_final_dists_ls.append(sample_final_dists)
 
             def get_loss(vocab_dists, target_batch, padding_mask, rewards=None):
                 batch_nums = tf.range(0, limit=tf.shape(target_batch)[0])
@@ -210,15 +211,16 @@ class PointerGenerator(object):
                         self._loss + hps.cov_loss_wt * self._coverage_loss
 
             with tf.variable_scope('gan_loss'):
-                k_gan_losses = []
-                for k in range(len(k_sample_targets_ls)):
-                    gan_loss_per_step = get_loss(
-                        k_sample_final_dists_ls[k], k_sample_targets_ls[k],
-                        k_sample_targets_mask_ls[k], k_rewards_ls[k])
-                    masked_average = _avg(gan_loss_per_step, k_sample_targets_mask_ls[k])
-                    k_gan_losses.append(masked_average)
+                if hps.mode == "train_gan":
+                    k_gan_losses = []
+                    for k in range(len(k_sample_targets_ls)):
+                        gan_loss_per_step = get_loss(
+                            k_sample_final_dists_ls[k], k_sample_targets_ls[k],
+                            k_sample_targets_mask_ls[k], k_rewards_ls[k])
+                        masked_average = _avg(gan_loss_per_step, k_sample_targets_mask_ls[k])
+                        k_gan_losses.append(masked_average)
 
-                self.gan_loss = tf.reduce_mean(tf.stack(k_gan_losses))
+                    self.gan_loss = tf.reduce_mean(tf.stack(k_gan_losses))
 
         # We run decode beam search mode one decoder step at a time
         # log_dists is a singleton list containing shape (batch_size,
@@ -269,13 +271,14 @@ class PointerGenerator(object):
             staircase=True)
 
         # for the gan loss
-        g_opt = self.g_optimizer(learning_rate_gan)
-        trainable_variables = tf.trainable_variables()
-        gradients = tf.gradients(self.gan_loss, trainable_variables,
-                                 aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
-        self.g_grad, _ = tf.clip_by_global_norm(gradients, self.hps.gen_max_gradient)
-        with tf.device("/gpu:0"):
-            self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables), global_step=self.global_step)
+        if hps.mode == "train_gan":
+            g_opt = self.g_optimizer(learning_rate_gan)
+            trainable_variables = tf.trainable_variables()
+            gradients = tf.gradients(self.gan_loss, trainable_variables,
+                                     aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
+            self.g_grad, _ = tf.clip_by_global_norm(gradients, self.hps.gen_max_gradient)
+            with tf.device("/gpu:0"):
+                self.g_updates = g_opt.apply_gradients(zip(self.g_grad, trainable_variables), global_step=self.global_step)
 
         return decoder_scope
 
