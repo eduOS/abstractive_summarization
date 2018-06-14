@@ -488,12 +488,12 @@ def main(argv):
             tf.logging.info("Caught keyboard interrupt on worker....")
 
     elif FLAGS.mode == "train_gan":
-        best_rouge = 0
         gen_best_loss = get_best_loss_from_chpt(val_dir)
         gen_global_step = 0
         print('Going to tune the two using Gan')
 
         ave_rouge = decoder.bs_decode(gan_batcher_val, save2file=False, single_pass=True)
+        best_rouge = ave_rouge
         print(colored('The starting rouge score is %s.' % ave_rouge, "green"))
         for i_gan in range(hps_gan.gan_iter):
             # Train the generator for one step
