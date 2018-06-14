@@ -10,13 +10,13 @@ from termcolor import colored
 from os.path import join as join_path
 
 
-def check_rouge(sess, decoder, best_rouge, val_batcher, val_path, val_saver, global_step, sample_rate=0):
+def check_rouge(sess, decoder, best_rouge, val_batcher, val_path, val_saver, global_step, sample_rate=0, save2file=False):
     """
     model: the decoder
     val_batcher: the gen_val_batcher
     """
     saved = False
-    ave_rouge = decoder.bs_decode(val_batcher, save2file=False, single_pass=True, sample_rate=sample_rate)
+    ave_rouge = decoder.bs_decode(val_batcher, save2file=save2file, single_pass=True, sample_rate=sample_rate)
     if ave_rouge > best_rouge:
         val_saver.save(sess, val_path, global_step=global_step)
         best_rouge = ave_rouge
@@ -161,7 +161,7 @@ def save_ckpt(sess, model, decoder, best_loss, best_rouge, model_dir, model_save
 
     ave_rouge, best_rouge, saved = check_rouge(
         sess, decoder, best_rouge, rouge_batcher,
-        val_save_path, rouge_saver, global_step, sample_rate=sample_rate)
+        val_save_path, rouge_saver, global_step, sample_rate=sample_rate, save2file=True)
 
     if not saved:
         model_saver.save(sess, model_save_path, global_step=global_step)

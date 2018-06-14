@@ -19,6 +19,7 @@ from gen_utils import calc_running_avg_loss
 from gen_utils import get_best_loss_from_chpt
 from gen_utils import save_ckpt as gen_save_ckpt
 from gan_utils import save_ckpt as gan_save_ckpt
+from gan_utils import check_rouge
 from tensorflow.python import debug as tf_debug
 from utils import sattolo_cycle
 from utils import print_dashboard
@@ -491,6 +492,9 @@ def main(argv):
         gen_best_loss = get_best_loss_from_chpt(val_dir)
         gen_global_step = 0
         print('Going to tune the two using Gan')
+
+        ave_rouge = decoder.bs_decode(gan_batcher_val, save2file=False, single_pass=True)
+        print(colored('The starting rouge score is %s.' % ave_rouge, "green"))
         for i_gan in range(hps_gan.gan_iter):
             # Train the generator for one step
             g_losses = []

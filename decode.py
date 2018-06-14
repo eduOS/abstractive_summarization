@@ -181,13 +181,13 @@ class Decoder(object):
                     assert single_pass, (
                         "Dataset exhausted, but we are not in single_pass mode")
                     print("Decoder has finished reading dataset for single_pass.")
-                    if not save2file:
-                        return np.mean(np.array(rouge_scores))
-                    else:
+                    if save2file:
                         ref_f.close()
                         dec_f.close()
                         ove_f.close()
-                        return
+                        return np.mean(np.array(rouge_scores))
+                    else:
+                        return np.mean(np.array(rouge_scores))
 
                 best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
                 outputs_ids = [[t for t in hyp.tokens[1:]] for hyp in best_hyps]
@@ -224,27 +224,26 @@ class Decoder(object):
                         elif save2file:
                             decoded_outputs.append(decoded_output)
 
-                if not save2file:
-                    summaries = strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING))
-                    references = strip_pads(batch.dec_batch.tolist(), self._vocab.word2id(STOP_DECODING))
-                    for s, r in zip(summaries, references):
-                        rouges = rouge_l(s, r)
-                        rouge_scores.append(rouges)
-                    continue
+                summaries = strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING))
+                references = strip_pads(batch.dec_batch.tolist(), self._vocab.word2id(STOP_DECODING))
+                for s, r in zip(summaries, references):
+                    rouges = rouge_l(s, r)
+                    rouge_scores.append(rouges)
 
-                counter += 1  # this is how many examples we've decoded
-                if counter % 10000 == 0:
-                    print("Have decoded %s samples." % (counter * FLAGS.batch_size))
+                if save2file:
+                    counter += 1  # this is how many examples we've decoded
+                    if counter % 10000 == 0:
+                        print("Have decoded %s samples." % (counter * FLAGS.batch_size))
 
-                for idx, sent in enumerate(original_abstracts):
-                    ref_f.write(sent+"\n")
-                for idx, sent in enumerate(decoded_outputs):
-                    dec_f.write(sent+"\n")
-                for artc, refe, hypo in zip(original_articles, original_abstracts, decoded_outputs):
-                    ove_f.write("article: "+artc+"\n")
-                    ove_f.write("reference: "+refe+"\n")
-                    ove_f.write("hypothesis: "+hypo+"\n")
-                    ove_f.write("\n")
+                    for idx, sent in enumerate(original_abstracts):
+                        ref_f.write(sent+"\n")
+                    for idx, sent in enumerate(decoded_outputs):
+                        dec_f.write(sent+"\n")
+                    for artc, refe, hypo in zip(original_articles, original_abstracts, decoded_outputs):
+                        ove_f.write("article: "+artc+"\n")
+                        ove_f.write("reference: "+refe+"\n")
+                        ove_f.write("hypothesis: "+hypo+"\n")
+                        ove_f.write("\n")
 
         except KeyboardInterrupt as exc:
             print(exc)
