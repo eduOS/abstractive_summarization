@@ -81,7 +81,7 @@ class Rollout(object):
             dis_rewards = []
             rouge_rewards = np.zeros((max_dec_steps, batch_size))
             for ir in range(rollout_num):
-                for given_num in range(hps_gan.rollout_start, max_dec_steps):
+                for given_num in range(hps_gan.rollout_start, max_dec_steps+1):
                     self.sample_emb_ls = []
 
                     feed_dict = {}
@@ -133,11 +133,11 @@ class Rollout(object):
 
             if rouge_ratio:
                 rouge_rewards = np.transpose(rouge_rewards)
-                # rouge_rewards = rouge_rewards[:, 1:] - rouge_rewards[:, :-1]
+                rouge_rewards = rouge_rewards[:, 1:] - rouge_rewards[:, :-1]
 
             if dis_ratio:
                 dis_rewards = np.transpose(np.array(dis_rewards))
-                # dis_rewards = dis_rewards[:, 1:] - dis_rewards[:, :-1]
+                dis_rewards = dis_rewards[:, 1:] - dis_rewards[:, :-1]
 
             if rouge_ratio == 1:
                 rewards = rouge_rewards
