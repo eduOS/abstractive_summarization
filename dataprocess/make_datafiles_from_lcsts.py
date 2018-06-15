@@ -31,6 +31,7 @@ WITH_DIGITS = False
 # -----------------------------------
 
 END_TOKENS = Punctuation.SENTENCE_DELIMITERS
+STOPS = Punctuation.STOPS
 
 # We use these to separate the summary sentences in the .bin datafiles
 SENTENCE_START = '<s>'
@@ -41,6 +42,16 @@ finished_files_dir = "./finished_files/"
 start = time.time()
 enc_must_include = ['[PAD]', '[UNK]']
 dec_must_include = ['[PAD]', '[UNK]', '[STOP]', '[START]']
+
+
+def label_sentence_num(sentence, stop_ids):
+    _label = [0] * len(sentence)
+    count = 0
+    for i, c in enumerate(sentence):
+        _label[i] = str(count)
+        if c in stop_ids:
+            count += 1
+    return _label
 
 
 def read_text_file(text_file):
@@ -61,7 +72,7 @@ len_abs = []
 log_file = open('corpus_log', 'a', 'utf-8')
 
 
-def get_pairs_from_lcsts(filePath, enc_segment=False, dec_segment=False):
+def get_triples_from_lcsts(filePath, enc_segment=False, dec_segment=False):
     """
     both should be segmented if segment is true
     """
@@ -105,6 +116,7 @@ def get_pairs_from_lcsts(filePath, enc_segment=False, dec_segment=False):
                 text = process_line(text, False)
             else:
                 text = process_line(text, True)
+            s_label = label_sentence_num(text, STOPS)
             line = f.readline().strip()
 
         else:
@@ -135,14 +147,14 @@ def get_pairs_from_lcsts(filePath, enc_segment=False, dec_segment=False):
                 log_file.write('\n')
                 log_file.write('\n')
                 dont_yield = 1
-            pair = (text, summary)
+            triple = (text, s_label, summary)
             if dont_yield:
                 continue
             else:
                 lines += 1
                 if lines % 200000 == 0:
                     print(lines)
-                yield pair
+                yield triple
 
     f.close()
     print(lines)
@@ -161,8 +173,8 @@ def write_to_txt(source_path, out_file, makevocab=False, max_length=100000, enc_
 
     writer = open(out_file + "_" + str(file_num), 'w', 'utf-8')
 
-    for art_tokens, abs_tokens in \
-            get_pairs_from_lcsts(source_path, enc_segment=enc_segment, dec_segment=dec_segment):
+    for art_tokens, s_labels, abs_tokens in \
+            get_triples_from_lcsts(source_path, enc_segment=enc_segment, dec_segment=dec_segment):
         # Write to file
         if length >= max_length:
             file_num += 1
@@ -170,7 +182,7 @@ def write_to_txt(source_path, out_file, makevocab=False, max_length=100000, enc_
             writer = open(out_file + "_" + str(file_num), 'w', 'utf-8')
             length = 0
 
-        writer.write(" ".join(art_tokens) + "\t" + " ".join(abs_tokens) + "\n")
+        writer.write(" ".join(art_tokens) + "\t" + " ".join(s_labels) + "\t" + " ".join(abs_tokens) + "\n")
         length += 1
 
         if length % (max_length / 10) == 0:

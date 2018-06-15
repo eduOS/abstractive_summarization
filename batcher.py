@@ -33,8 +33,7 @@ import os
 from collections import defaultdict as dd
 from cntk.tokenizer import text2charlist
 from codecs import open
-from utils import red_assert, red_print, label_sentence_num
-from cntk.constants.punctuation import Punctuation
+from utils import red_assert, red_print
 
 
 def fopen(filename, mode='r'):
@@ -49,9 +48,8 @@ class Example(object):
     def __len__(self):
         return self.enc_len
 
-    def __init__(self, article, abstract, enc_vocab, dec_vocab, hps):
+    def __init__(self, article, s_label, abstract, enc_vocab, dec_vocab, hps):
         self.hps = hps
-        self.stop_ids = [enc_vocab.word2id(s) for s in Punctuation.STOPS if s in enc_vocab.word_keys]
 
         # Get ids of special tokens
         start_decoding = dec_vocab.word2id(data.START_DECODING)
@@ -59,8 +57,11 @@ class Example(object):
 
         # Process the article
         article_words = article.split()
+        s_labels = map(int, s_label.split())
         if len(article_words) > hps.max_enc_steps:
             article_words = article_words[:hps.max_enc_steps]
+            s_labels = s_labels[:hps.max_enc_steps]
+        self.s_labels = s_labels
         # store the length after truncation but before padding
         self.enc_len = len(article_words)
         # list of word ids; OOVs are represented by the id for UNK token
@@ -126,7 +127,7 @@ class Example(object):
         """Pad the encoder input sequence with pad_id up to max_len."""
         while len(self.enc_input) < max_len:
             self.enc_input.append(pad_id)
-        self.enc_sent_num = label_sentence_num(self.enc_input, self.stop_ids)
+            self.s_labels.append(pad_id)
 
 
 class Batch(object):
@@ -365,7 +366,7 @@ class GenBatcher(object):
             try:
                 # read the next example from file. article and abstract are both
                 # strings.
-                (article, abstract) = input_gen.next()
+                (article, s_label, abstract) = input_gen.next()
             except StopIteration:  # if there are no more examples:
                 red_print(
                     "The example generator for this example queue filling thread has exhausted data.")
@@ -387,7 +388,7 @@ class GenBatcher(object):
             # Process into an Example.
             if article and abstract:
                 example = Example(
-                    article, abstract, self._enc_vocab, self._dec_vocab, self._hps)
+                    article, s_label, abstract, self._enc_vocab, self._dec_vocab, self._hps)
                 # what is the vocab here? the extended vocab?
                 # place the Example in the example queue.
                 enc_len = len(example.enc_input)
@@ -480,8 +481,8 @@ class GenBatcher(object):
                 # print("opening file %s" % ff)
                 f = open(ff, "r", 'utf-8')
                 while True:
-                    art_abs = f.readline().strip().split("\t")
-                    if len(art_abs) != 2:
+                    art_lbl_abs = f.readline().strip().split("\t")
+                    if len(art_lbl_abs) != 3:
                         # print(
                         #     "file %s reaches the end of the data file %s"
                         #     % (f.name, datetime.datetime.now().strftime("on %m-%d at %H:%M")))
@@ -498,10 +499,10 @@ class GenBatcher(object):
                             f.close()
                             # print("closing file %s" % ff)
                             break
-                    article_text, abstract_text = art_abs
+                    article_text, sentence_label, abstract_text = art_lbl_abs
                     if article_text and abstract_text:
                         # self._files_name_dict[f.name] += 1
-                        yield (article_text, abstract_text)
+                        yield (article_text, sentence_label, abstract_text)
                     else:
                         print('Found an example with empty article text. Skipping it.')
 
