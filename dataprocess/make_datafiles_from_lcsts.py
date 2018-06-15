@@ -84,6 +84,8 @@ def get_triples_from_lcsts(filePath, enc_segment=False, dec_segment=False):
     line = f.readline().strip()
     lines = 0
     flag = 0
+    s_labels = None
+    t_labels = None
     while line:
         if line == '<summary>':
             summary = f.readline().strip()
@@ -96,7 +98,7 @@ def get_triples_from_lcsts(filePath, enc_segment=False, dec_segment=False):
             flag = 1
 
             if dec_segment:
-                summary = process_line(summary, False)
+                summary, s_labels = process_line(summary, False)
             else:
                 summary = process_line(summary, True)
 
@@ -113,10 +115,9 @@ def get_triples_from_lcsts(filePath, enc_segment=False, dec_segment=False):
             flag = 0
 
             if enc_segment:
-                text = process_line(text, False)
+                text, t_labels = process_line(text, False)
             else:
                 text = process_line(text, True)
-            s_label = label_sentence_num(text, STOPS)
             line = f.readline().strip()
 
         else:
@@ -147,7 +148,10 @@ def get_triples_from_lcsts(filePath, enc_segment=False, dec_segment=False):
                 log_file.write('\n')
                 log_file.write('\n')
                 dont_yield = 1
-            triple = (text, s_label, summary)
+            if t_labels:
+                triple = (text, t_labels, summary)
+            else:
+                triple = (text, summary)
             if dont_yield:
                 continue
             else:

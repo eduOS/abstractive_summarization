@@ -23,8 +23,10 @@ def sourceline2wordsorchars(line, _char=False, with_digits=True):
     if _char:
         words_chars = text2charlist(line)
     else:
-        words_chars = tokenizer.sentence2words(line)
+        words_chars, sen_labels = tokenizer.text2words(line, dim=1, sen_lab=True)
     line = " ".join(words_chars)
     line = cleanser.set_sentence(line).delete_useless().sentence
     words_chars = [w for w in line.split() if w]
+    if not _char:
+        return words_chars, sen_labels
     return words_chars
