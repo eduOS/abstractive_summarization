@@ -58,6 +58,7 @@ class Example(object):
         # Process the article
         article_words = article.split()
         s_labels = map(int, s_label.split())
+        assert len(article_words) == len(s_labels)
         if len(article_words) != len(s_labels):
             print('\t\t'.join(article_words))
             print('\t\t'.join(s_label.split()))
