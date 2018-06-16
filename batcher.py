@@ -58,6 +58,10 @@ class Example(object):
         # Process the article
         article_words = article.split()
         s_labels = map(int, s_label.split())
+        if len(article_words) != len(s_labels):
+            print('\t\t'.join(article_words))
+            print('\t\t'.join(s_label.split()))
+            time.sleep(6)
         if len(article_words) > hps.max_enc_steps:
             article_words = article_words[:hps.max_enc_steps]
             s_labels = s_labels[:hps.max_enc_steps]
@@ -166,7 +170,7 @@ class Batch(object):
             self.max_art_oovs:
               maximum number of in-article OOVs in the batch
             self.art_oovs:
-              list of list of in-article OOVs (strings), for each example in the
+              list of list of in-article O)OVs (strings), for each example in the
               batch
             self.enc_batch_extend_vocab:
               Same as self.enc_batch, but in-article OOVs are represented by
@@ -194,7 +198,7 @@ class Batch(object):
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):
             i_enc_input = ex.enc_input[:]
-            i_enc_sent_num = ex.enc_sent_num[:]
+            i_enc_sent_num = ex.s_labels[:]
             i_abs_ids = ex.abs_ids[:]
             self.enc_batch[i, :] = i_enc_input
             self.enc_sent_label[i, :] = i_enc_sent_num
@@ -252,6 +256,7 @@ class GenBatcher(object):
     # TODO: bucket can be added
 
     BATCH_QUEUE_MAX = 100  # max number of batches the batch_queue can hold
+    # BATCH_QUEUE_MAX = 1  # max number of batches the batch_queue can hold
 
     def __init__(self, file_name, mode, enc_vocab, dec_vocab, hps):
         """Initialize the batcher. Start threads that process the data into

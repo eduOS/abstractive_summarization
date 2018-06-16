@@ -44,16 +44,6 @@ enc_must_include = ['[PAD]', '[UNK]']
 dec_must_include = ['[PAD]', '[UNK]', '[STOP]', '[START]']
 
 
-def label_sentence_num(sentence, stop_ids):
-    _label = [0] * len(sentence)
-    count = 0
-    for i, c in enumerate(sentence):
-        _label[i] = str(count)
-        if c in stop_ids:
-            count += 1
-    return _label
-
-
 def read_text_file(text_file):
     lines = []
     with open(text_file, "r", 'utf-8') as f:

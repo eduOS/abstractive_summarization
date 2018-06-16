@@ -20,13 +20,12 @@ def sourceline2wordsorchars(line, _char=False, with_digits=True):
         line = standardizer.set_sentence(line).fwidth2hwidth().to_lowercase().sentence
     else:
         line = standardizer.set_sentence(line).fwidth2hwidth().to_lowercase().digits().sentence
+    line = cleanser.set_sentence(line).delete_useless().sentence
     if _char:
         words_chars = text2charlist(line)
     else:
         words_chars, sen_labels = tokenizer.text2words(line, dim=1, sen_lab=True)
-    line = " ".join(words_chars)
-    line = cleanser.set_sentence(line).delete_useless().sentence
-    words_chars = [w for w in line.split() if w]
+        assert len(words_chars) == len(sen_labels), line
     if not _char:
         return words_chars, sen_labels
     return words_chars
