@@ -111,6 +111,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
   ensure that the traditional chinese character have been transfered into simplified ones
 12. the word segmentation tool doesn't work well
   change to charater based 
+13. use poisson distribution to predict the number of copy words
 
 # error
 1. a list of float cannot be joined
