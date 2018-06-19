@@ -103,14 +103,11 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 9. the dictionary 100000 is too big, in this paper <Incorporating Copying Mechanism in Sequence-to-Sequence Learning> it is 10000. this will decrease the variance by decreasing the search space.
   when the vocab size is 10k the loss only decreases from 4.5 and 4.1(160000 samples) to 3.82(val) and 3.30(train) after training 4640000 samples, that never decreases in training the later 11920000 - 4640000 samples
   when the vocab size is 50k the start losses are 4.22(training) and 5.19(val)(160000 samples)
-10. the length problem
-  normal distribution
-  the rouge is acumulated but how to add the previous influence?
   minuts the previous word's rouge value is a good idea
-11. the oov problem:
-  ensure that the traditional chinese character have been transfered into simplified ones
 12. the word segmentation tool doesn't work well
-  change to charater based 
+  1. put the words in pretrained embeddings corpus to the Jieba
+  2. cut words and choose and put those chosen words into jieba and then cut again
+13. use poisson distribution to predict the number of copy words
 
 # error
 1. a list of float cannot be joined

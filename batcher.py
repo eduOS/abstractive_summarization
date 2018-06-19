@@ -494,11 +494,11 @@ class GenBatcher(object):
                         #     % (f.name, datetime.datetime.now().strftime("on %m-%d at %H:%M")))
                         if self._mode == "val":
                             f.seek(0)
-                            yield (None, None)
+                            yield (None, None, None)
                             continue
                         elif self._mode == 'test':
                             f.close()
-                            yield (None, None)
+                            yield (None, None, None)
                             break
                         else:
                             # for training
