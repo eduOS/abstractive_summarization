@@ -8,8 +8,8 @@ import datetime
 import utils
 import time
 import sys
-import data
-from batcher import GenBatcher, DisBatcher
+# import data
+from batcher import GenBatcher
 from decode import Decoder
 from pointer_generator import PointerGenerator
 from rollout import Rollout
@@ -19,11 +19,12 @@ from gen_utils import calc_running_avg_loss
 from gen_utils import get_best_loss_from_chpt
 from gen_utils import save_ckpt as gen_save_ckpt
 from gan_utils import save_ckpt as gan_save_ckpt
-from gan_utils import check_rouge
-from tensorflow.python import debug as tf_debug
+# from gan_utils import check_rouge
+from dis_utils import eval_dis
+# from tensorflow.python import debug as tf_debug
 from utils import sattolo_cycle
 from utils import print_dashboard
-from dis_utils import dump_chpt
+# from dis_utils import dump_chpt
 import math
 from termcolor import colored
 from data import POSITIVE_LABEL, NEGATIVE_LABEL
@@ -143,7 +144,7 @@ tf.app.flags.DEFINE_float('dis_reward_ratio', 0, 'The importance of rollout in c
 
 FLAGS = tf.app.flags.FLAGS
 
-assert FLAGS.mode in ["pretrain_gen", "train_gan", "decode", "test"]
+assert FLAGS.mode in ["pretrain_gen", "train_gan", "decode"]
 assert FLAGS.sample_rate >= 0 and FLAGS.sample_rate <= 0.5, "sample rate should be [0, 0.5]"
 
 if FLAGS.mode == "train_gan":
@@ -476,7 +477,9 @@ def main(argv):
         decoder_batcher = GenBatcher("val", "test", enc_vocab, dec_vocab, hps_gen)
 
     if FLAGS.mode == "train_gan":
-        gan_batcher_val = GenBatcher("mini_val", "val", enc_vocab, dec_vocab, hps_gen)
+        # only for the gan bs rouge test
+        gan_batcher_test = GenBatcher("test", "val", enc_vocab, dec_vocab, hps_gen)
+        # gan_batcher_val = GenBatcher("val", "val", enc_vocab, dec_vocab, hps_gen)
 
     if FLAGS.mode == "pretrain_gen":
         # get reload the
@@ -492,7 +495,7 @@ def main(argv):
         gen_global_step = 0
         print('Going to tune the two using Gan')
 
-        ave_rouge = decoder.bs_decode(gan_batcher_val, save2file=False, single_pass=True)
+        ave_rouge = decoder.bs_decode(gan_batcher_test, save2file=False, single_pass=True)
         best_rouge = ave_rouge
         print(colored('The starting rouge score is %s.' % ave_rouge, "green"))
         for i_gan in range(hps_gan.gan_iter):
@@ -605,20 +608,7 @@ def main(argv):
                             ))
 
                 if not math.isnan(_f1) and _f1 > 0.9:
-                    print(
-                        "\nDashboard for %s updated %s, finished steps:\t%s\n"
-                        "\tBatch size:\t%s, learning rate:\t%s, model nums: \t%s\n"
-                        "\tTraining loss:\t%.4f. Average training f1: \t%.4f\n"
-                        "\tAverage training recall:\t%.4f. Average training precision: \t%.4f" % (
-                            "GAN Discriminator",
-                            datetime.datetime.now().strftime("on %m-%d at %H:%M"),
-                            results["global_step"].item(),
-                            hps_dis.batch_size,
-                            results['learning_rate'],
-                            hps_dis.num_models,
-                            results["loss"].item(),
-                            _f1, _recall, _precision
-                            ))
+                    eval_dis()
                     gan_gen_iter = 5
                     break
 
@@ -675,7 +665,7 @@ def main(argv):
                 # one more process hould be opened for the evaluation
                 gen_eval_loss, gen_best_loss, eval_rouge, best_rouge = gan_save_ckpt(
                     sess, generator, decoder, gen_best_loss, best_rouge, gan_dir, gan_saver,
-                    gen_batcher_val, gan_batcher_val, gan_val_dir, gan_val_saver,
+                    gen_batcher_val, gan_batcher_test, gan_val_dir, gan_val_saver,
                     gen_global_step, FLAGS.sample_rate)
 
                 if gen_eval_loss:

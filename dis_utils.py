@@ -181,3 +181,7 @@ def print_dashboard(train_accuracies, eval_loss, eval_accuracy):
     train_accuracy = sum(train_accuracies) / len(train_accuracies)
     train_accuracies = []
     print("Eval loss %.4f, train accuracy is %.4f and eval accuracy is %.4f" % (eval_loss, train_accuracy, eval_accuracy))
+
+
+def eval_dis():
+    pass

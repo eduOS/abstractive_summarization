@@ -83,7 +83,7 @@ class Seq2ClassModel(object):
       with tf.variable_scope("model"+str(m)):
         prob, _, _, _, _ = self._seq2class_model(
             self.inputs, self.conditions, self.condition_lens, self.targets)
-        probs.append(prob)
+        probs.append(1-prob)
         f1.append(f1)
         # print(prob.get_shape())
     self.dis_ypred_for_auc = tf.reduce_mean(tf.cast(tf.stack(probs, 1), tf.float32), 1)
