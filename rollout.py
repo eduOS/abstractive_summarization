@@ -106,9 +106,13 @@ class Rollout(object):
                             dis_rewards[given_num-1] += ypred_for_auc
 
                     if rouge_ratio:
-                        rpred = rouge_l(strip_pads(rollout_samples.tolist(), dec_vocab.word2id(STOP_DECODING)),
-                                        strip_pads(source_batch.dec_batch.tolist(), dec_vocab.word2id(PAD_TOKEN)), beta=0.5)
-                        rouge_rewards[given_num] += np.array(rpred)
+                        rouge_scores = []
+                        summaries = strip_pads(strip_pads(rollout_samples.tolist(), dec_vocab.word2id(STOP_DECODING)))
+                        references = strip_pads(source_batch.dec_batch.tolist(), dec_vocab.word2id(PAD_TOKEN))
+                        for s, r in zip(summaries, references):
+                            rouges = rouge_l(s, r)
+                            rouge_scores.append(rouges)
+                        rouge_rewards[given_num] += np.array(rouge_scores)
 
                 if dis_ratio:
                     emb_samples = sess.run(
@@ -126,10 +130,15 @@ class Rollout(object):
                         dis_rewards.append(ypred_for_auc)
                     else:
                         dis_rewards[max_dec_steps-1] += ypred_for_auc
+
                 if rouge_ratio:
-                    rpred = rouge_l(strip_pads(samples.tolist(), dec_vocab.word2id(STOP_DECODING)),
-                                    strip_pads(source_batch.dec_batch.tolist(), dec_vocab.word2id(PAD_TOKEN)), beta=0.5)
-                    rouge_rewards[max_dec_steps] += np.array(rpred)
+                    rouge_scores = []
+                    summaries = strip_pads(samples.tolist(), dec_vocab.word2id(STOP_DECODING))
+                    references = strip_pads(source_batch.dec_batch.tolist(), dec_vocab.word2id(PAD_TOKEN))
+                    for s, r in zip(summaries, references):
+                        rouges = rouge_l(s, r)
+                        rouge_scores.append(rouges)
+                    rouge_rewards[max_dec_steps] += np.array(rouge_scores)
 
             if rouge_ratio:
                 rouge_rewards = np.transpose(rouge_rewards)
