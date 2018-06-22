@@ -226,14 +226,6 @@ class Decoder(object):
                         elif save2file:
                             decoded_outputs.append(decoded_output)
 
-                summaries = strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING))
-                references = strip_pads(batch.dec_batch.tolist(), self._vocab.word2id(STOP_DECODING))
-                summaries = outputsids2words(summaries, self._vocab)
-                references = outputsids2words(references, self._vocab)
-                for s, r in zip(summaries, references):
-                    rouges = rouge_l(s, r)
-                    rouge_scores.append(rouges)
-
                 if save2file:
                     counter += 1  # this is how many examples we've decoded
                     if counter % 10000 == 0:
@@ -385,6 +377,10 @@ class Decoder(object):
                 for idx, sent in enumerate(decoded_outputs):
                     dec_f.write(sent+"\n")
                 for artc, refe, hypo in zip(original_articles, original_abstracts, decoded_outputs):
+
+                    rouges = rouge_l(hypo.split(), refe.split())
+                    rouge_scores.append(rouges)
+
                     ove_f.write("article: "+artc+"\n")
                     ove_f.write("reference: "+refe+"\n")
                     ove_f.write("hypothesis: "+hypo+"\n")
