@@ -25,6 +25,7 @@ import os
 from gan_utils import rouge_l
 from data import strip_pads
 import time
+from data import outputsids2words
 import tensorflow as tf
 from random import randint
 import beam_search
@@ -99,7 +100,7 @@ class Decoder(object):
             padded_hyps = []
             for n, hyp in enumerate(n_hyps):
                 tokens = hyp.tokens
-                length_exclude_start_token = tokens.index(stop_id)
+                length_exclude_start_token = tokens.index(stop_id) if stop_id in tokens else len(tokens) - 1
                 padding_mask[b, n, :length_exclude_start_token] = 1
                 padded = tokens + (sample_max_len - len(hyp)) * [pad_id] if len(hyp) < sample_max_len else tokens[:sample_max_len]
                 assert len(padded) == sample_max_len, "sample should be of length %s, but %s given." % (sample_max_len, len(padded))
@@ -202,7 +203,7 @@ class Decoder(object):
                     if sample == 1:
                         print()
                     try:
-                        decoded_words_list = data.outputsids2words(
+                        decoded_words_list = outputsids2words(
                             outputs_ids, self._vocab)
                     except:
                         print(outputs_ids)
@@ -227,6 +228,8 @@ class Decoder(object):
 
                 summaries = strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING))
                 references = strip_pads(batch.dec_batch.tolist(), self._vocab.word2id(STOP_DECODING))
+                summaries = outputsids2words(summaries, self._vocab)
+                references = outputsids2words(references, self._vocab)
                 for s, r in zip(summaries, references):
                     rouges = rouge_l(s, r)
                     rouge_scores.append(rouges)
@@ -342,7 +345,7 @@ class Decoder(object):
                     sample_n = randint(0, batch_size)
                     if sample == 1:
                         print()
-                    decoded_words_list = data.outputsids2words(
+                    decoded_words_list = outputsids2words(
                         outputs_ids, self._vocab)
 
                     decoded_outputs = []
@@ -364,10 +367,11 @@ class Decoder(object):
                             decoded_outputs.append(decoded_output)
 
                 if not save2file:
+                    summaries = strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING)),
+                    references = strip_pads(batch.dec_batch.tolist(), self._vocab.word2id(STOP_DECODING))
+                    summaries = outputsids2words(summaries, self._vocab)
+                    references = outputsids2words(references, self._vocab)
                     rouges = rouge_l(
-                        strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING)),
-                        strip_pads(batch.dec_batch.tolist(),
-                                   self._vocab.word2id(STOP_DECODING))
                         )
                     rouge_scores += rouges
                     continue

@@ -123,7 +123,17 @@ def rouge_l(summary, references, alpha=0.5):
         for _r in _refs:
             rfs.append(_r.strip().split())
         _refs = rfs
+
+    try:
+        summary = [s.strip().lower() for s in summary]
+    except:
+        summary = summary
+
     for r in _refs:
+        try:
+            r = [rr.strip().lower() for rr in r]
+        except:
+            r = r
         matches += lcs(r, summary)
         count_for_recall += len(r)
     count_for_prec = len(_refs) * len(summary)
