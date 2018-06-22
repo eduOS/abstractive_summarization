@@ -91,6 +91,7 @@ class Decoder(object):
 
         padded_n_hyps = []
         pad_id = self._vocab.word2id(PAD_TOKEN)
+        stop_id = self._vocab.word2id(STOP_DECODING)
         padding_max_len = self._hps.max_dec_steps
         sample_max_len = self._hps.max_dec_steps + 1
         padding_mask = np.zeros((len(n_hyps_batch), s_num, padding_max_len), dtype=np.int32)
@@ -98,7 +99,7 @@ class Decoder(object):
             padded_hyps = []
             for n, hyp in enumerate(n_hyps):
                 tokens = hyp.tokens
-                length_exclude_start_token = len(hyp)-1
+                length_exclude_start_token = tokens.index(stop_id)
                 padding_mask[b, n, :length_exclude_start_token] = 1
                 padded = tokens + (sample_max_len - len(hyp)) * [pad_id] if len(hyp) < sample_max_len else tokens[:sample_max_len]
                 assert len(padded) == sample_max_len, "sample should be of length %s, but %s given." % (sample_max_len, len(padded))

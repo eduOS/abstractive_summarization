@@ -12,6 +12,7 @@ from six.moves import xrange
 
 FLAGS = tf.app.flags.FLAGS
 
+
 class Hypothesis(object):
 
     def __init__(self, tokens):
@@ -21,10 +22,6 @@ class Hypothesis(object):
         return len(self.tokens)
 
     def extend(self, token):
-        if not token:
-            return Hypothesis(
-                tokens=self._tokens,
-            )
         return Hypothesis(
             tokens=self._tokens + [token],
         )
@@ -43,6 +40,8 @@ def run_monte_carlo_search(sess, model, vocab, batch, s_num=10):
 
     attention_keys, attention_values = model.run_encoder(sess, batch)
     stop_id = vocab.word2id(data.STOP_DECODING)
+    pad_id = vocab.word2id(data.PAD_TOKEN)
+
     k_hyps = []
     batch_hyps = []
     for i in xrange(batch_size):
@@ -74,11 +73,13 @@ def run_monte_carlo_search(sess, model, vocab, batch, s_num=10):
             _hyps = []
             for i in xrange(num_orig_hyps):
                 h = hyps[i]
-                n_token = ran_id[i][0] if h.latest_token != stop_id else None
+                n_token = ran_id[i][0] if h.latest_token not in [stop_id, pad_id] else pad_id
                 new_hyp = h.extend(token=n_token)
                 _hyps.append(new_hyp)
 
             hyps = _hyps
+            if steps > min_dec_steps and [h.latest_token for h in hyps] == [pad_id for h in hyps]:
+                break
 
         assert len(hyps) == s_num, colored("Hypothesis should be %s but given %s" % (s_num, len(hyps)), "red")
         k_hyps.append(hyps)

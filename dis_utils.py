@@ -183,5 +183,10 @@ def print_dashboard(train_accuracies, eval_loss, eval_accuracy):
     print("Eval loss %.4f, train accuracy is %.4f and eval accuracy is %.4f" % (eval_loss, train_accuracy, eval_accuracy))
 
 
-def eval_dis():
-    pass
+def eval_dis(batcher, decoder, discriminator):
+    while True:
+        batch = batcher.next_batch()
+        if not batch[0]:
+            eval_batcher.reset()
+            break
+        enc_states, n_samples, n_targets_padding_mask = decoder.mc_generate(batch, s_num=hps_gan.sample_num)

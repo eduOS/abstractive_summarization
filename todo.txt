@@ -83,6 +83,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 67. decorator practice: https://wiki.python.org/moin/PythonDecoratorLibrary
 68. generate at once like the way conv encoder decodes, or block by block
 69. unsupervised pre-training using language model
+70. Train discriminator using previous checkpoints, not only the latest one
 
 # problems
 1. cannot end
@@ -120,6 +121,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 1. a list of float cannot be joined
 2. two list cannot be updated by += but if the right side is a numpy it is ok
 3. tensorarray should asigned to itself after writing
+4. in run_decode_onestep the ran_id is not returned
 
 # tips 
   immediate rewards should be given more importance, discount or impatience

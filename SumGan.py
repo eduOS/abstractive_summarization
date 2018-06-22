@@ -137,7 +137,7 @@ tf.app.flags.DEFINE_integer('gan_gen_iter', 5, 'in each gan step run how many ti
 tf.app.flags.DEFINE_integer('gan_dis_iter', 10**8, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 12, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan", "Training directory.")
-tf.app.flags.DEFINE_integer('sample_num', 2, 'beam size for beam search decoding.')
+tf.app.flags.DEFINE_integer('sample_num', 20, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_float('gan_lr', 0.0005, 'learning rate for the gen in GAN training')
 tf.app.flags.DEFINE_float('rouge_reward_ratio', 0, 'The importance of rollout in calculating the reward.')
 tf.app.flags.DEFINE_float('dis_reward_ratio', 0, 'The importance of rollout in calculating the reward.')
@@ -608,7 +608,7 @@ def main(argv):
                             ))
 
                 if not math.isnan(_f1) and _f1 > 0.9:
-                    eval_dis()
+                    # eve_f1 = eval_dis(gan_batcher_test, decoder, discriminator)
                     gan_gen_iter = 5
                     break
 

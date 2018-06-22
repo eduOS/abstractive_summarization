@@ -469,7 +469,7 @@ class PointerGenerator(object):
 
         results = sess.run(to_return, feed_dict=feed)
 
-        return results['topk_log_probs'], results['indices'], results['indices']
+        return results['topk_log_probs'], results['indices'], results['ran_id']
 
     def g_optimizer(self, *args, **kwargs):
         return tf.train.AdamOptimizer(*args, **kwargs)
