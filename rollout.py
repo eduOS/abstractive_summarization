@@ -7,6 +7,7 @@ from tensorflow.python.ops import tensor_array_ops, control_flow_ops
 import numpy as np
 from data import strip_pads
 from gan_utils import rouge_l
+from data import outputsids2words
 PAD_TOKEN = "[PAD]"
 START_DECODING = '[START]'
 STOP_DECODING = '[STOP]'
@@ -107,10 +108,10 @@ class Rollout(object):
 
                     if rouge_ratio:
                         rouge_scores = []
-                        summaries = strip_pads(strip_pads(rollout_samples.tolist(), dec_vocab.word2id(STOP_DECODING)))
-                        references = strip_pads(source_batch.dec_batch.tolist(), dec_vocab.word2id(PAD_TOKEN))
+                        summaries = outputsids2words(strip_pads(rollout_samples.tolist(), dec_vocab.word2id(STOP_DECODING)), dec_vocab)
+                        references = source_batch.original_abstracts
                         for s, r in zip(summaries, references):
-                            rouges = rouge_l(s, r)
+                            rouges = rouge_l(s, r.split())
                             rouge_scores.append(rouges)
                         rouge_rewards[given_num] += np.array(rouge_scores)
 
@@ -133,10 +134,10 @@ class Rollout(object):
 
                 if rouge_ratio:
                     rouge_scores = []
-                    summaries = strip_pads(samples.tolist(), dec_vocab.word2id(STOP_DECODING))
-                    references = strip_pads(source_batch.dec_batch.tolist(), dec_vocab.word2id(PAD_TOKEN))
+                    summaries = outputsids2words(strip_pads(samples.tolist(), dec_vocab.word2id(STOP_DECODING)), dec_vocab)
+                    references = source_batch.original_abstracts
                     for s, r in zip(summaries, references):
-                        rouges = rouge_l(s, r)
+                        rouges = rouge_l(s, r.split())
                         rouge_scores.append(rouges)
                     rouge_rewards[max_dec_steps] += np.array(rouge_scores)
 

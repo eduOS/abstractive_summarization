@@ -198,44 +198,46 @@ class Decoder(object):
                 original_abstracts = batch.original_abstracts
 
                 sample = randint(0, int(1 / sample_rate) if sample_rate else 0)
-                if sample == 1 or save2file:
-                    sample_n = randint(0, batch_size)
-                    if sample == 1:
-                        print()
+
+                sample_n = randint(0, batch_size)
+                if sample == 1:
+                    print()
+                try:
+                    decoded_words_list = outputsids2words(
+                        outputs_ids, self._vocab)
+                except:
+                    print(outputs_ids)
+                    raise
+
+                decoded_outputs = []
+
+                for s_n, decoded_words in enumerate(decoded_words_list):
                     try:
-                        decoded_words_list = outputsids2words(
-                            outputs_ids, self._vocab)
-                    except:
-                        print(outputs_ids)
-                        raise
+                        fst_stop_idx = decoded_words.index(data.STOP_DECODING)
+                        decoded_words = decoded_words[:fst_stop_idx]
+                    except ValueError:
+                        pass
+                    decoded_output = ' '.join(decoded_words)
+                    if sample == 1 and s_n == sample_n:
+                        print("article:\t" + original_articles[sample_n])
+                        print("abstract:\t" + original_abstracts[sample_n])
+                        print("hypothesis:\t" + decoded_output)
+                        print("")
+                    decoded_outputs.append(decoded_output)
 
-                    decoded_outputs = []
-
-                    for s_n, decoded_words in enumerate(decoded_words_list):
-                        try:
-                            fst_stop_idx = decoded_words.index(data.STOP_DECODING)
-                            decoded_words = decoded_words[:fst_stop_idx]
-                        except ValueError:
-                            pass
-                        decoded_output = ' '.join(decoded_words)
-                        if sample == 1 and s_n == sample_n:
-                            print("article:\t" + original_articles[sample_n])
-                            print("abstract:\t" + original_abstracts[sample_n])
-                            print("hypothesis:\t" + decoded_output)
-                            print("")
-                        elif save2file:
-                            decoded_outputs.append(decoded_output)
+                counter += 1  # this is how many examples we've decoded
+                if counter % 10000 == 0:
+                    print("Have decoded %s samples." % (counter * FLAGS.batch_size))
 
                 if save2file:
-                    counter += 1  # this is how many examples we've decoded
-                    if counter % 10000 == 0:
-                        print("Have decoded %s samples." % (counter * FLAGS.batch_size))
-
                     for idx, sent in enumerate(original_abstracts):
                         ref_f.write(sent+"\n")
                     for idx, sent in enumerate(decoded_outputs):
                         dec_f.write(sent+"\n")
-                    for artc, refe, hypo in zip(original_articles, original_abstracts, decoded_outputs):
+                for artc, refe, hypo in zip(original_articles, original_abstracts, decoded_outputs):
+                    rouges = rouge_l(hypo.split(), refe.split())
+                    rouge_scores.append(rouges)
+                    if save2file:
                         ove_f.write("article: "+artc+"\n")
                         ove_f.write("reference: "+refe+"\n")
                         ove_f.write("hypothesis: "+hypo+"\n")
@@ -355,36 +357,27 @@ class Decoder(object):
                             print("abstract:\t" + original_abstracts[sample_n])
                             print("hypothesis:\t" + decoded_output)
                             print("")
-                        elif save2file:
-                            decoded_outputs.append(decoded_output)
-
-                if not save2file:
-                    summaries = strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING)),
-                    references = strip_pads(batch.dec_batch.tolist(), self._vocab.word2id(STOP_DECODING))
-                    summaries = outputsids2words(summaries, self._vocab)
-                    references = outputsids2words(references, self._vocab)
-                    rouges = rouge_l(
-                        )
-                    rouge_scores += rouges
-                    continue
+                        decoded_outputs.append(decoded_output)
 
                 counter += 1  # this is how many examples we've decoded
                 if counter % 10000 == 0:
                     print("Have decoded %s samples." % (counter * FLAGS.batch_size))
 
-                for idx, sent in enumerate(original_abstracts):
-                    ref_f.write(sent+"\n")
-                for idx, sent in enumerate(decoded_outputs):
-                    dec_f.write(sent+"\n")
+                if save2file:
+                    for idx, sent in enumerate(original_abstracts):
+                        ref_f.write(sent+"\n")
+                    for idx, sent in enumerate(decoded_outputs):
+                        dec_f.write(sent+"\n")
                 for artc, refe, hypo in zip(original_articles, original_abstracts, decoded_outputs):
 
                     rouges = rouge_l(hypo.split(), refe.split())
                     rouge_scores.append(rouges)
 
-                    ove_f.write("article: "+artc+"\n")
-                    ove_f.write("reference: "+refe+"\n")
-                    ove_f.write("hypothesis: "+hypo+"\n")
-                    ove_f.write("\n")
+                    if save2file:
+                        ove_f.write("article: "+artc+"\n")
+                        ove_f.write("reference: "+refe+"\n")
+                        ove_f.write("hypothesis: "+hypo+"\n")
+                        ove_f.write("\n")
         except KeyboardInterrupt as exc:
             print(exc)
             print("Have decoded %s samples." % (counter * FLAGS.batch_size))
