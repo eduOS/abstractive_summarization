@@ -28,6 +28,7 @@ from utils import conv_encoder
 from utils import linear_mapping_weightnorm
 from codecs import open
 import data
+import numpy as np
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -41,6 +42,11 @@ class PointerGenerator(object):
         self._enc_vocab = enc_vocab
         self._dec_vocab = dec_vocab
         self._log_writer = open("./pg_log", "a", "utf-8")
+        batch_vocab = np.tile(dec_vocab.id_keys, (hps.batch_size, 1))
+        self.unk_mask = np.where(
+            batch_vocab == self._dec_vocab.word2id(data.UNKNOWN_TOKEN),
+            np.zeros_like(batch_vocab), np.ones_like(batch_vocab)
+        )
 
     def _add_placeholders(self):
         """Add placeholders to the graph. These are entry points for any input
@@ -360,7 +366,8 @@ class PointerGenerator(object):
         if is_training:
             vocab_dists = tf.unstack(tf.nn.softmax(logits), axis=1)
         else:
-            vocab_dists = [tf.nn.softmax(logits)]
+            vocab_dists = [tf.nn.softmax(logits) * self.unk_mask]
+            # assign 0 to unk
 
         return vocab_dists
 
