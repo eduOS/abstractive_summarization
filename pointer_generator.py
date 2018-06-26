@@ -28,7 +28,6 @@ from utils import conv_encoder
 from utils import linear_mapping_weightnorm
 from codecs import open
 import data
-import numpy as np
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -42,11 +41,6 @@ class PointerGenerator(object):
         self._enc_vocab = enc_vocab
         self._dec_vocab = dec_vocab
         self._log_writer = open("./pg_log", "a", "utf-8")
-        batch_vocab = np.tile(dec_vocab.id_keys, (hps.batch_size, 1))
-        self.unk_mask = np.where(
-            batch_vocab == self._dec_vocab.word2id(data.UNKNOWN_TOKEN),
-            np.zeros_like(batch_vocab), np.ones_like(batch_vocab)
-        )
 
     def _add_placeholders(self):
         """Add placeholders to the graph. These are entry points for any input
@@ -58,43 +52,29 @@ class PointerGenerator(object):
         else:
             max_dec_steps = hps.max_dec_steps
 
-        # -------- placeholders for training generatror and beam search decoding
-        # encoder part
         self.enc_batch = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch')
         self.temp_batch = tf.placeholder(tf.int32, [batch_size, None], name='temp_batch_for_embedding')
         self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
         self.enc_padding_mask = tf.placeholder(tf.float32, [batch_size, None], name='enc_padding_mask')
 
-        # decoder part
-        # when max_dec_steps is 1, this is for beam search decoding, it is for
-        # getting the loss otherwise
         self._dec_batch = tf.placeholder(tf.int32, [batch_size, max_dec_steps], name='dec_batch')
         self.target_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='target_batch')
         self.dec_padding_mask = tf.placeholder(tf.float32, [batch_size, hps.max_dec_steps], name='decoder_padding_mask')
 
-        # ------------------------ placeholders for training GAN
-        # encoder part
         self.cell_c = tf.placeholder(
             tf.float32, shape=[batch_size, self.hps.hidden_dim])
         self.cell_h = tf.placeholder(
             tf.float32, shape=[batch_size, self.hps.hidden_dim])
 
-        # decoder part
-        # in gan training all three modes of the generator are used:
-        # decoding for the generating process; training for the tuning and
-        # evaluation for its evaluation
         self.k_sample_targets = tf.placeholder(tf.int32, [FLAGS.sample_num, batch_size, hps.max_dec_steps], name='k_sample_targets')
         self.k_sample_targets_mask = tf.placeholder(tf.float32, [FLAGS.sample_num, batch_size, hps.max_dec_steps], name='k_padding_mask_of_the_sample_targets')
         self.k_samples = tf.placeholder(tf.int32, [FLAGS.sample_num, batch_size, hps.max_dec_steps], name='k_samples')
         self.k_rewards = tf.placeholder(tf.float32, shape=[FLAGS.sample_num, batch_size, hps.max_dec_steps], name="k_rewards")
 
-        # ------------------------ placeholders for evaluation
-        # decoder part
         self._eval_dec_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='eval_dec_batch')
 
         if hps.mode in ["decode", 'train_gan'] and hps.coverage:
             self.prev_coverage = tf.placeholder(tf.float32, [None, None], name='prev_coverage')
-            # so this need not to be reloaded and taken gradient hps
 
     def _make_feed_dict(self, batch, just_enc=False, gan_eval=False, gan=False):
         """Make a feed dictionary mapping parts of the batch to the appropriate
@@ -127,7 +107,6 @@ class PointerGenerator(object):
         hps = self.hps
 
         with tf.name_scope('seq2seq'):
-            # Some initializers
             self.rand_unif_init = tf.random_uniform_initializer(
                 -hps.rand_unif_init_mag, hps.rand_unif_init_mag, seed=123)
             self.trunc_norm_init = tf.truncated_normal_initializer(stddev=hps.trunc_norm_init_std)
@@ -146,10 +125,7 @@ class PointerGenerator(object):
                 self.dec_emb_saver = tf.train.Saver({"dec_embeddings": self.dec_embeddings})
                 self.emb_enc_inputs = tf.nn.embedding_lookup(self.enc_embeddings, self.enc_batch)
                 self.temp_embedded_seq = tf.nn.embedding_lookup(self.enc_embeddings, self.temp_batch)
-                # for gen training(mode is pretrain_gen) and
-                # beam searching(mode is decode or train_gan)
                 emb_dec_inputs = tf.nn.embedding_lookup(self.dec_embeddings, self._dec_batch)
-                # for evaluation gan(when mode is train_gan)
                 emb_eval_dec_inputs = tf.nn.embedding_lookup(self.dec_embeddings, self._eval_dec_batch)
 
                 k_emb_samples_ls = [
@@ -168,12 +144,11 @@ class PointerGenerator(object):
                 ) + self.emb_enc_inputs) * tf.sqrt(0.5)
 
             with tf.variable_scope('decoder') as decoder_scope:
-                # is_training = self.hps.mode in ["pretrain_gen", "train_gan"]
                 is_training = False if self.hps.mode in ["train_gan", 'decode'] else True
                 final_dists = self._conv_decoder(emb_dec_inputs, is_training=is_training)
                 decoder_scope.reuse_variables()
                 self.final_dists = final_dists
-                self.topk_log_probs, self.indices = tf.nn.top_k(tf.log(final_dists[0]), self.hps.beam_size * 2)
+                self.topk_log_probs, self.indices = tf.nn.top_k(tf.log(self.final_dists[0]), self.hps.beam_size * 2)
                 self._ran_id = tf.multinomial(tf.log(self.final_dists[0]), 1)
 
                 eval_final_dists = self._conv_decoder(emb_eval_dec_inputs, is_training=True)
@@ -195,20 +170,14 @@ class PointerGenerator(object):
                     loss_per_step.append(losses * rewards[:, dec_step] if rewards is not None else losses)
                 return loss_per_step
 
-            # Calculate the loss
             with tf.variable_scope('generator_loss'):
 
-                # for training of generator
                 tf.Print(self.final_dists, self.final_dists, "final list")
                 loss_per_step = get_loss(self.final_dists, self.target_batch, self.dec_padding_mask)
-                # self.loss_per_step = loss_per_step
                 eval_loss_per_step = get_loss(eval_final_dists, self.target_batch, self.dec_padding_mask)
-                # Apply padding_mask mask and get loss
                 self._loss = _avg(loss_per_step, self.dec_padding_mask)
                 self._eval_loss = _avg(eval_loss_per_step, self.dec_padding_mask)
 
-                # for training of GAN
-                # Calculate coverage loss from the attention distributions
                 if hps.coverage:
                     with tf.variable_scope('coverage_loss'):
                         self._coverage_loss = _coverage_loss(
@@ -228,14 +197,12 @@ class PointerGenerator(object):
 
                     self.gan_loss = tf.reduce_mean(tf.stack(k_gan_losses))
 
-        # for the loss
         loss_to_minimize = self._total_loss if self.hps.coverage else self._loss
         trainable_variables = tf.trainable_variables()
         gradients = tf.gradients(
             loss_to_minimize, trainable_variables,
             aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
 
-        # Clip the gradients
         with tf.device("/gpu:0"):
             grads, global_norm = tf.clip_by_global_norm(
                 gradients, self.hps.gen_max_gradient)
@@ -246,14 +213,12 @@ class PointerGenerator(object):
             1000000,             # Decay step.
             0.95,                # Decay rate.
             staircase=True)
-        # Apply adagrad optimizer
         optimizer = tf.train.AdamOptimizer(self.learning_rate)
         with tf.device("/gpu:0"):
             self._train_op = optimizer.apply_gradients(
                 zip(grads, trainable_variables),
                 global_step=self.global_step)
 
-        # for the loss
         if hps.mode == "train_gan":
             g_opt = self.g_optimizer(FLAGS.gan_lr)
             trainable_variables = tf.trainable_variables()
@@ -269,7 +234,6 @@ class PointerGenerator(object):
         return sess.run(self.learning_rate)
 
     def beam_search(self):
-        # state, attention
         beam_size = self.hps.beam_size
         batch_size = self.hps.batch_size
         vocab_size = self._dec_vocab.size()
@@ -288,19 +252,15 @@ class PointerGenerator(object):
         def beam_search(prev, i, log_fn):
             if output_projection is not None:
                 prev = tf.nn.xw_plus_b(prev, output_projection[0], output_projection[1])
-                # (batch_size*beam_size, embedding_size) -> (batch_size*beam_size, vocab_size)
 
             log_probs = log_fn(prev)
 
             if i > 1:
                 log_probs = tf.reshape(tf.expand_dims(tf.reduce_sum(tf.stack(log_beam_probs, axis=1), axis=1), axis=1) + log_probs,
                                        [-1, beam_size * vocab_size])
-                # (batch_size*beam_size, vocab_size) -> (batch_size, beam_size*vocab_size)
             best_probs, indices = tf.nn.top_k(log_probs, beam_size)
-            # (batch_size, beam_size)
             indices = tf.squeeze(tf.reshape(indices, [-1, 1]))
             best_probs = tf.reshape(best_probs, [batch_size*beam_size])
-            # (batch_size*beam_size)
 
             symbols = indices % vocab_size       # which word in vocabulary
             beam_parent = indices // vocab_size  # which hypothesis it came from
@@ -309,10 +269,7 @@ class PointerGenerator(object):
 
             index_base = tf.reshape(
                 tf.tile(tf.expand_dims(tf.range(batch_size) * beam_size, axis=1), [1, beam_size]), [-1])
-            # (batch_size*beam_size, num_steps)
-            # real_path = tf.reshape(tf.stack(beam_path, axis=1) + index_base, [beam_size*batch_size, i])
             real_path = beam_parent + index_base
-            # adapt the previous symbols according to the current symbol
             if i > 1:
                 pre_sum = tf.reduce_sum(tf.stack(log_beam_probs, axis=1), axis=1)
                 pre_sum = tf.gather(pre_sum, real_path)
@@ -346,7 +303,6 @@ class PointerGenerator(object):
 
         best_seq = tf.stack(values=beam_symbols, axis=1)
         self.best_seq = tf.reshape(best_seq, [batch_size, beam_size, num_steps])
-        # (batch_size*beam_size, num_steps)
 
     def run_beam_search(self, sess, batch):
         feed_dict = self._make_feed_dict(batch, just_enc=True)
@@ -355,6 +311,15 @@ class PointerGenerator(object):
 
     def _conv_decoder(self, emb_dec_inputs,
                       attention_keys=None, attention_values=None, enc_padding_mask=None, is_training=True):
+
+        def get_unk_mask(logits):
+            batch_vocab = tf.tile(tf.expand_dims(tf.convert_to_tensor(self._dec_vocab.id_keys), 0), (tf.shape(logits)[0], 1))
+            unk_mask = tf.where(
+                batch_vocab == self._dec_vocab.word2id(data.UNKNOWN_TOKEN),
+                tf.zeros_like(batch_vocab, tf.float32), tf.ones_like(batch_vocab, tf.float32)
+            )
+            return unk_mask
+
         if attention_keys is None:
             enc_padding_mask = self.enc_padding_mask
             attention_keys = self.attention_keys
@@ -366,8 +331,8 @@ class PointerGenerator(object):
         if is_training:
             vocab_dists = tf.unstack(tf.nn.softmax(logits), axis=1)
         else:
-            vocab_dists = [tf.nn.softmax(logits) * self.unk_mask]
-            # assign 0 to unk
+            unk_mask = get_unk_mask(logits)
+            vocab_dists = [tf.nn.softmax(logits) * unk_mask]
 
         return vocab_dists
 
@@ -401,9 +366,7 @@ class PointerGenerator(object):
         else:
             to_return['loss'] = self._loss
         if update:
-            # if update is False it is for the generator evaluation
             to_return['train_op'] = self._train_op
-            # to_return['loss_per_step'] = self.loss_per_step
         if self.hps.coverage:
             to_return['coverage_loss'] = self._coverage_loss
         rsts = sess.run(to_return, feed_dict)
@@ -416,7 +379,6 @@ class PointerGenerator(object):
         feed_dict = self._make_feed_dict(batch, gan_eval=gan_eval, gan=True)
 
         feed_dict.update({
-            # for the decoder
             self.k_samples: samples,
             self.k_sample_targets: sample_targets,
             self.k_sample_targets_mask: sample_padding_mask,
@@ -426,7 +388,6 @@ class PointerGenerator(object):
         to_return = {
             'global_step': self.global_step,
             'loss': self.gan_loss,
-            # 'loss_per': self.gan_loss_per_step,
         }
         if update:
             to_return['updates'] = self.g_updates
@@ -449,14 +410,9 @@ class PointerGenerator(object):
         inputs:
             the embedded input
         """
-        # attn_dists, p_gens, coverage, vocab_scores, log_probs, new_states
         final_dists = self._conv_decoder(emb_dec_inputs, is_training=False)
-        # how can it be fed by a [batch_size * 1 * emb_dim] while decoding?
-        # final_dists_sliced = tf.slice(final_dists[0], [0, 0], [-1, self._vocab.size()])
         final_dists = final_dists[0]
-        # final_dists += tf.ones_like(final_dists) * sys.float_info.epsilon
         output_id = tf.squeeze(tf.cast(tf.reshape(tf.multinomial(tf.log(final_dists), 1), [self.hps.batch_size]), tf.int32))
-        # next_input = tf.nn.embedding_lookup(self.embeddings, next_token)  # batch x emb_dim
         return output_id
 
     def run_decode_onestep(self, sess, dec_inputs, attention_keys, attention_values, enc_padding_mask):
@@ -496,7 +452,6 @@ def _mask_and_avg(values, padding_mask):
 
     dec_lens = tf.reduce_sum(padding_mask, axis=1)  # shape batch_size. float32
     values_per_step = [v * padding_mask[:, dec_step] for dec_step, v in enumerate(values)]
-    # shape (batch_size); normalized value for each batch member
     values_per_ex = tf.reduce_sum(tf.stack(values_per_step, 1), 1)/dec_lens
     return tf.reduce_mean(values_per_ex)  # overall average
 
@@ -514,8 +469,6 @@ def _avg(values, padding_mask):
     """
 
     dec_lens = tf.reduce_sum(padding_mask, axis=1)  # shape batch_size. float32
-    # values_per_step = [v * padding_mask[:, dec_step] for dec_step, v in enumerate(values)]
-    # shape (batch_size); normalized value for each batch member
     values_per_ex = tf.reduce_sum(tf.stack(values, 1), 1)/dec_lens
     return tf.reduce_mean(values_per_ex)  # overall average
 
@@ -533,7 +486,6 @@ def _mask(values, padding_mask):
     """
 
     values_per_step = [v * padding_mask[:, dec_step] for dec_step, v in enumerate(values)]
-    # shape (batch_size); normalized value for each batch member
     values_per_ex = sum(values_per_step)
     return tf.reduce_sum(values_per_ex)  # overall loss
 
@@ -551,12 +503,8 @@ def _coverage_loss(attn_dists, padding_mask):
     """
     coverage = tf.zeros_like(
         attn_dists[0])
-    # shape (batch_size, attn_length). Initial coverage is zero.
-    # Coverage loss per decoder timestep. Will be list length max_dec_steps
-    # containing shape (batch_size).
     covlosses = []
     for a in attn_dists:
-        # calculate the coverage loss for this step
         covloss = tf.reduce_sum(tf.minimum(a, coverage), [1])
         covlosses.append(covloss)
         coverage += a  # update the coverage vector

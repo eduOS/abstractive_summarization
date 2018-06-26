@@ -143,11 +143,17 @@ class Rollout(object):
 
             if rouge_ratio:
                 rouge_rewards = np.transpose(rouge_rewards)
-                rouge_rewards = rouge_rewards[:, 1:] - rouge_rewards[:, :-1]
+                if hps_gan.subtract:
+                    rouge_rewards = rouge_rewards[:, 1:] - rouge_rewards[:, :-1]
+                else:
+                    rouge_rewards = dis_rewards[:, 1:]
 
             if dis_ratio:
                 dis_rewards = np.transpose(np.array(dis_rewards))
-                dis_rewards = dis_rewards[:, 1:] - dis_rewards[:, :-1]
+                if hps_gan.subtract:
+                    dis_rewards = dis_rewards[:, 1:] - dis_rewards[:, :-1]
+                else:
+                    dis_rewards = dis_rewards[:, 1:]
 
             if rouge_ratio == 1:
                 rewards = rouge_rewards

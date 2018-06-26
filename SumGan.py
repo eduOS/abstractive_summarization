@@ -141,6 +141,7 @@ tf.app.flags.DEFINE_integer('sample_num', 20, 'beam size for beam search decodin
 tf.app.flags.DEFINE_float('gan_lr', 0.0005, 'learning rate for the gen in GAN training')
 tf.app.flags.DEFINE_float('rouge_reward_ratio', 0, 'The importance of rollout in calculating the reward.')
 tf.app.flags.DEFINE_float('dis_reward_ratio', 0, 'The importance of rollout in calculating the reward.')
+tf.app.flags.DEFINE_boolean('subtract', False, "if the reward of the current word should be subtracted by the reward of the previous word")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -384,6 +385,7 @@ def main(argv):
         'rouge_reward_ratio',
         'dis_reward_ratio',
         "rollout_start",
+        'subtract',
     ]
     hps_dict = {}
     for key, val in FLAGS.__flags.iteritems():  # for each flag
