@@ -41,6 +41,11 @@ class PointerGenerator(object):
         self._enc_vocab = enc_vocab
         self._dec_vocab = dec_vocab
         self._log_writer = open("./pg_log", "a", "utf-8")
+        vocab_ = tf.convert_to_tensor(self._dec_vocab.id_keys)
+        self._unk_mask = tf.where(
+            vocab_ == self._dec_vocab.word2id(data.UNKNOWN_TOKEN),
+            tf.zeros_like(vocab_, tf.float32), tf.ones_like(vocab_, tf.float32)
+        )
 
     def _add_placeholders(self):
         """Add placeholders to the graph. These are entry points for any input
@@ -331,8 +336,8 @@ class PointerGenerator(object):
         if is_training:
             vocab_dists = tf.unstack(tf.nn.softmax(logits), axis=1)
         else:
-            unk_mask = get_unk_mask(logits)
-            vocab_dists = [tf.nn.softmax(logits) * unk_mask]
+            # unk_mask = get_unk_mask(logits)
+            vocab_dists = [tf.nn.softmax(logits) * self._unk_mask]
 
         return vocab_dists
 
