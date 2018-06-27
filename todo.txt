@@ -116,6 +116,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
   train word segmentation model using kcws
 
 13. the beam search implementation I made is weaker than the vallina one
+14. I can borrow some ideas of conditoning GAN from image captioning and image completion
 
 # error
 1. a list of float cannot be joined
