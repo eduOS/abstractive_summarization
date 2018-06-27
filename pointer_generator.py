@@ -43,7 +43,7 @@ class PointerGenerator(object):
         self._log_writer = open("./pg_log", "a", "utf-8")
         vocab_ = tf.convert_to_tensor(self._dec_vocab.id_keys)
         self._unk_mask = tf.where(
-            vocab_ == self._dec_vocab.word2id(data.UNKNOWN_TOKEN),
+            tf.equal(vocab_, self._dec_vocab.word2id(data.UNKNOWN_TOKEN)),
             tf.zeros_like(vocab_, tf.float32), tf.ones_like(vocab_, tf.float32)
         )
 
@@ -317,14 +317,6 @@ class PointerGenerator(object):
     def _conv_decoder(self, emb_dec_inputs,
                       attention_keys=None, attention_values=None, enc_padding_mask=None, is_training=True):
 
-        def get_unk_mask(logits):
-            batch_vocab = tf.tile(tf.expand_dims(tf.convert_to_tensor(self._dec_vocab.id_keys), 0), (tf.shape(logits)[0], 1))
-            unk_mask = tf.where(
-                batch_vocab == self._dec_vocab.word2id(data.UNKNOWN_TOKEN),
-                tf.zeros_like(batch_vocab, tf.float32), tf.ones_like(batch_vocab, tf.float32)
-            )
-            return unk_mask
-
         if attention_keys is None:
             enc_padding_mask = self.enc_padding_mask
             attention_keys = self.attention_keys
@@ -336,7 +328,6 @@ class PointerGenerator(object):
         if is_training:
             vocab_dists = tf.unstack(tf.nn.softmax(logits), axis=1)
         else:
-            # unk_mask = get_unk_mask(logits)
             vocab_dists = [tf.nn.softmax(logits) * self._unk_mask]
 
         return vocab_dists
