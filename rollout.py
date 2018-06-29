@@ -80,7 +80,7 @@ class Rollout(object):
 
         for k, samples in enumerate(k_samples):
             dis_rewards = []
-            rouge_rewards = np.zeros((max_dec_steps, batch_size))
+            rouge_rewards = []
             for ir in range(rollout_num):
                 for given_num in range(hps_gan.rollout_start, max_dec_steps+1):
                     self.sample_emb_ls = []
@@ -113,7 +113,10 @@ class Rollout(object):
                         for s, r in zip(summaries, references):
                             rouges = rouge_l(s, r.split())
                             rouge_scores.append(rouges)
-                        rouge_rewards[given_num] += np.array(rouge_scores)
+                        if ir == 0:
+                            rouge_rewards.append(np.array(rouge_scores))
+                        else:
+                            rouge_rewards[given_num-1] += np.array(rouge_scores)
 
                 if dis_ratio:
                     emb_samples = sess.run(
@@ -137,16 +140,19 @@ class Rollout(object):
                     summaries = outputsids2words(strip_pads(samples.tolist(), dec_vocab.word2id(STOP_DECODING)), dec_vocab)
                     references = source_batch.original_abstracts
                     for s, r in zip(summaries, references):
-                        rouges = rouge_l(s, r.split())
-                        rouge_scores.append(rouges)
-                    rouge_rewards[max_dec_steps] += np.array(rouge_scores)
+                        rouge = rouge_l(s, r.split())
+                        rouge_scores.append(rouge)
+                    if ir == 0:
+                        rouge_rewards.append(np.array(rouge_scores))
+                    else:
+                        rouge_rewards[max_dec_steps-1] += np.array(rouge_scores)
 
             if rouge_ratio:
-                rouge_rewards = np.transpose(rouge_rewards)
+                rouge_rewards = np.transpose(np.array(rouge_rewards))
                 if hps_gan.subtract:
                     rouge_rewards = rouge_rewards[:, 1:] - rouge_rewards[:, :-1]
                 else:
-                    rouge_rewards = dis_rewards[:, 1:]
+                    rouge_rewards = rouge_rewards[:, 1:]
 
             if dis_ratio:
                 dis_rewards = np.transpose(np.array(dis_rewards))

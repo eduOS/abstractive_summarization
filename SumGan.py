@@ -133,7 +133,6 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 # ------------------------------------- gan
 tf.app.flags.DEFINE_integer('rollout_start', 1, 'how many times to run the gan')
 tf.app.flags.DEFINE_integer('gan_iter', 200000, 'how many times to run the gan')
-tf.app.flags.DEFINE_integer('gan_gen_iter', 5, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('gan_dis_iter', 10**8, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 12, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan", "Training directory.")
@@ -367,7 +366,7 @@ def main(argv):
         print("Building generator graph ...")
         gen_decoder_scope = generator.build_graph()
 
-    if FLAGS.mode == 'train_gan':
+    if FLAGS.mode == 'train_gan' and FLAGS.dis_reward_ratio:
         with tf.variable_scope("discriminator"), tf.device("/gpu:0"):
             discriminator = Seq2ClassModel(hps_dis)
             print("Building discriminator graph ...")
@@ -377,7 +376,6 @@ def main(argv):
         'mode',
         'model_dir',
         'gan_iter',
-        'gan_gen_iter',
         'gan_dis_iter',
         'gan_lr',
         'rollout_num',
@@ -461,7 +459,7 @@ def main(argv):
         utils.load_ckpt(dec_saver, sess, model_dir, mode="val", force=True)
         decoder = Decoder(sess, generator, dec_vocab)
 
-    if FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1:
+    if FLAGS.mode == "train_gan" and FLAGS.dis_reward_ratio:
         dis_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "discriminator" in v.name])
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
@@ -505,12 +503,12 @@ def main(argv):
             g_losses = []
             current_speed = []
             # for it in range(0):
-            gan_gen_iter = hps_gan.gan_gen_iter
+            gan_gen_iter = 0 if FLAGS.dis_reward_ratio else 10**3
 
             # Train the discriminator
             dis_best_loss = 1000
             dis_losses = []
-            gan_dis_iter = hps_gan.gan_dis_iter if hps_gan.rouge_reward_ratio != 1 else 0
+            gan_dis_iter = hps_gan.gan_dis_iter if hps_gan.dis_reward_ratio else 0
             if gan_dis_iter:
                 print('\nGoing to train the discriminator.')
             for d_gan in range(gan_dis_iter):
@@ -632,7 +630,8 @@ def main(argv):
                 n_samples_no_start = np.array(n_samples)[:, :, 1:]
                 try:
                     n_rewards = rollout.get_reward(
-                        hps_gan, sess, dec_vocab, batch, enc_states, n_samples, discriminator)
+                        hps_gan, sess, dec_vocab, batch, enc_states, n_samples,
+                        discriminator if FLAGS.dis_reward_ratio else None)
                 except:
                     print('enc_states')
                     print(enc_states)

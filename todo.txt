@@ -117,6 +117,8 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 
 13. the beam search implementation I made is weaker than the vallina one
 14. I can borrow some ideas of conditoning GAN from image captioning and image completion
+15. bidirectionary attention: https://github.com/allenai/bilm-tf
+16. communicating agents: https://arxiv.org/pdf/1803.10357.pdf
 
 # error
 1. a list of float cannot be joined
