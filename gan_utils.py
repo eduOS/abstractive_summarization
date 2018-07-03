@@ -178,3 +178,10 @@ def save_ckpt(sess, model, decoder, best_loss, best_rouge, model_dir, model_save
         print("Model is saved to" + colored(" %s", 'yellow') % model_dir)
 
     return eval_loss, best_loss, ave_rouge, best_rouge
+
+
+def show_sample_reward(words, rewards, padding_mask):
+    for word, reward, padding in zip(words, rewards, padding_mask):
+        for w, r in zip(word, (reward * padding).tolist()):
+            print(w+"(%s)" % r, end='\t')
+        print('\n')

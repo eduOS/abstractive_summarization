@@ -8,6 +8,7 @@ import numpy as np
 from data import strip_pads
 from gan_utils import rouge_l
 from data import outputsids2words
+from termcolor import colored
 PAD_TOKEN = "[PAD]"
 START_DECODING = '[START]'
 STOP_DECODING = '[STOP]'
@@ -21,47 +22,42 @@ class Rollout(object):
         self._gen_hps = self.generator.hps
         self.g_embeddings = self.generator.dec_embeddings
         max_dec_steps = self._gen_hps.max_dec_steps
-        #######################################################################
 
+        #######################################################################
         self.given_num = tf.placeholder(tf.int32, name="given_num")
         self.sample = tf.placeholder(
             tf.int32, shape=[self._gen_hps.batch_size, max_dec_steps+1], name="sample")
-        self.emb_sample = tf.nn.embedding_lookup(self.g_embeddings, self.sample)
-        init_start_emb = tf.slice(self.emb_sample, [0, 0, 0], [-1, self.given_num, -1])
-        _init_start_emb = tf.slice(self.emb_sample, [0, 1, 0], [-1, self.given_num, -1])
-        _init_start = tf.slice(self.sample, [0, 1], [-1, self.given_num])
-        init_start_emb = tf.reshape(
-            init_start_emb,
-            [self._gen_hps.batch_size, self.given_num, self._gen_hps.char_emb_dim])
 
+        sample_ar = tensor_array_ops.TensorArray(dtype=tf.int32, size=max_dec_steps+1)
+        self.sample_ar = sample_ar.unstack(tf.transpose(self.sample, [1, 0]))
+
+        rollout_sample_ar = tensor_array_ops.TensorArray(
+            dtype=tf.int32, size=1, dynamic_size=True, infer_shape=True)
         ######################################################################
-
-        self.rollout_sample_emb_ar = tensor_array_ops.TensorArray(
-            dtype=tf.float32, size=max_dec_steps-self.given_num, dynamic_size=False, infer_shape=True)
-        self.sample_emb_ls = []
-        self.rollout_sample_ar = tensor_array_ops.TensorArray(
-            dtype=tf.int32, size=max_dec_steps-self.given_num, dynamic_size=False, infer_shape=True)
 
         with tf.variable_scope(decoder_scope, reuse=True):
 
-            def recurrence_rollout(i, dec_input, rollout_sample_ar, rollout_sample_emb_ar):
-                output_id = self.generator.decode_onestep(dec_input)
-                rollout_sample_ar = rollout_sample_ar.write(i, output_id)
-                output_id_emb = tf.nn.embedding_lookup(self.g_embeddings, output_id)
-                rollout_sample_emb_ar = rollout_sample_emb_ar.write(i, output_id_emb)
-                self.sample_emb_ls.append(output_id_emb)
+            def recurrence_given(i, init_start_ar):
+                init_start_ar = init_start_ar.write(i, self.sample_ar.read(i))
+                return i+1, init_start_ar
 
-                next_input_emb = tf.concat([init_start_emb, tf.stack(self.sample_emb_ls, axis=1)], axis=1)
-                # [self._gen_hps.batch_size, self.given_num+i+1, self._gen_hps.char_emb_dim])
-                return i+1, next_input_emb, rollout_sample_ar, rollout_sample_emb_ar
+            def recurrence_rollout(i, dec_input):
+                dec_input_emb = tf.nn.embedding_lookup(
+                    self.g_embeddings, dec_input.stack())
+                output_id = self.generator.decode_onestep(dec_input_emb)
+                next_input = dec_input.write(i, output_id)
+                return i+1, next_input
 
-            _, _, self.rollout_sample_ar, self.rollout_sample_emb_ar = control_flow_ops.while_loop(
-                cond=lambda i, _1, _2, _3: i < max_dec_steps-self.given_num,
-                body=recurrence_rollout,
-                loop_vars=(0, init_start_emb, self.rollout_sample_ar, self.rollout_sample_emb_ar))
+            i, init_start = control_flow_ops.while_loop(
+                cond=lambda i, _1: i < self.given_num,
+                body=recurrence_given, loop_vars=(0, rollout_sample_ar))
 
-        self.rollout_samples_emb = tf.concat([_init_start_emb, tf.transpose(self.rollout_sample_emb_ar.stack(), [1, 0, 2])], axis=1)
-        self.rollout_samples = tf.concat([_init_start, tf.transpose(self.rollout_sample_ar.stack(), [1, 0])], axis=1)
+            _, self.rollout_sample_ar = control_flow_ops.while_loop(
+                cond=lambda i, _1: i < max_dec_steps+1,
+                body=recurrence_rollout, loop_vars=(i, init_start))
+
+        self.rollout_samples = self.rollout_sample_ar.stack()
+        self.rollout_samples_emb = tf.nn.embedding_lookup(self.g_embeddings, self.rollout_samples)
 
     def get_reward(self, hps_gan, sess, dec_vocab, source_batch, enc_states, k_samples, discriminator):
         rollout_num = hps_gan.rollout_num
@@ -71,7 +67,7 @@ class Rollout(object):
 
         articles = source_batch.enc_batch
         article_lens = source_batch.enc_lens
-        batch_size = int(articles.shape[0])
+        # batch_size = int(articles.shape[0])
         emb_articles = sess.run(
             self.generator.temp_embedded_seq,
             feed_dict={self.generator.temp_batch: articles})
@@ -111,8 +107,11 @@ class Rollout(object):
                         summaries = outputsids2words(strip_pads(rollout_samples.tolist(), dec_vocab.word2id(STOP_DECODING)), dec_vocab)
                         references = source_batch.original_abstracts
                         for s, r in zip(summaries, references):
-                            rouges = rouge_l(s, r.split())
-                            rouge_scores.append(rouges)
+                            rouge = rouge_l(s, r.split())
+                            print(r)
+                            print(colored(' '.join(s[:given_num]), 'green') + " " + colored(' '.join(s[given_num:]), 'red'))
+                            print()
+                            rouge_scores.append(rouge)
                         if ir == 0:
                             rouge_rewards.append(np.array(rouge_scores))
                         else:

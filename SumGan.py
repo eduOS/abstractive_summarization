@@ -20,7 +20,7 @@ from gen_utils import get_best_loss_from_chpt
 from gen_utils import save_ckpt as gen_save_ckpt
 from gan_utils import save_ckpt as gan_save_ckpt
 # from gan_utils import check_rouge
-from dis_utils import eval_dis
+# from dis_utils import eval_dis
 # from tensorflow.python import debug as tf_debug
 from utils import sattolo_cycle
 from utils import print_dashboard
@@ -28,6 +28,8 @@ from utils import print_dashboard
 import math
 from termcolor import colored
 from data import POSITIVE_LABEL, NEGATIVE_LABEL
+from data import outputsids2words, strip_pads
+from gan_utils import show_sample_reward
 
 from res_discriminator import Seq2ClassModel
 from data import Vocab
@@ -141,6 +143,8 @@ tf.app.flags.DEFINE_float('gan_lr', 0.0005, 'learning rate for the gen in GAN tr
 tf.app.flags.DEFINE_float('rouge_reward_ratio', 0, 'The importance of rollout in calculating the reward.')
 tf.app.flags.DEFINE_float('dis_reward_ratio', 0, 'The importance of rollout in calculating the reward.')
 tf.app.flags.DEFINE_boolean('subtract', False, "if the reward of the current word should be subtracted by the reward of the previous word")
+# if not subtract the later the better and then it will generate shorter and
+# shorter
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -503,7 +507,7 @@ def main(argv):
             g_losses = []
             current_speed = []
             # for it in range(0):
-            gan_gen_iter = 0 if FLAGS.dis_reward_ratio else 10**3
+            gan_gen_iter = 0 if FLAGS.dis_reward_ratio else 2
 
             # Train the discriminator
             dis_best_loss = 1000
@@ -645,6 +649,13 @@ def main(argv):
                 n_sample_targets = np.array(n_samples)[:, :, 1:]
                 n_samples = np.array(n_samples)[:, :, :-1]
                 # sample_target_padding_mask = pad_sample(sample_target, gen_vocab, hps_gen)
+
+                # to show the reward for each word in the samle
+                # for samples_no_start, rewards, targets_padding_mask in zip(n_samples_no_start, n_rewards, n_targets_padding_mask):
+                #     show_sample_reward(
+                #         outputsids2words(strip_pads(samples_no_start.tolist(), dec_vocab.word2id(STOP_DECODING)), dec_vocab),
+                #         rewards, targets_padding_mask)
+
                 results = generator.run_gan_batch(
                     sess, batch, n_samples, n_sample_targets, n_targets_padding_mask, n_rewards)
 
@@ -659,7 +670,7 @@ def main(argv):
                 current_speed.append(time.time() - start_time)
 
             # Test
-            if gan_gen_iter and (i_gan % 10 == 0 or i_gan == hps_gan.gan_iter - 1):
+            if gan_gen_iter and (i_gan % 3 == 0 or i_gan == hps_gan.gan_iter - 1):
                 print('\nGoing to test the loss of the generator.')
                 current_speed = (float(sum(current_speed)) + epsilon) / (int(len(current_speed)) * hps_gen.batch_size + epsilon)
                 everage_g_loss = (float(sum(g_losses)) + epsilon) / float(len(g_losses) + epsilon)

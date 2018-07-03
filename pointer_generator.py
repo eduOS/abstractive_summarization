@@ -406,7 +406,7 @@ class PointerGenerator(object):
         inputs:
             the embedded input
         """
-        final_dists = self._conv_decoder(emb_dec_inputs, is_training=False)
+        final_dists = self._conv_decoder(emb_dec_inputs)
         final_dists = final_dists[0]
         output_id = tf.squeeze(tf.cast(tf.reshape(tf.multinomial(tf.log(final_dists), 1), [self.hps.batch_size]), tf.int32))
         return output_id
