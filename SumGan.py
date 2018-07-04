@@ -614,10 +614,10 @@ def main(argv):
 
                 if not math.isnan(_f1) and _f1 > 0.9:
                     # eve_f1 = eval_dis(gan_batcher_test, decoder, discriminator)
-                    gan_gen_iter = 5
+                    gan_gen_iter = 2
                     break
 
-            if gan_dis_iter:
+            if gan_gen_iter:
                 print('Going to train the generator, %s times.' % gan_gen_iter)
             for it in range(gan_gen_iter):
                 start_time = time.time()
