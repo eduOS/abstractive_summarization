@@ -32,7 +32,7 @@ class Rollout(object):
         self.sample_ar = sample_ar.unstack(tf.transpose(self.sample, [1, 0]))
 
         rollout_sample_ar = tensor_array_ops.TensorArray(
-            dtype=tf.int32, size=1, dynamic_size=True, infer_shape=True)
+            dtype=tf.int32, size=1, dynamic_size=True, infer_shape=True, clear_after_read=False)
         ######################################################################
 
         with tf.variable_scope(decoder_scope, reuse=True):
@@ -43,20 +43,20 @@ class Rollout(object):
 
             def recurrence_rollout(i, dec_input):
                 dec_input_emb = tf.nn.embedding_lookup(
-                    self.g_embeddings, dec_input.stack())
+                    self.g_embeddings, tf.transpose(dec_input.stack(), [1, 0]))
                 output_id = self.generator.decode_onestep(dec_input_emb)
                 next_input = dec_input.write(i, output_id)
                 return i+1, next_input
 
-            i, init_start = control_flow_ops.while_loop(
+            j, init_start = control_flow_ops.while_loop(
                 cond=lambda i, _1: i < self.given_num,
                 body=recurrence_given, loop_vars=(0, rollout_sample_ar))
 
             _, self.rollout_sample_ar = control_flow_ops.while_loop(
                 cond=lambda i, _1: i < max_dec_steps+1,
-                body=recurrence_rollout, loop_vars=(i, init_start))
+                body=recurrence_rollout, loop_vars=(j, init_start))
 
-        self.rollout_samples = self.rollout_sample_ar.stack()
+        self.rollout_samples = tf.slice(tf.transpose(self.rollout_sample_ar.stack()), [0, 1], [-1, -1])
         self.rollout_samples_emb = tf.nn.embedding_lookup(self.g_embeddings, self.rollout_samples)
 
     def get_reward(self, hps_gan, sess, dec_vocab, source_batch, enc_states, k_samples, discriminator):
@@ -108,9 +108,9 @@ class Rollout(object):
                         references = source_batch.original_abstracts
                         for s, r in zip(summaries, references):
                             rouge = rouge_l(s, r.split())
-                            print(r)
-                            print(colored(' '.join(s[:given_num]), 'green') + " " + colored(' '.join(s[given_num:]), 'red'))
-                            print()
+                            # print(r)
+                            # print(colored(' '.join(s[:given_num]), 'green') + " " + colored(' '.join(s[given_num:]), 'red'))
+                            # print()
                             rouge_scores.append(rouge)
                         if ir == 0:
                             rouge_rewards.append(np.array(rouge_scores))

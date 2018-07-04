@@ -315,7 +315,7 @@ class PointerGenerator(object):
         return best_seq
 
     def _conv_decoder(self, emb_dec_inputs,
-                      attention_keys=None, attention_values=None, enc_padding_mask=None, is_training=True):
+                      attention_keys=None, attention_values=None, enc_padding_mask=None, is_training=True, mask=True):
 
         if attention_keys is None:
             enc_padding_mask = self.enc_padding_mask
@@ -327,8 +327,10 @@ class PointerGenerator(object):
 
         if is_training:
             vocab_dists = tf.unstack(tf.nn.softmax(logits), axis=1)
-        else:
+        elif mask is True:
             vocab_dists = [tf.nn.softmax(logits) * self._unk_mask]
+        else:
+            vocab_dists = [tf.nn.softmax(logits)]
 
         return vocab_dists
 
@@ -406,7 +408,7 @@ class PointerGenerator(object):
         inputs:
             the embedded input
         """
-        final_dists = self._conv_decoder(emb_dec_inputs)
+        final_dists = self._conv_decoder(emb_dec_inputs, is_training=False, mask=False)
         final_dists = final_dists[0]
         output_id = tf.squeeze(tf.cast(tf.reshape(tf.multinomial(tf.log(final_dists), 1), [self.hps.batch_size]), tf.int32))
         return output_id
