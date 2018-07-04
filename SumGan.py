@@ -33,6 +33,7 @@ from gan_utils import show_sample_reward
 
 from res_discriminator import Seq2ClassModel
 from data import Vocab
+DEBUG = False
 STOP_DECODING = '[STOP]'
 epsilon = sys.float_info.epsilon
 
@@ -651,10 +652,11 @@ def main(argv):
                 # sample_target_padding_mask = pad_sample(sample_target, gen_vocab, hps_gen)
 
                 # to show the reward for each word in the samle
-                # for samples_no_start, rewards, targets_padding_mask in zip(n_samples_no_start, n_rewards, n_targets_padding_mask):
-                #     show_sample_reward(
-                #         outputsids2words(strip_pads(samples_no_start.tolist(), dec_vocab.word2id(STOP_DECODING)), dec_vocab),
-                #         rewards, targets_padding_mask)
+                if DEBUG:
+                    for samples_no_start, rewards, targets_padding_mask in zip(n_samples_no_start, n_rewards, n_targets_padding_mask):
+                        show_sample_reward(
+                            outputsids2words(strip_pads(samples_no_start.tolist(), dec_vocab.word2id(STOP_DECODING)), dec_vocab),
+                            rewards, targets_padding_mask)
 
                 results = generator.run_gan_batch(
                     sess, batch, n_samples, n_sample_targets, n_targets_padding_mask, n_rewards)
