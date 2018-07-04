@@ -8,7 +8,9 @@ import numpy as np
 from data import strip_pads
 from gan_utils import rouge_l
 from data import outputsids2words
-from termcolor import colored
+DEBUG = False
+if DEBUG:
+    from termcolor import colored # noqa
 PAD_TOKEN = "[PAD]"
 START_DECODING = '[START]'
 STOP_DECODING = '[STOP]'
@@ -108,9 +110,10 @@ class Rollout(object):
                         references = source_batch.original_abstracts
                         for s, r in zip(summaries, references):
                             rouge = rouge_l(s, r.split())
-                            # print(r)
-                            # print(colored(' '.join(s[:given_num]), 'green') + " " + colored(' '.join(s[given_num:]), 'red'))
-                            # print()
+                            if DEBUG:
+                                print(r)
+                                print(colored(' '.join(s[:given_num]), 'green') + " " + colored(' '.join(s[given_num:]), 'red'))
+                                print()
                             rouge_scores.append(rouge)
                         if ir == 0:
                             rouge_rewards.append(np.array(rouge_scores))
