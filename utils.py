@@ -14,6 +14,7 @@ from termcolor import colored
 from tensorflow.python import pywrap_tensorflow
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.ops import array_ops
+from tensorflow.contrib.rnn import LSTMStateTuple
 import datetime
 import tensorflow as tf
 from random import randrange
@@ -391,6 +392,7 @@ def selective_fn(encoder_outputs, dec_in_state):
     batch_size = encoder_outputs.get_shape().as_list()[0]
     output_dim = encoder_outputs.get_shape()[-1].value
     sele_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
+    dec_state = [dec_in_state.h, dec_in_state.c] if type(dec_in_state) == LSTMStateTuple else dec_in_state
 
     with tf.variable_scope('selective'):
 
@@ -400,7 +402,7 @@ def selective_fn(encoder_outputs, dec_in_state):
         def mask_fn(inputs, i, sele_ar):
             sGate = tf.sigmoid(
                 linear(inputs[i], output_dim, True, scope="w") +
-                linear([dec_in_state.h, dec_in_state.c], output_dim, True, scope="u"))
+                linear(dec_state, output_dim, True, scope="u"))
             sele_ar = sele_ar.write(i, inputs[i] * sGate)
             if i == tf.constant(0, dtype=tf.int32):
                 tf.get_variable_scope().reuse_variables()

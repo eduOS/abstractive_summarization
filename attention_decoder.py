@@ -29,6 +29,7 @@ from tensorflow.python.ops import math_ops
 from utils import linear_mapping_weightnorm
 # from utils import global_selective_fn
 from utils import conv_decoder_stack
+from utils import selective_fn
 from utils import linear
 from utils import maxout
 
@@ -45,7 +46,7 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
     assert type(decoder_inputs) == list, "decoder inputs should be list, but % given" % type(decoder_inputs)
     with variable_scope.variable_scope("attention_decoder"):
         encoder_states = attention_keys
-        batch_size = array_ops.shape(enc_padding_mask)[0]
+        batch_size = attention_keys.get_shape().as_list()[0]
         attn_size = encoder_states.get_shape()[2].value
 
         encoder_states = tf.expand_dims(encoder_states, axis=2)
@@ -68,8 +69,8 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
         def attention(decoder_state, coverage=None):
 
             with variable_scope.variable_scope("Attention"):
-                decoder_features = linear(decoder_state, attention_vec_size, True)
-                decoder_features = tf.expand_dims(tf.expand_dims(decoder_features, 1), 1)
+                decoder_features_ = linear(decoder_state, attention_vec_size, True)
+                decoder_features = tf.expand_dims(tf.expand_dims(decoder_features_, 1), 1)
 
                 def masked_attention(e):
                     """Take softmax of e then apply enc_padding_mask and re-normalize"""
@@ -85,14 +86,18 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
                     batch_nums = tf.tile(batch_nums, [1, attn_len])
                     sent_nums = tf.stack((batch_nums, enc_sent_label), axis=2)
 
-                    masked_enc_features = tf.squeeze(encoder_features, axis=2)*tf.expand_dims(enc_padding_mask, axis=-1)
+                    masked_enc_features = attention_keys*tf.expand_dims(enc_padding_mask, axis=-1)
                     max_sent_num = tf.reduce_max(sent_nums)+1
-                    shape = [batch_size, max_sent_num, tf.shape(encoder_features)[-1]]
-                    sent_features = v * (tf.scatter_nd(sent_nums, masked_enc_features, shape) + decoder_features)
+                    _dim = encoder_features.get_shape().as_list()[-1]
+                    shape = [batch_size, max_sent_num, _dim]
+                    sent_features = v * selective_fn(
+                        tf.scatter_nd(sent_nums, masked_enc_features, shape),
+                        decoder_features_
+                    )
                     new_encoder_features = tf.gather_nd(sent_features, sent_nums)
                     e = math_ops.reduce_sum(
-                        w * math_ops.tanh(new_encoder_features + encoder_features + decoder_features),
-                        [2, 3])  # calculate e
+                        w * math_ops.tanh(new_encoder_features + attention_keys + tf.expand_dims(decoder_features_, 1)),
+                        2)  # calculate e
                     return masked_attention(e)
 
                 if use_coverage and coverage is not None:
