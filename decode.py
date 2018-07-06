@@ -183,13 +183,15 @@ class Decoder(object):
                     assert single_pass, (
                         "Dataset exhausted, but we are not in single_pass mode")
                     print("Decoder has finished reading dataset for single_pass.")
+                    average_rouge = np.mean(np.array(rouge_scores))
                     if save2file:
                         ref_f.close()
                         dec_f.close()
+                        ove_f.write("\nThe overall average rouge: %s" % average_rouge)
                         ove_f.close()
-                        return np.mean(np.array(rouge_scores))
+                        return average_rouge
                     else:
-                        return np.mean(np.array(rouge_scores))
+                        return average_rouge
 
                 best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
                 outputs_ids = [[t for t in hyp.tokens[1:]] for hyp in best_hyps]
@@ -235,12 +237,12 @@ class Decoder(object):
                     for idx, sent in enumerate(decoded_outputs):
                         dec_f.write(sent+"\n")
                 for artc, refe, hypo in zip(original_articles, original_abstracts, decoded_outputs):
-                    rouges = rouge_l(hypo.split(), refe.split())
-                    rouge_scores.append(rouges)
+                    rouge = rouge_l(hypo.split(), refe.split())
+                    rouge_scores.append(rouge)
                     if save2file:
                         ove_f.write("article: "+artc+"\n")
                         ove_f.write("reference: "+refe+"\n")
-                        ove_f.write("hypothesis: "+hypo+"\n")
+                        ove_f.write("hypothesis: "+hypo+" --%s--\n" % str(rouge))
                         ove_f.write("\n")
 
         except KeyboardInterrupt as exc:

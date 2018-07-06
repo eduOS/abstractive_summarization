@@ -113,7 +113,8 @@ def _calc_f1(matches, count_for_recall, count_for_precision, alpha):
 
 
 def rouge_l(summary, references, alpha=0.5):
-    assert not isinstance(summary[0], list), "summary should be a 1-d list"
+    if summary and references:
+        assert not isinstance(summary[0], list), "summary should be a 1-d list"
     matches = 0
     count_for_recall = 0
     _refs = references if isinstance(references[0], list) else [references]
