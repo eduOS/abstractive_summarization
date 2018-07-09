@@ -483,10 +483,9 @@ class GenBatcher(object):
                 while True:
                     art_abs = f.readline().strip().split("\t")
                     if len(art_abs) != 2:
-                        if len(art_abs) != 0:
-                            print("Invalide sample:\n")
-                            for aa in art_abs:
-                                print(aa)
+                        if art_abs:
+                            print(colored("Invalide sample:\n"), 'red')
+                            print(art_abs)
 
                         if self._mode == "val":
                             f.seek(0)
