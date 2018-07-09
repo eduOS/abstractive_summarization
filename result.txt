@@ -8,3 +8,8 @@ The average rouge_l is 0.3829562984
 The average rouge_1 is 0.432169863049
 The average rouge_2 is 0.321548944854
 The average rouge_l is 0.412794904293
+
+# vocab word:char 500000:7500, old_bs_2, 4200008
+The average rouge_1 is 0.435149681593
+The average rouge_2 is 0.32379437307
+The average rouge_l is 0.415395715971
