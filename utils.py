@@ -386,32 +386,33 @@ def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_in
         return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
 
 
-def selective_fn(encoder_outputs, dec_in_state):
-    enc_outputs = tf.transpose(encoder_outputs, perm=[1, 0, 2])
-    dynamic_enc_steps = tf.shape(enc_outputs)[0]
-    batch_size = encoder_outputs.get_shape().as_list()[0]
-    output_dim = encoder_outputs.get_shape()[-1].value
-    sele_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
-    dec_state = [dec_in_state.h, dec_in_state.c] if type(dec_in_state) == LSTMStateTuple else dec_in_state
+def selective_fn(encoder_outputs, dec_in_state, scope="selective_fn"):
+    with tf.variable_scope(scope):
+        enc_outputs = tf.transpose(encoder_outputs, perm=[1, 0, 2])
+        dynamic_enc_steps = tf.shape(enc_outputs)[0]
+        batch_size = encoder_outputs.get_shape().as_list()[0]
+        output_dim = encoder_outputs.get_shape()[-1].value
+        sele_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
+        dec_state = [dec_in_state.h, dec_in_state.c] if type(dec_in_state) == LSTMStateTuple else dec_in_state
 
-    with tf.variable_scope('selective'):
+        with tf.variable_scope('selective'):
 
-        def cond(_e, i, _m):
-            return i < dynamic_enc_steps
+            def cond(_e, i, _m):
+                return i < dynamic_enc_steps
 
-        def mask_fn(inputs, i, sele_ar):
-            sGate = tf.sigmoid(
-                linear(inputs[i], output_dim, True, scope="w") +
-                linear(dec_state, output_dim, True, scope="u"))
-            sele_ar = sele_ar.write(i, inputs[i] * sGate)
-            if i == tf.constant(0, dtype=tf.int32):
-                tf.get_variable_scope().reuse_variables()
-            return inputs, i+1, sele_ar
+            def mask_fn(inputs, i, sele_ar):
+                sGate = tf.sigmoid(
+                    linear(inputs[i], output_dim, True, scope="w") +
+                    linear(dec_state, output_dim, True, scope="u"))
+                sele_ar = sele_ar.write(i, inputs[i] * sGate)
+                if i == tf.constant(0, tf.int32):
+                    tf.get_variable_scope().reuse_variables()
+                return inputs, i+1, sele_ar
 
-        _, _, sele_ar = tf.while_loop(
-            cond, mask_fn, (enc_outputs, tf.constant(0, dtype=tf.int32), sele_ar))
-        new_enc_outputs = tf.transpose(tf.squeeze(sele_ar.stack()), perm=[1, 0, 2])
-        new_enc_outputs = tf.reshape(new_enc_outputs, [batch_size, -1, output_dim])
+            _, _, sele_ar = tf.while_loop(
+                cond, mask_fn, (enc_outputs, tf.constant(0, dtype=tf.int32), sele_ar))
+            new_enc_outputs = tf.transpose(tf.squeeze(sele_ar.stack()), perm=[1, 0, 2])
+            new_enc_outputs = tf.reshape(new_enc_outputs, [batch_size, -1, output_dim])
     return new_enc_outputs
 
 

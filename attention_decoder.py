@@ -25,13 +25,8 @@ from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import math_ops
-# from gen_utils import get_local_global_features
-from utils import linear_mapping_weightnorm
-# from utils import global_selective_fn
-from utils import conv_decoder_stack
 from utils import selective_fn
 from utils import linear
-from utils import maxout
 
 
 # Note: this function is based on tf.contrib.legacy_seq2seq_attention_decoder,
@@ -88,15 +83,17 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
 
                     masked_enc_features = attention_keys*tf.expand_dims(enc_padding_mask, axis=-1)
                     max_sent_num = tf.reduce_max(sent_nums)+1
-                    _dim = encoder_features.get_shape().as_list()[-1]
+                    _dim = attention_keys.get_shape().as_list()[-1]
                     shape = [batch_size, max_sent_num, _dim]
                     sent_features = v * selective_fn(
-                        tf.scatter_nd(sent_nums, masked_enc_features, shape),
+                        tf.scatter_nd(sent_nums, masked_enc_features, shape, "sentence_selection"),
                         decoder_features_
                     )
-                    new_encoder_features = tf.gather_nd(sent_features, sent_nums)
+                    sent_encoder_features = tf.gather_nd(sent_features, sent_nums)
+                    new_encoder_features = selective_fn(sent_encoder_features, decoder_features_, 'character_selection')
+
                     e = math_ops.reduce_sum(
-                        w * math_ops.tanh(new_encoder_features + attention_keys + tf.expand_dims(decoder_features_, 1)),
+                        w * math_ops.tanh(attention_keys + sent_encoder_features + new_encoder_features + tf.expand_dims(decoder_features_, 1)),
                         2)  # calculate e
                     return masked_attention(e)
 
@@ -158,53 +155,3 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
             coverage = array_ops.reshape(coverage, [batch_size, -1])
 
         return outputs, state, attn_dists
-
-
-def conv_attention_decoder(emb_enc_inputs, enc_padding_mask, emb_dec_inputs, attentions_keys,
-                           vocab_size, is_training, cnn_layers=4, nout_embed=256,
-                           nhids_list=[256, 256, 256, 256], kwidths_list=[3, 3, 3, 3],
-                           embedding_dropout_keep_prob=0.9, nhid_dropout_keep_prob=0.9,
-                           out_dropout_keep_prob=0.9):
-    """
-    attentions_keys:
-        a four dimensional tensor: (attention heads number, batch size, enc_length, hidden_dim)
-
-    """
-
-    enc_inputs = emb_enc_inputs
-    input_shape = emb_dec_inputs.get_shape().as_list()    # static shape. may has None
-    dec_labels = tf.contrib.layers.dropout(
-        inputs=emb_dec_inputs,
-        keep_prob=embedding_dropout_keep_prob,
-        is_training=is_training)
-
-    with tf.variable_scope("decoder_cnn"):
-        next_layer = dec_labels
-        if cnn_layers > 0:
-            next_layer = linear_mapping_weightnorm(
-                next_layer, nhids_list[0], dropout=embedding_dropout_keep_prob,
-                var_scope_name="linear_mapping_before_cnn")
-
-            next_layer, att_out, attn_dist = conv_decoder_stack(
-                enc_inputs, dec_labels, attentions_keys, next_layer, enc_padding_mask,
-                nhids_list, kwidths_list, is_training=is_training, dropout_dict={
-                    'src': embedding_dropout_keep_prob,
-                    'hid': nhid_dropout_keep_prob
-                })
-
-    with tf.variable_scope("softmax"):
-        if is_training:
-            next_layer = linear_mapping_weightnorm(next_layer, nout_embed, var_scope_name="linear_mapping_after_cnn")
-        else:
-            next_layer = linear_mapping_weightnorm(next_layer[:, -1:, :], nout_embed, var_scope_name="linear_mapping_after_cnn")
-        outputs = tf.contrib.layers.dropout(
-            inputs=next_layer,
-            keep_prob=out_dropout_keep_prob,
-            is_training=is_training)
-
-    p_gens = linear_mapping_weightnorm(tf.concat(axis=-1, values=[outputs, att_out]), 1, 1, "p_gens")
-    logits = linear_mapping_weightnorm(outputs, vocab_size, dropout=out_dropout_keep_prob, var_scope_name="logits_before_softmax")
-    p_gens = tf.reshape(p_gens, [-1, input_shape[1], 1])
-    logits = tf.reshape(logits, [-1, input_shape[1], vocab_size])
-
-    return logits, p_gens, attn_dist, None, None

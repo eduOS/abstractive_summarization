@@ -25,13 +25,11 @@ import numpy as np
 import tensorflow as tf
 from termcolor import colored
 from attention_decoder import lstm_attention_decoder
-from attention_decoder import conv_attention_decoder
 from utils import lstm_encoder
 from utils import linear
 from codecs import open
 from six.moves import xrange
 from tensorflow.contrib.rnn import LSTMStateTuple
-from utils import selective_fn
 import data
 
 FLAGS = tf.app.flags.FLAGS
@@ -161,8 +159,8 @@ class PointerGenerator(object):
 
             # selective encoding: http://arxiv.org/abs/1704.07073
             # this can filter out some useless words
-            attention_keys = tf.reshape(self.attention_keys, [hps.batch_size, -1, self.attention_keys.get_shape()[-1].value])
-            self.attention_keys = selective_fn(attention_keys, self.dec_in_state)
+            self.attention_keys = tf.reshape(self.attention_keys, [hps.batch_size, -1, self.attention_keys.get_shape()[-1].value])
+            # self.attention_keys = selective_fn(attention_keys, self.dec_in_state)
 
             with tf.variable_scope('decoder') as decoder_scope:
                 vocab_dists, self.attn_dists, self._dec_out_state = self._lstm_decoder(emb_dec_inputs, self.dec_in_state)
