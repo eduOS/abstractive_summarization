@@ -286,7 +286,7 @@ class GenBatcher(object):
         self._data_path = os.path.join(hps.data_path, file_name) + ".txt_*"
         self._minutes = 0
         self._files_name_dict = dd(lambda: 0)
-        self._log_writer = open("./gen_batcher_writer", "a", "utf-8")
+        # self._log_writer = open("./gen_batcher_writer", "a", "utf-8")
 
         # Initialize a queue of Batches waiting to be used, and a queue of
         # Examples waiting to be batched
@@ -397,18 +397,18 @@ class GenBatcher(object):
                     article, s_label, abstract, self._enc_vocab, self._dec_vocab, self._hps)
                 # what is the vocab here? the extended vocab?
                 # place the Example in the example queue.
-                enc_len = len(example.enc_input)
-                abs_len = len(example.abs_ids)
-                if enc_len < 2 * abs_len:
-                    self._log_writer.write("total length of abstract %s, total length of the article %s" % (enc_len, abs_len))
-                    self._log_writer.write("\n")
-                    self._log_writer.write(example.original_article)
-                    self._log_writer.write("\n")
-                    self._log_writer.write(example.original_abstract)
-                    self._log_writer.write("\n")
-                    self._log_writer.write("\n")
-                else:
-                    self._example_queue.put(example)
+                # enc_len = len(example.enc_input)
+                # abs_len = len(example.abs_ids)
+                # if enc_len < 2 * abs_len:
+                #     self._log_writer.write("total length of abstract %s, total length of the article %s" % (enc_len, abs_len))
+                #     self._log_writer.write("\n")
+                #     self._log_writer.write(example.original_article)
+                #     self._log_writer.write("\n")
+                #     self._log_writer.write(example.original_abstract)
+                #     self._log_writer.write("\n")
+                #     self._log_writer.write("\n")
+                # else:
+                self._example_queue.put(example)
             elif self._mode in ['val', 'test']:
                 self._example_queue.put(None)
             else:
