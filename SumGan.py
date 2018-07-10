@@ -614,7 +614,7 @@ def main(argv):
 
                 if not math.isnan(_f1) and _f1 > 0.9:
                     # eve_f1 = eval_dis(gan_batcher_test, decoder, discriminator)
-                    gan_gen_iter = 2
+                    gan_gen_iter = 1
                     break
 
             if gan_gen_iter:
@@ -672,7 +672,7 @@ def main(argv):
                 current_speed.append(time.time() - start_time)
 
             # Test
-            if gan_gen_iter and (i_gan % 3 == 0 or i_gan == hps_gan.gan_iter - 1):
+            if gan_gen_iter and (i_gan % 1 == 0 or i_gan == hps_gan.gan_iter - 1):
                 print('\nGoing to test the loss of the generator.')
                 current_speed = (float(sum(current_speed)) + epsilon) / (int(len(current_speed)) * hps_gen.batch_size + epsilon)
                 everage_g_loss = (float(sum(g_losses)) + epsilon) / float(len(g_losses) + epsilon)
