@@ -9,7 +9,7 @@ import utils
 import time
 import sys
 import data
-from batcher import GenBatcher, DisBatcher
+from batcher import GenBatcher
 from decode import Decoder
 from pointer_generator import PointerGenerator
 from rollout import Rollout
@@ -19,7 +19,7 @@ from gen_utils import calc_running_avg_loss
 from gen_utils import get_best_loss_from_chpt
 from gen_utils import save_ckpt as gen_save_ckpt
 from gan_utils import save_ckpt as gan_save_ckpt
-from tensorflow.python import debug as tf_debug
+from tensorflow.python import debug as tf_debug # noqa
 from utils import sattolo_cycle
 from utils import print_dashboard
 from dis_utils import dump_chpt
