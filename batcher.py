@@ -425,15 +425,25 @@ class GenBatcher(object):
             # Get bucketing_cache_size-many batches of Examples into a list,
             # then sort
             inputs = []
-            for _ in range(self._hps.batch_size * self._bucketing_cache_size):
+            for l in range(self._hps.batch_size * self._bucketing_cache_size):
+
                 pair = self._example_queue.get()
-                if pair and pair not in inputs:
-                    inputs.append(pair)
-                elif not pair:
+                if self._mode == "val":
+                    pass
+                if pair:
+                    if self._mode == "train" and pair not in inputs:
+                        inputs.append(pair)
+                    elif self._mode in ["val", 'test']:
+                        inputs.append(pair)
+                else:
                     inputs.append('None')
+                    for _ in range((l+1) % self._hps.batch_size):
+                        inputs.append('None')
+                    break
             # sort by length of encoder sequence
-            inputs = list(set(inputs))
-            inputs = sorted(inputs, key=lambda inp: len(inp))
+            if self._mode == "train":
+                inputs = list(set(inputs))
+                inputs = sorted(inputs, key=lambda inp: len(inp))
 
             # Group the sorted Examples into batches, optionally shuffle the
             # batches, and place in the batch queue.
@@ -442,11 +452,11 @@ class GenBatcher(object):
                 batches.append(inputs[i:i + self._hps.batch_size])
             if self._mode == "train":
                 shuffle(batches)
-            for b in batches:  # each b is a list of Example objects
+            for i, b in enumerate(batches):  # each b is a list of Example objects
                 if "None" in b:
                     self._batch_queue.put(None)
                     continue
-                elif len(b) != self._hps.batch_size:
+                if len(b) != self._hps.batch_size:
                     continue
                 self._batch_queue.put(Batch(b, self._hps, self._enc_vocab, self._dec_vocab))
 
@@ -517,134 +527,3 @@ class GenBatcher(object):
 
             if self._mode == "test":
                 break
-
-
-def get_batch(self, data, batch_size, balance=False, put_back=True):
-  encoder_inputs = []
-  targets = []
-
-  # Get a random batch of encoder and decoder inputs from data,
-  # pad them if needed, reverse encoder inputs and add GO to decoder.
-  for _ in range(batch_size):
-
-    if len(data) == 0:
-      break
-
-    else:
-      if put_back and not balance:
-        encoder_input, target = random.choice(data)
-      if put_back and balance:
-        clas = random.choice(data)
-        encoder_input, target = random.choice(clas)
-      else:
-        encoder_input, target = data.pop()
-      # add to the batch
-      encoder_inputs.append(encoder_input)
-      targets.append(target)
-
-  if len(targets) == 0:
-    return None, None, False
-  else:
-    encoder_inputs = list(np.transpose(np.array(encoder_inputs)))
-    targets = np.array(targets)
-    return encoder_inputs, targets, True
-
-
-class DisBatcher:
-    """
-    all training data have a compared negative abstract which can be ignored in the gan training
-    """
-
-    def __init__(self, data_dir, mode, gen_vocab, dis_vocab, batch_size=1, max_art_steps=80, max_abs_steps=15, single_pass=False, clip_length=True):
-        self.positive = fopen(os.path.join(data_dir, mode + "_positive"), 'r')
-        self.negative = fopen(os.path.join(data_dir, mode + "_negative"), 'r')
-        self.source = fopen(os.path.join(data_dir, mode + "_source"), 'r')
-        self.dis_vocab = dis_vocab
-        self.gen_vocab_keys = gen_vocab.word_keys
-
-        self.batch_size = batch_size
-        self.max_art_steps = max_art_steps
-        self.max_abs_steps = max_abs_steps
-        self.end_of_data = False
-        self.single_pass = single_pass
-        self.clip_length = clip_length
-        self._count = 0
-
-    def __iter__(self):
-        return self
-
-    def reset(self):
-        self.positive.seek(0)
-        self.negative.seek(0)
-        self.source.seek(0)
-
-    def next_batch(self, print_fqc=0):
-        if self.end_of_data:
-            self.end_of_data = False
-            self.reset()
-            # raise StopIteration
-
-        positive = []
-        negative = []
-        source = []
-
-        try:
-            while True:
-                abs_p = self.positive.readline().strip()
-                abs_n = self.negative.readline().strip()
-                art = self.source.readline().strip()
-
-                if abs_p == "" or art == "":
-                    raise IOError
-                if abs_n == "":
-                    # the generated negative abstract may be empty
-                    continue
-                gen_vocab = art.split() + self.gen_vocab_keys
-                abs_p = abs_p.split()
-                abs_p = ' '.join([p if p in gen_vocab else "[UNK]" for p in abs_p])
-                if (print_fqc and self._count % print_fqc == 0) or (print_fqc and self._count == 0):
-                    print("positive sample in dis_batch: " + colored(abs_p, "green"))
-                    print("negative sample in dis_batch: " + colored(abs_n, "red"))
-                    print('\n')
-
-                abs_p = text2charlist(abs_p, keep_word='[UNK]')
-                abs_n = text2charlist(abs_n, keep_word='[UNK]')
-                art = text2charlist(art, keep_word='[UNK]')
-
-                if not self.clip_length:
-                    if len(abs_p) > self.max_abs_steps or len(abs_n) > self.max_abs_steps or len(art) > self.max_art_steps:
-                        continue
-                else:
-                    abs_p = abs_p[:self.max_abs_steps]
-                    abs_n = abs_n[:self.max_abs_steps]
-                    art = art[:self.max_art_steps]
-
-                abs_p = [self.dis_vocab.word2id(w) for w in abs_p]
-                abs_n = [self.dis_vocab.word2id(w) for w in abs_n]
-                art = [self.dis_vocab.word2id(w) for w in art]
-
-                abs_p = abs_p + [0] * (self.max_abs_steps - len(abs_p))
-                abs_n = abs_n + [0] * (self.max_abs_steps - len(abs_n))
-                art = art + [0] * (self.max_art_steps - len(art))
-
-                positive.append(abs_p)
-                negative.append(abs_n)
-                source.append(art)
-
-                if len(positive) >= self.batch_size:
-                    break
-        except IOError:
-            if self.single_pass:
-                return None, None, None
-            else:
-                print("Reaches the end..")
-            self.end_of_data = True
-
-        if len(positive) <= 0 or len(negative) <= 0:
-            self.end_of_data = False
-            self.reset()
-            raise StopIteration
-
-        self._count += 1
-
-        return source, positive, negative
