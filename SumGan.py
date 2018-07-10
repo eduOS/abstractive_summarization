@@ -479,7 +479,7 @@ def main(argv):
         gen_batcher_val = GenBatcher("val", "val", enc_vocab, dec_vocab, hps_gen)
 
     if FLAGS.mode == "decode":
-        decoder_batcher = GenBatcher("val", "test", enc_vocab, dec_vocab, hps_gen)
+        decoder_batcher = GenBatcher("test", "test", enc_vocab, dec_vocab, hps_gen)
 
     if FLAGS.mode == "train_gan":
         # only for the gan bs rouge test

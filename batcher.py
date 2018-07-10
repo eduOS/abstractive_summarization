@@ -423,15 +423,24 @@ class GenBatcher(object):
             # Get bucketing_cache_size-many batches of Examples into a list,
             # then sort
             inputs = []
-            for _ in range(self._hps.batch_size * self._bucketing_cache_size):
+            for l in range(self._hps.batch_size * self._bucketing_cache_size):
+
                 pair = self._example_queue.get()
-                if pair and pair not in inputs:
-                    inputs.append(pair)
-                elif not pair:
+                if self._mode == "val":
+                    pass
+                if pair:
+                    if self._mode == "train" and pair not in inputs:
+                        inputs.append(pair)
+                    elif self._mode in ["val", 'test']:
+                        inputs.append(pair)
+                else:
                     inputs.append('None')
+                    for _ in range((l+1) % self._hps.batch_size):
+                        inputs.append('None')
+                    break
             # sort by length of encoder sequence
-            inputs = list(set(inputs))
             if self._mode == "train":
+                inputs = list(set(inputs))
                 inputs = sorted(inputs, key=lambda inp: len(inp))
 
             # Group the sorted Examples into batches, optionally shuffle the
@@ -441,11 +450,11 @@ class GenBatcher(object):
                 batches.append(inputs[i:i + self._hps.batch_size])
             if self._mode == "train":
                 shuffle(batches)
-            for b in batches:  # each b is a list of Example objects
+            for i, b in enumerate(batches):  # each b is a list of Example objects
                 if "None" in b:
                     self._batch_queue.put(None)
                     continue
-                elif len(b) != self._hps.batch_size:
+                if len(b) != self._hps.batch_size:
                     continue
                 self._batch_queue.put(Batch(b, self._hps, self._enc_vocab, self._dec_vocab))
 
@@ -483,13 +492,10 @@ class GenBatcher(object):
                 while True:
                     art_abs = f.readline().strip().split("\t")
                     if len(art_abs) != 2:
-                        if art_abs:
-                            print(colored("Invalide sample:\n"), 'red')
-                            print(art_abs)
 
                         if self._mode == "val":
-                            f.seek(0)
                             yield (None, None)
+                            f.seek(0)
                             continue
                         elif self._mode == 'test':
                             f.close()
