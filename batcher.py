@@ -284,7 +284,7 @@ class GenBatcher(object):
         self._data_path = os.path.join(hps.data_path, file_name) + ".txt_*"
         self._minutes = 0
         self._files_name_dict = dd(lambda: 0)
-        self._log_writer = open("./gen_batcher_writer", "a", "utf-8")
+        # self._log_writer = open("./gen_batcher_writer", "a", "utf-8")
 
         # Initialize a queue of Batches waiting to be used, and a queue of
         # Examples waiting to be batched
