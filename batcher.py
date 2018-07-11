@@ -440,7 +440,6 @@ class GenBatcher(object):
                     break
             # sort by length of encoder sequence
             if self._mode == "train":
-                inputs = list(set(inputs))
                 inputs = sorted(inputs, key=lambda inp: len(inp))
 
             # Group the sorted Examples into batches, optionally shuffle the
@@ -450,8 +449,17 @@ class GenBatcher(object):
                 batches.append(inputs[i:i + self._hps.batch_size])
             if self._mode == "train":
                 shuffle(batches)
-            for i, b in enumerate(batches):  # each b is a list of Example objects
+            for b in batches:  # each b is a list of Example objects
                 if "None" in b:
+                    # print()
+                    # print('begin----------')
+                    # for bb in b:
+                    #     if bb == 'None':
+                    #         print('None')
+                    #     else:
+                    #         print(bb.original_abstract)
+                    # print('end----------')
+                    # print()
                     self._batch_queue.put(None)
                     continue
                 if len(b) != self._hps.batch_size:

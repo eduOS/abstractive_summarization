@@ -157,6 +157,7 @@ def save_ckpt(sess, model, decoder, best_loss, best_rouge, model_dir, model_save
     losses = []
     while True:
         val_batch = loss_batcher.next_batch()
+
         if not val_batch:
             break
         results_val = model.run_one_batch(sess, val_batch, update=False, gan_eval=True)
