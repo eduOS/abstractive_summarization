@@ -494,8 +494,8 @@ class GenBatcher(object):
                     if len(art_abs) != 2:
 
                         if self._mode == "val":
-                            yield (None, None)
                             f.seek(0)
+                            yield (None, None)
                             continue
                         elif self._mode == 'test':
                             f.close()
