@@ -442,7 +442,6 @@ class GenBatcher(object):
                     break
             # sort by length of encoder sequence
             if self._mode == "train":
-                inputs = list(set(inputs))
                 inputs = sorted(inputs, key=lambda inp: len(inp))
 
             # Group the sorted Examples into batches, optionally shuffle the
