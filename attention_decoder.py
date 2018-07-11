@@ -90,10 +90,10 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
                         decoder_features_
                     )
                     sent_encoder_features = tf.gather_nd(sent_features, sent_nums)
-                    new_encoder_features = selective_fn(sent_encoder_features, decoder_features_, 'character_selection')
+                    new_encoder_features = selective_fn(sent_encoder_features+masked_enc_features, decoder_features_, 'character_selection')
 
                     e = math_ops.reduce_sum(
-                        w * math_ops.tanh(attention_keys + sent_encoder_features + new_encoder_features + tf.expand_dims(decoder_features_, 1)),
+                        w * math_ops.tanh(masked_enc_features + sent_encoder_features + new_encoder_features + tf.expand_dims(decoder_features_, 1)),
                         2)  # calculate e
                     return masked_attention(e)
 
