@@ -483,7 +483,7 @@ def main(argv):
 
     if FLAGS.mode == "train_gan":
         # only for the gan bs rouge test
-        gan_batcher_test = GenBatcher("test", "val", enc_vocab, dec_vocab, hps_gen)
+        gan_batcher_test = GenBatcher("mini_v", "val", enc_vocab, dec_vocab, hps_gen)
         # gan_batcher_val = GenBatcher("val", "val", enc_vocab, dec_vocab, hps_gen)
 
     if FLAGS.mode == "pretrain_gen":
