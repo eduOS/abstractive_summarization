@@ -437,7 +437,7 @@ class GenBatcher(object):
                         inputs.append(pair)
                 else:
                     inputs.append('None')
-                    for _ in range((l+1) % self._hps.batch_size):
+                    for _ in range(self._hps.batch_size - ((l+1) % self._hps.batch_size)):
                         inputs.append('None')
                     break
             # sort by length of encoder sequence
