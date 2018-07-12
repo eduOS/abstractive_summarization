@@ -435,8 +435,23 @@ class GenBatcher(object):
                         inputs.append(pair)
                 else:
                     inputs.append('None')
-                    for _ in range((l+1) % self._hps.batch_size):
+                    for _ in range(self._hps.batch_size - ((l+1) % self._hps.batch_size)):
                         inputs.append('None')
+                    # print('batch_size')
+                    # print(self._hps.batch_size)
+                    # print('l')
+                    # print(l)
+                    # print((l+1) % self._hps.batch_size)
+                    # print()
+                    # print('BEGIN----------')
+                    # for bb in inputs[-self._hps.batch_size:]:
+                    #     if bb == 'None':
+                    #         print('None')
+                    #     else:
+                    #         print(bb.original_abstract)
+                    # print('END----------')
+                    # print()
+                    assert len(inputs) % self._hps.batch_size == 0, '%s, %s' % (str(len(inputs)), self._hps.batch_size)
                     break
             # sort by length of encoder sequence
             if self._mode == "train":
@@ -451,15 +466,16 @@ class GenBatcher(object):
                 shuffle(batches)
             for b in batches:  # each b is a list of Example objects
                 if "None" in b:
-                    # print()
-                    # print('begin----------')
-                    # for bb in b:
-                    #     if bb == 'None':
-                    #         print('None')
-                    #     else:
-                    #         print(bb.original_abstract)
-                    # print('end----------')
-                    # print()
+                    # if self._mode == 'val' and 'val' in self._data_path:
+                    #     print()
+                    #     print('begin----------')
+                    #     for bb in b:
+                    #         if bb == 'None':
+                    #             print('None')
+                    #         else:
+                    #             print(bb.original_abstract)
+                    #     print('end----------')
+                    #     print()
                     self._batch_queue.put(None)
                     continue
                 if len(b) != self._hps.batch_size:
