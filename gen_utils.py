@@ -94,10 +94,14 @@ def save_ckpt(sess, model, best_loss, model_dir, model_saver,
         results_val = model.run_one_batch(sess, val_batch, update=False, gan_eval=gan_eval)
         loss_eval = results_val["loss"]
         # why there exists nan?
-        if not math.isnan(loss_eval):
+        if not (math.isnan(loss_eval) or math.isinf(loss_eval)):
             losses.append(loss_eval)
         else:
-            print(colored("Encountered a NAN.", 'red'))
+            print(val_batch)
+            for at, ab in zip(val_batch.original_articles, val_batch.original_abstracts):
+                print(at)
+                print(ab)
+            print(colored("Encountered a NAN or INF.", 'red'))
     eval_loss = sum(losses) / len(losses)
     if best_loss is None or eval_loss < best_loss:
         sess.run(model.least_val_loss.assign(eval_loss))
