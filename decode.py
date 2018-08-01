@@ -30,6 +30,7 @@ import tensorflow as tf
 from random import randint
 import beam_search
 import monte_carlo_search
+from data import outputsids2words
 import data
 import json
 from codecs import open
@@ -205,7 +206,7 @@ class Decoder(object):
                     sample_n = randint(0, batch_size)
                     if sample == 1:
                         print()
-                    decoded_words_list = data.outputsids2words(
+                    decoded_words_list = outputsids2words(
                         outputs_ids, self._vocab)
 
                     decoded_outputs = []
@@ -223,31 +224,27 @@ class Decoder(object):
                             print("abstract:\t" + original_abstracts[sample_n])
                             print("hypothesis:\t" + decoded_output)
                             print("")
-                        elif save2file:
-                            decoded_outputs.append(decoded_output)
-
-                if not save2file:
-                    rouges = rouge_l(
-                        strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING)),
-                        strip_pads(batch.dec_batch.tolist(),
-                                   self._vocab.word2id(STOP_DECODING))
-                        )
-                    rouge_scores += rouges
-                    continue
+                        decoded_outputs.append(decoded_output)
 
                 counter += 1  # this is how many examples we've decoded
                 if counter % 10000 == 0:
                     print("Have decoded %s samples." % (counter * FLAGS.batch_size))
 
-                for idx, sent in enumerate(original_abstracts):
-                    ref_f.write(sent+"\n")
-                for idx, sent in enumerate(decoded_outputs):
-                    dec_f.write(sent+"\n")
+                if save2file:
+                    for idx, sent in enumerate(original_abstracts):
+                        ref_f.write(sent+"\n")
+                    for idx, sent in enumerate(decoded_outputs):
+                        dec_f.write(sent+"\n")
                 for artc, refe, hypo in zip(original_articles, original_abstracts, decoded_outputs):
-                    ove_f.write("article: "+artc+"\n")
-                    ove_f.write("reference: "+refe+"\n")
-                    ove_f.write("hypothesis: "+hypo+"\n")
-                    ove_f.write("\n")
+
+                    rouges = rouge_l(hypo.split(), refe.split())
+                    rouge_scores.append(rouges)
+
+                    if save2file:
+                        ove_f.write("article: "+artc+"\n")
+                        ove_f.write("reference: "+refe+"\n")
+                        ove_f.write("hypothesis: "+hypo+"\n")
+                        ove_f.write("\n")
         except KeyboardInterrupt as exc:
             print(exc)
             print("Have decoded %s samples." % (counter * FLAGS.batch_size))
@@ -262,7 +259,6 @@ class Decoder(object):
         intervals"""
 
         rouge_scores = []
-        # t0 = time.time()
         if save2file:
             self.prepare_dir()
             ref_file = os.path.join(
@@ -280,108 +276,73 @@ class Decoder(object):
         counter = 0
         try:
             while True:
-                # 1 example repeated across batch
                 batch = batcher.next_batch()
                 if batch is None:
-                    # finished decoding dataset in single_pass mode
                     assert single_pass, (
                         "Dataset exhausted, but we are not in single_pass mode")
                     print("Decoder has finished reading dataset for single_pass.")
-                    if not save2file:
-                        return np.mean(np.array(rouge_scores))
-                    else:
+                    average_rouge = np.mean(np.array(rouge_scores))
+                    if save2file:
                         ref_f.close()
                         dec_f.close()
+                        ove_f.write("\nThe overall average rouge: %s" % average_rouge)
                         ove_f.close()
-                        return
-                    # print(
-                    #     "Output has been saved in %s and %s. \
-                    #     Now starting ROUGE eval..." % (
-                    #         self._rouge_ref_dir, self._rouge_dec_dir))
-                    # results_dict = rouge_eval(
-                    #     self._rouge_ref_dir, self._rouge_dec_dir)
-                    # rouge_log(results_dict, self._decode_dir)
+                        return average_rouge
+                    else:
+                        return average_rouge
 
-                _, _, best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
-                # is the beam_size here 1?
+                best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
                 outputs_ids = [[t for t in hyp.tokens[1:]] for hyp in best_hyps]
 
                 original_articles = batch.original_articles
                 original_abstracts = batch.original_abstracts
-                # original_abstract_sents = batch.original_abstracts_sents[0]
-                # list of strings
 
                 sample = randint(0, int(1 / sample_rate) if sample_rate else 0)
-                if sample == 1 or save2file:
-                    sample_n = randint(0, batch_size)
-                    if sample == 1:
-                        print()
-                    decoded_words_list = data.outputsids2words(
-                        outputs_ids, self._vocab, art_oovs)
 
-                    decoded_outputs = []
+                sample_n = randint(0, batch_size)
+                if sample == 1:
+                    print()
+                try:
+                    decoded_words_list = outputsids2words(
+                        outputs_ids, self._vocab)
+                except:
+                    print(outputs_ids)
+                    raise
 
-                    # Remove the [STOP] token from decoded_words, if necessary
-                    for s_n, decoded_words in enumerate(decoded_words_list):
-                        try:
-                            fst_stop_idx = decoded_words.index(data.STOP_DECODING)
-                            decoded_words = decoded_words[:fst_stop_idx]
-                        except ValueError:
-                            pass
-                        decoded_output = ' '.join(decoded_words)
-                        if sample == 1 and s_n == sample_n:
-                            print("article:\t" + original_articles[sample_n])
-                            print("abstract:\t" + original_abstracts[sample_n])
-                            print("hypothesis:\t" + decoded_output)
-                            print("")
-                        elif save2file:
-                            decoded_outputs.append(decoded_output)
+                decoded_outputs = []
 
-                if not save2file:
-                    rouges = rouge_l(
-                        strip_pads(outputs_ids, self._vocab.word2id(STOP_DECODING)),
-                        strip_pads(batch.dec_batch.tolist(),
-                                   self._vocab.word2id(STOP_DECODING))
-                        )
-                    rouge_scores += rouges
-                    continue
+                for s_n, decoded_words in enumerate(decoded_words_list):
+                    try:
+                        fst_stop_idx = decoded_words.index(data.STOP_DECODING)
+                        decoded_words = decoded_words[:fst_stop_idx]
+                    except ValueError:
+                        pass
+                    decoded_output = ' '.join(decoded_words)
+                    if sample == 1 and s_n == sample_n:
+                        print("article:\t" + original_articles[sample_n])
+                        print("abstract:\t" + original_abstracts[sample_n])
+                        print("hypothesis:\t" + decoded_output)
+                        print("")
+                    decoded_outputs.append(decoded_output)
 
-                # articles_withunks = data.show_art_oovs(original_articles, self._vocab)
-                # abstracts_withunks = data.show_abs_oovs(original_abstracts, self._vocab, art_oovs)
-
-                # write ref summary and decoded summary to file, to eval with
-                # pyrouge later
-                # self.write_for_discriminator(
-                #     original_articles, original_abstracts, decoded_outputs)
                 counter += 1  # this is how many examples we've decoded
                 if counter % 10000 == 0:
                     print("Have decoded %s samples." % (counter * FLAGS.batch_size))
 
-                for idx, sent in enumerate(original_abstracts):
-                    ref_f.write(sent+"\n")
-                for idx, sent in enumerate(decoded_outputs):
-                    dec_f.write(sent+"\n")
+                if save2file:
+                    for idx, sent in enumerate(original_abstracts):
+                        ref_f.write(sent+"\n")
+                    for idx, sent in enumerate(decoded_outputs):
+                        dec_f.write(sent+"\n")
                 for artc, refe, hypo in zip(original_articles, original_abstracts, decoded_outputs):
-                    ove_f.write("article: "+artc+"\n")
-                    ove_f.write("reference: "+refe+"\n")
-                    ove_f.write("hypothesis: "+hypo+"\n")
-                    ove_f.write("\n")
-                #     print_results(articles_withunks, abstracts_withunks, decoded_outputs)
-                #     # log output to screen
-                #     self.write_for_attnvis(articles_withunks, abstracts_withunks,
-                #                            decoded_words, best_hyps.attn_dists, best_hyps.p_gens)
-                    # write info to .json file for visualization tool
+                    rouge = rouge_l(hypo.split(), refe.split())
+                    rouge_scores.append(rouge)
+                    if save2file:
+                        ove_f.write("article: "+artc+"\n")
+                        ove_f.write("reference: "+refe+"\n")
+                        ove_f.write("hypothesis: "+hypo+" --%s--\n" % str(rouge))
+                        ove_f.write("\n")
 
-                    # Check if SECS_UNTIL_NEW_CKPT has elapsed; if so return so we
-                    # can load a new checkpoint
-                    # t1 = time.time()
-                    # if t1-t0 > SECS_UNTIL_NEW_CKPT:
-                    #     tf.logging.info(
-                    #         'We\'ve been decoding with same checkpoint for %i \
-                    #         seconds. Time to load new checkpoint',
-                    #         t1-t0)
-                    #     _ = gen_utils.load_ckpt(self._saver, self._sess) # NOQA
-                    #     t0 = time.time()
         except KeyboardInterrupt as exc:
             print(exc)
             print("Have decoded %s samples." % (counter * FLAGS.batch_size))

@@ -691,7 +691,7 @@ def main(argv):
     elif FLAGS.mode == "decode":
         print('Going to decode from the generator.')
 
-        decoder.beam_search(decoder_batcher)
+        decoder.bs_decode(decoder_batcher)
         print("Finished decoding..")
         # decode for generating corpus for discriminator
 

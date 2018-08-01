@@ -299,7 +299,7 @@ class PointerGenerator(object):
         return _mask
 
     def _lstm_decoder(self, emb_dec_inputs, dec_in_state,
-                      enc_padding_mask=None, attention_keys=None):
+                      enc_padding_mask=None, enc_sent_label=None, attention_keys=None):
         """
         input:
             emb_dec_inputs, the input of the cell
@@ -307,7 +307,7 @@ class PointerGenerator(object):
             output log distribution
             new state
         """
-        if not enc_padding_mask:
+        if enc_padding_mask is None:
             enc_padding_mask = self.enc_padding_mask
             enc_sent_label = self.enc_sent_label
             attention_keys = self.attention_keys
@@ -505,6 +505,8 @@ class PointerGenerator(object):
         _attention_keys = tf.reshape(_attention_keys, [batch_size*beam_size, tf.shape(self.attention_keys)[1], self.attention_keys.get_shape().as_list()[-1]])
         _enc_padding_mask = tf.tile(tf.expand_dims(self.enc_padding_mask, axis=1), [1, beam_size, 1])
         _enc_padding_mask = tf.reshape(_enc_padding_mask, [batch_size*beam_size, tf.shape(self.enc_padding_mask)[1]])
+        _enc_sent_label = tf.tile(tf.expand_dims(self.enc_sent_label, axis=1), [1, beam_size, 1])
+        _enc_sent_label = tf.reshape(_enc_sent_label, [batch_size*beam_size, tf.shape(self.enc_sent_label)[1]])
 
         def beam_search(prev, i, log_fn):
             if output_projection is not None:
@@ -554,17 +556,19 @@ class PointerGenerator(object):
             if i > 0:
                 attention_keys = _attention_keys
                 enc_padding_mask = _enc_padding_mask
+                enc_sent_label = _enc_sent_label
             else:
                 dec_in_state = self.dec_in_state
                 attention_keys = self.attention_keys
                 enc_padding_mask = self.enc_padding_mask
+                enc_sent_label = self.enc_sent_label
             if i == 1:
                 new_c = tf.tile(tf.expand_dims(dec_in_state.c, axis=1), [1, beam_size, 1])
                 new_c = tf.reshape(new_c, [batch_size*beam_size, -1])
                 new_h = tf.tile(tf.expand_dims(dec_in_state.h, axis=1), [1, beam_size, 1])
                 new_h = tf.reshape(new_h, [batch_size*beam_size, -1])
                 dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
-            vocab_dists, _, dec_in_state = self._lstm_decoder([dec_input], dec_in_state, enc_padding_mask, attention_keys)
+            vocab_dists, _, dec_in_state = self._lstm_decoder([dec_input], dec_in_state, enc_padding_mask, enc_sent_label, attention_keys)
             dec_input = beam_search(vocab_dists[0], i+1, tf.log)
 
         best_seq = tf.stack(values=beam_symbols, axis=1)

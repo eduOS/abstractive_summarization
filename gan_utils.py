@@ -51,30 +51,34 @@ def my_lcs(string, sub):
     return lengths[len(string)][len(sub)]
 
 
-def rouge_l(samples, references, beta=1.2):
-    """
-    samples: list of list,
-    references: list of list
-    """
-    prec = []
-    rec = []
-    scores = []
-    for n, (s, r) in enumerate(zip(samples, references)):
-        if len(s) == 0 or len(r) == 0:
-            prec.append(0)
-            rec.append(0)
-            continue
-        lcs = my_lcs(s, r)
-        prec.append(lcs/float(len(s)))
-        rec.append(lcs/float(len(r)))
+def rouge_l(summary, references, alpha=0.5):
+    if summary and references:
+        assert not isinstance(summary[0], list), "summary should be a 1-d list"
+    matches = 0
+    count_for_recall = 0
+    _refs = references if isinstance(references[0], list) else [references]
+    if not isinstance(summary, list):
+        rfs = []
+        summary = summary.strip().split()
+        for _r in _refs:
+            rfs.append(_r.strip().split())
+        _refs = rfs
 
-    for p, r in zip(prec, rec):
-        if(p != 0 and r != 0):
-            score = ((1 + beta**2) * p * r) / float(r + beta**2 * p)
-        else:
-            score = 0.0
-        scores.append(score)
-    return scores
+    try:
+        summary = [s.strip().lower() for s in summary]
+    except:
+        summary = summary
+
+    for r in _refs:
+        try:
+            r = [rr.strip().lower() for rr in r]
+        except:
+            r = r
+        matches += lcs(r, summary)
+        count_for_recall += len(r)
+    count_for_prec = len(_refs) * len(summary)
+    f1 = _calc_f1(matches, count_for_recall, count_for_prec, alpha)
+    return f1
 
 
 def save_ckpt(sess, model, decoder, best_loss, best_rouge, model_dir, model_saver,
@@ -114,3 +118,38 @@ def save_ckpt(sess, model, decoder, best_loss, best_rouge, model_dir, model_save
         print("Model is saved to" + colored(" %s", 'yellow') % model_dir)
 
     return eval_loss, best_loss, ave_rouge, best_rouge
+
+def lcs(a, b):
+    longer = a
+    base = b
+    if len(longer) < len(base):
+        longer, base = base, longer
+
+    if len(base) == 0:
+        return 0
+
+    row = [0] * len(base)
+    for c_a in longer:
+        left = 0
+        upper_left = 0
+        for i, c_b in enumerate(base):
+            up = row[i]
+            if c_a == c_b:
+                value = upper_left + 1
+            else:
+                value = max(left, up)
+            row[i] = value
+            left = value
+            upper_left = up
+
+    return left
+
+
+def _calc_f1(matches, count_for_recall, count_for_precision, alpha):
+    def safe_div(x1, x2):
+        return 0 if x2 == 0 else x1 / x2
+    recall = safe_div(matches, count_for_recall)
+    precision = safe_div(matches, count_for_precision)
+    denom = (1.0 - alpha) * precision + alpha * recall
+    return safe_div(precision * recall, denom)
+
