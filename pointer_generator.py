@@ -110,7 +110,6 @@ class PointerGenerator(object):
         if dropout_keep_prob != 1:
             feed_dict[self.dropout_keep_prob] = dropout_keep_prob
 
-        feed_dict[self.dropout_keep_prob] = batch.enc_lens
         if not just_enc:
             feed_dict[self.target_batch] = batch.target_batch
             feed_dict[self.dec_padding_mask] = batch.dec_padding_mask
