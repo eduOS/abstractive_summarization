@@ -62,6 +62,8 @@ tf.app.flags.DEFINE_integer("num_models", 3, "Size of each model layer. The actu
 tf.app.flags.DEFINE_float("dis_lr", 0.0001, "Learning rate.")
 tf.app.flags.DEFINE_float("lr_decay_factor", 0.5, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("dis_max_gradient", 2.0, "Clip gradients to this norm.")
+tf.app.flags.DEFINE_float("dropout_keep_prob", 0.9, "the learing rate while training")
+
 # TODO: how much thould this be?
 tf.app.flags.DEFINE_boolean("early_stop", False, "Set to True to turn on early stop.")
 tf.app.flags.DEFINE_integer("max_steps", -1, "max number of steps to train")
@@ -182,7 +184,7 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
         if batch is None:
             return None
 
-        results = model.run_one_batch(sess, batch)
+        results = model.run_one_batch(sess, batch, dropout_keep_prob=FLAGS.dropout_keep_prob)
         counter += 1
         global_step = results['global_step']
         # print('seconds for training step: %.3f', t1-t0)
@@ -216,45 +218,6 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
                             running_avg_loss, eval_loss,
                             total_training_time, current_speed, current_learing_rate,
                             coverage_loss if coverage_loss else "not set")
-
-
-def pretrain_discriminator(sess, model, batcher_val, dis_vocab, batcher, saver):
-    """Train a text classifier. the ratio of the positive data to negative data is 1:1"""
-    # TODO: load two pretained model: the generator and the embedding
-    eval_loss_best = sys.float_info.max
-    hps = model.hps
-    # This is the training loop.
-    step_time, loss = 0.0, 0.0
-    current_step = 0
-    train_accuracies = []
-    while True:
-        start_time = time.time()
-        batch = batcher.next_batch()
-        inputs, conditions, targets = data.prepare_dis_pretraining_batch(batch)
-        if inputs.shape[0] != hps.batch_size * hps.num_models * 2:
-            print("The expected batch_size is %s but given %s, escape.." %
-                  (hps.batch_size * hps.num_models, inputs.shape[0]))
-            continue
-        results = model.run_one_batch(sess, inputs, conditions, targets)
-        train_accuracies.append(results["accuracy"])
-        step_time += (time.time() - start_time) / hps.steps_per_checkpoint
-        loss += results["loss"] / hps.steps_per_checkpoint
-        current_step += 1
-
-        # Once in a while, we save checkpoint, print statistics, and run evals.
-        if current_step % hps.steps_per_checkpoint == 0:
-            # Print statistics for the previous epoch.
-            eval_accuracy, eval_loss, stop_flag, eval_loss_best = dump_chpt(
-                batcher_val, hps, model, sess, saver, eval_loss_best, hps.early_stop)
-            if stop_flag:
-                break
-            print_dashboard("Discriminator", results["global_step"], hps.batch_size,
-                            hps.dis_vocab_size, loss, eval_loss, 0.0, step_time)
-            print(colored("training accuracy: %.4f; eval_accuracy: %.4f"
-                  % (results['accuracy'], eval_accuracy), "green"))
-            step_time, loss = 0.0, 0.0
-            if current_step >= hps.max_steps:
-                break
 
 
 def main(argv):
@@ -458,17 +421,17 @@ def main(argv):
         utils.load_ckpt(dec_saver, sess, model_dir, mode="val", force=True)
         decoder = Decoder(sess, generator, dec_vocab)
 
-    if FLAGS.mode == "pretrain_dis" or (FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1):
+    if FLAGS.mode == "train_gan" and FLAGS.rouge_reward_ratio != 1:
         dis_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "discriminator" in v.name])
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
-        mode = "train" if FLAGS.mode == "pretrain_dis" else "val"
+        mode = "val"
         # ckpt = utils.load_ckpt(dis_saver, sess, dis_dir, mode=mode, force=(FLAGS.mode == "train_gan"))
         ckpt = utils.load_ckpt(dis_saver, sess, dis_dir, mode=mode, force=False)
         del mode
 
     # --------------- train models ---------------
-    if FLAGS.mode not in ["pretrain_dis", "decode"]:
+    if FLAGS.mode != "decode":
         gen_batcher_train = GenBatcher("train", "train", enc_vocab, dec_vocab, hps_gen)
         gen_batcher_val = GenBatcher("val", "val", enc_vocab, dec_vocab, hps_gen)
 
@@ -478,33 +441,12 @@ def main(argv):
     if FLAGS.mode == "train_gan":
         gan_batcher_val = GenBatcher("mini_val", "val", enc_vocab, dec_vocab, hps_gen)
 
-    if FLAGS.mode == "pretrain_dis":
-        dis_val_batch_size = hps_dis.batch_size * hps_dis.num_models \
-            if hps_dis.mode == "train_gan" else hps_dis.batch_size * hps_dis.num_models * 2
-        dis_batcher_val = DisBatcher(
-            hps_dis.data_path, "eval", gen_vocab, dis_vocab,
-            dis_val_batch_size, single_pass=True,
-            max_art_steps=hps_dis.max_enc_steps, max_abs_steps=hps_dis.max_dec_steps,
-        )
-
     if FLAGS.mode == "pretrain_gen":
         # get reload the
         print('Going to pretrain the generator')
         try:
             with tf.device("/gpu:0"):
                 pretrain_generator(generator, gen_batcher_train, sess, gen_batcher_val, gen_saver, gen_val_saver)
-        except KeyboardInterrupt:
-            tf.logging.info("Caught keyboard interrupt on worker....")
-
-    elif FLAGS.mode == "pretrain_dis":
-        print('Going to pretrain the discriminator')
-        dis_batcher = DisBatcher(
-            hps_dis.data_path, "decode", gen_vocab, dis_vocab,
-            hps_dis.batch_size * hps_dis.num_models, single_pass=hps_dis.single_pass,
-            max_art_steps=hps_dis.max_enc_steps, max_abs_steps=hps_dis.max_dec_steps,
-        )
-        try:
-            pretrain_discriminator(sess, discriminator, dis_batcher_val, dis_vocab, dis_batcher, dis_saver)
         except KeyboardInterrupt:
             tf.logging.info("Caught keyboard interrupt on worker....")
 

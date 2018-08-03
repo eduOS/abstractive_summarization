@@ -96,7 +96,9 @@ class PointerGenerator(object):
             self.prev_coverage = tf.placeholder(tf.float32, [None, None], name='prev_coverage')
             # so this need not to be reloaded and taken gradient hps
 
-    def _make_feed_dict(self, batch, just_enc=False, gan_eval=False, gan=False):
+        self.dropout_keep_prob = tf.placeholder_with_default(1.0, shape=())
+
+    def _make_feed_dict(self, batch, just_enc=False, gan_eval=False, gan=False, dropout_keep_prob=1):
 
         if gan_eval:
             gan = True
@@ -105,6 +107,10 @@ class PointerGenerator(object):
         feed_dict[self.enc_lens] = batch.enc_lens
         feed_dict[self.enc_padding_mask] = batch.enc_padding_mask
         feed_dict[self.enc_sent_label] = batch.enc_sent_label
+        if dropout_keep_prob != 1:
+            feed_dict[self.dropout_keep_prob] = dropout_keep_prob
+
+        feed_dict[self.dropout_keep_prob] = batch.enc_lens
         if not just_enc:
             feed_dict[self.target_batch] = batch.target_batch
             feed_dict[self.dec_padding_mask] = batch.dec_padding_mask
@@ -151,6 +157,7 @@ class PointerGenerator(object):
                     for samples in k_samples_ls
                 ]
 
+            self._emb_enc_inputs = tf.nn.dropout(self._emb_enc_inputs, self.dropout_keep_prob)
             attention_keys, dec_in_state = lstm_encoder(
                 self._emb_enc_inputs, self.enc_lens, hps.hidden_dim,
                 rand_unif_init=self.rand_unif_init, keep_prob=hps.keep_prob, is_training=self.is_training)
@@ -332,7 +339,7 @@ class PointerGenerator(object):
         outputs, out_state, attn_dists = lstm_attention_decoder(
             emb_dec_inputs, enc_sent_label, enc_padding_mask, attention_keys, dec_in_state, cell,
             initial_state_attention=(len(emb_dec_inputs) == 1),
-            use_coverage=self.hps.coverage, prev_coverage=prev_coverage)
+            use_coverage=self.hps.coverage, prev_coverage=prev_coverage, dropout_keep_prob=self.dropout_keep_prob)
 
         with tf.variable_scope('output_projection'):
             w = tf.get_variable(
@@ -376,13 +383,13 @@ class PointerGenerator(object):
     def get_cur_lr(self, sess):
         return sess.run(self.learning_rate)
 
-    def run_one_batch(self, sess, batch, update=True, gan_eval=False):
+    def run_one_batch(self, sess, batch, update=True, gan_eval=False, dropout_keep_prob=1):
         """Runs one training iteration. Returns a dictionary containing train
         op, summaries, loss, global_step and (optionally) coverage loss."""
         if gan_eval:
             update = False
 
-        feed_dict = self._make_feed_dict(batch, gan_eval=gan_eval)
+        feed_dict = self._make_feed_dict(batch, gan_eval=gan_eval, dropout_keep_prob=dropout_keep_prob)
 
         to_return = {
             'global_step': self.global_step,

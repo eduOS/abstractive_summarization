@@ -37,8 +37,9 @@ from utils import linear
 
 def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, attention_keys,
                            initial_state, cell, initial_state_attention=False, use_coverage=False,
-                           prev_coverage=None, local_attention_layers=3):
+                           prev_coverage=None, local_attention_layers=3, dropout_keep_prob=0.9):
     assert type(decoder_inputs) == list, "decoder inputs should be list, but % given" % type(decoder_inputs)
+
     with variable_scope.variable_scope("attention_decoder"):
         encoder_states = attention_keys
         batch_size = attention_keys.get_shape().as_list()[0]
@@ -129,6 +130,7 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
         if initial_state_attention:  # true in decode mode
             context_vector, _, coverage = attention(initial_state, coverage)
         for i, inp in enumerate(decoder_inputs):
+            inp = tf.nn.dropout(inp, dropout_keep_prob)
             if i > 0:
                 variable_scope.get_variable_scope().reuse_variables()
 
@@ -149,6 +151,7 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
 
             with variable_scope.variable_scope("AttnOutputProjection"):
                 output = linear([cell_output] + [context_vector], cell.output_size, True)
+                output = tf.nn.dropout(output, dropout_keep_prob)
             outputs.append(output)
 
         if coverage is not None:
