@@ -36,8 +36,8 @@ from utils import linear
 # https://www.tensorflow.org/api_guides/python/contrib.seq2seq#Attention
 
 def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, attention_keys,
-                           initial_state, cell, initial_state_attention=False, use_coverage=False,
-                           prev_coverage=None, local_attention_layers=3, dropout_keep_prob=0.9):
+                           initial_state, cell, initial_state_attention=False, local_attention_layers=3,
+                           dropout_keep_prob=0.9):
     assert type(decoder_inputs) == list, "decoder inputs should be list, but % given" % type(decoder_inputs)
 
     with variable_scope.variable_scope("attention_decoder"):
@@ -49,24 +49,13 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
 
         attention_vec_size = attn_size
 
-        W_h = variable_scope.get_variable("W_h", [1, 1, attn_size, attention_vec_size])
-        encoder_features = nn_ops.conv2d(encoder_states, W_h, [1, 1, 1, 1], "SAME")
-
         v = variable_scope.get_variable("v", [attention_vec_size])
         w = variable_scope.get_variable("w", [attention_vec_size])
 
-        if use_coverage:
-            with variable_scope.variable_scope("coverage"):
-                w_c = variable_scope.get_variable("w_c", [1, 1, 1, attention_vec_size])
-
-        if prev_coverage is not None:  # for beam search mode with coverage
-            prev_coverage = tf.expand_dims(tf.expand_dims(prev_coverage, 2), 3)
-
-        def attention(decoder_state, coverage=None):
+        def attention(decoder_state):
 
             with variable_scope.variable_scope("Attention"):
-                decoder_features_ = linear(decoder_state, attention_vec_size, True)
-                decoder_features = tf.expand_dims(tf.expand_dims(decoder_features_, 1), 1)
+                decoder_features = linear(decoder_state, attention_vec_size, True)
 
                 def masked_attention(e):
                     """Take softmax of e then apply enc_padding_mask and re-normalize"""
@@ -88,47 +77,30 @@ def lstm_attention_decoder(decoder_inputs, enc_sent_label, enc_padding_mask, att
                     shape = [batch_size, max_sent_num, _dim]
                     sent_features = v * selective_fn(
                         tf.scatter_nd(sent_nums, masked_enc_features, shape, "sentence_selection"),
-                        decoder_features_
+                        decoder_features
                     )
                     sent_encoder_features = tf.gather_nd(sent_features, sent_nums)
-                    new_encoder_features = selective_fn(sent_encoder_features+masked_enc_features, decoder_features_, 'character_selection')
+                    encoder_features = selective_fn(sent_encoder_features+masked_enc_features, decoder_features, 'character_selection')
 
                     e = math_ops.reduce_sum(
-                        w * math_ops.tanh(masked_enc_features + new_encoder_features + tf.expand_dims(decoder_features_, 1)),
+                        w * math_ops.tanh(masked_enc_features + encoder_features + tf.expand_dims(decoder_features, 1)),
                         2)  # calculate e
                     return masked_attention(e)
 
-                if use_coverage and coverage is not None:
-                    coverage_features = nn_ops.conv2d(coverage, w_c, [1, 1, 1, 1], "SAME")
-                    e = math_ops.reduce_sum(
-                        v * math_ops.tanh(
-                            encoder_features +
-                            decoder_features +
-                            coverage_features), [2, 3])
-                    attn_dist = masked_attention(e)
-                    coverage += array_ops.reshape(attn_dist, [batch_size, -1, 1, 1])
-                else:
-                    # e = math_ops.reduce_sum(
-                    #     v * math_ops.tanh(encoder_features + decoder_features),
-                    #     [2, 3])  # calculate e
-                    # attn_dist = masked_attention(e)
-                    attn_dist = get_new_attn_dis()
+                attn_dist = get_new_attn_dis()
 
-                    if use_coverage:  # first step of training
-                        coverage = tf.expand_dims(tf.expand_dims(attn_dist, 2), 2)
                 context_vector = math_ops.reduce_sum(
                     array_ops.reshape(attn_dist, [batch_size, -1, 1, 1]) * encoder_states, [1, 2])
                 context_vector = array_ops.reshape(context_vector, [-1, attn_size])
-            return context_vector, attn_dist, coverage
+            return context_vector, attn_dist
 
         outputs = []
         attn_dists = []
         state = initial_state
-        coverage = prev_coverage
         context_vector = array_ops.zeros([batch_size, attn_size])
         context_vector.set_shape([None, attn_size])
         if initial_state_attention:  # true in decode mode
-            context_vector, _, coverage = attention(initial_state, coverage)
+            context_vector, _, coverage = attention(initial_state)
         for i, inp in enumerate(decoder_inputs):
             inp = tf.nn.dropout(inp, dropout_keep_prob)
             if i > 0:
