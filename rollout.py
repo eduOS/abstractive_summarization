@@ -66,6 +66,7 @@ class Rollout(object):
         rouge_ratio = hps_gan.rouge_reward_ratio
         dis_ratio = hps_gan.dis_reward_ratio
         max_dec_steps = self._gen_hps.max_dec_steps
+        weights = map(lambda i: 0.7**i, range([max_dec_steps - hps_gan.rollout_start + 1]))
 
         articles = source_batch.enc_batch
         article_lens = source_batch.enc_lens
@@ -170,7 +171,7 @@ class Rollout(object):
             else:
                 rewards = (1 - rouge_ratio)*dis_rewards + rouge_ratio*rouge_rewards
 
-            average_rewards = rewards / (1.0 * rollout_num)
+            average_rewards = rewards / (1.0 * rollout_num) * weights
             k_rewards.append(average_rewards)
 
         return k_rewards
