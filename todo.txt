@@ -84,6 +84,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 68. generate at once like the way conv encoder decodes, or block by block
 69. unsupervised pre-training using language model
 70. Train discriminator using previous checkpoints, not only the latest one
+71. check the input of every running,, verify the previous processing
 
 # problems
 1. cannot end

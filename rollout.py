@@ -8,12 +8,13 @@ import numpy as np
 from data import strip_pads
 from gan_utils import rouge_l
 from data import outputsids2words
+from data import PAD_TOKEN
+from data import START_DECODING # noqa
+from data import STOP_DECODING
+
 DEBUG = False
 if DEBUG:
     from termcolor import colored # noqa
-PAD_TOKEN = "[PAD]"
-START_DECODING = '[START]'
-STOP_DECODING = '[STOP]'
 
 
 class Rollout(object):
@@ -91,8 +92,18 @@ class Rollout(object):
                     feed_dict[self.generator.attention_keys] = enc_states
                     feed_dict[self.generator.emb_enc_inputs] = emb_articles
 
-                    rollout_samples, emb_rollout_samples = sess.run([self.rollout_samples, self.rollout_samples_emb], feed_dict)
+                    rollout_samples = sess.run([self.rollout_samples], feed_dict)
                     # how about multiple generators for one discriminator?
+                    rollout_samples_batch = strip_pads(
+                        rollout_samples.tolist(),
+                        dec_vocab.word2id(STOP_DECODING),
+                        keep_length=True,
+                        PAD_ID=dec_vocab.word2id(PAD_TOKEN))
+
+                    emb_rollout_samples = sess.run(
+                        self.generator.temp_embedded_seq,
+                        feed_dict={self.generator.temp_batch: rollout_samples_batch})
+
                     if dis_ratio:
 
                         feed = {

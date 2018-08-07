@@ -59,7 +59,6 @@ class Example(object):
           hps: hyperparameters
         """
         self.hps = hps
-
         # Get ids of special tokens
         start_decoding = dec_vocab.word2id(data.START_DECODING)
         stop_decoding = dec_vocab.word2id(data.STOP_DECODING)
@@ -147,8 +146,9 @@ class Batch(object):
            hps: hyperparameters
            vocab: Vocabulary object
         """
-        self.pad_id = enc_vocab.word2id(
-            data.PAD_TOKEN)  # id of the PAD token used to pad sequences
+        self.enc_pad_id = enc_vocab.word2id(data.PAD_TOKEN)
+        self.dec_pad_id = dec_vocab.word2id(data.PAD_TOKEN)
+
         # initialize the input to the encoder
         self.init_encoder_seq(example_list, hps)
         # initialize the input and targets for the decoder
@@ -185,14 +185,14 @@ class Batch(object):
         # Pad the encoder input sequences up to the length of the longest
         # sequence
         for ex in example_list:
-            ex.pad_encoder_input(max_enc_seq_len, self.pad_id)
+            ex.pad_encoder_input(max_enc_seq_len, self.enc_pad_id)
 
         # Initialize the numpy arrays
         # Note: our enc_batch can have different length (second dimension) for
         # each batch because we use dynamic_rnn for the encoder.
-        self.enc_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
-        self.padded_enc_batch = np.zeros((hps.batch_size, hps.max_enc_steps), dtype=np.int32)
-        self.padded_abs_ids = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
+        self.enc_batch = np.full((hps.batch_size, max_enc_seq_len), self.enc_pad_id, dtype=np.int32)
+        self.padded_enc_batch = np.full((hps.batch_size, hps.max_enc_steps), self.enc_pad_id, dtype=np.int32)
+        self.padded_abs_ids = np.full((hps.batch_size, hps.max_dec_steps), self.enc_pad_id, dtype=np.int32)
         self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
         self.enc_padding_mask = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.float32)
 
@@ -224,7 +224,7 @@ class Batch(object):
             """
         # Pad the inputs and targets
         for ex in example_list:
-            ex.pad_decoder_inp_targ(hps.max_dec_steps, self.pad_id)
+            ex.pad_decoder_inp_targ(hps.max_dec_steps, self.dec_pad_id)
 
         # Initialize the numpy arrays.
         # Note: our decoder inputs and targets must be the same length for each
@@ -232,8 +232,8 @@ class Batch(object):
         # dynamic_rnn for decoding. However I believe this is possible, or will
         # soon be possible, with Tensorflow 1.0, in which case it may be best to
         # upgrade to that.
-        self.dec_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
-        self.target_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
+        self.dec_batch = np.full((hps.batch_size, hps.max_dec_steps), self.dec_pad_id, dtype=np.int32)
+        self.target_batch = np.full((hps.batch_size, hps.max_dec_steps), self.dec_pad_id, dtype=np.int32)
         self.dec_padding_mask = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.float32)
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):

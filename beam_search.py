@@ -22,6 +22,7 @@ from __future__ import division
 import tensorflow as tf
 import numpy as np
 import data
+import math
 from six.moves import xrange
 
 FLAGS = tf.app.flags.FLAGS
@@ -48,7 +49,13 @@ class Hypothesis(object):
 
     @property
     def tokens(self):
+        """tokens with start tokens"""
         return self._tokens
+
+    @property
+    def prob(self):
+        """probs without start token"""
+        return np.mean(np.array(map(lambda x: math.e**x, self.log_probs[1:])))
 
     @property
     def latest_token(self):
@@ -56,14 +63,13 @@ class Hypothesis(object):
 
     @property
     def avg_log_prob(self):
-        return self.log_prob / len(self._tokens)
+        return self.log_prob / (len(self._tokens) - 1)
+    # the first 0.0 items should not be considered
 
 
-def run_beam_search(sess, model, vocab, batch, top_k=1):
+def run_beam_search(sess, model, vocab, batch):
     batch_size = model.hps.batch_size
-    beam_size = FLAGS.beam_size
-    if top_k > beam_size:
-        top_k = beam_size
+    top_k = beam_size = FLAGS.beam_size
     attention_keys, attention_values = model.run_encoder(sess, batch)
 
     best_k_hyps = []

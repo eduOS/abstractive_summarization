@@ -156,7 +156,7 @@ class PointerGenerator(object):
                 self.topk_log_probs, self.indices = tf.nn.top_k(tf.log(self.final_dists[0]), self.hps.beam_size * 2)
                 self._ran_id = tf.multinomial(tf.log(self.final_dists[0]), 1)
 
-                eval_final_dists = self._conv_decoder(emb_eval_dec_inputs, is_training=True)
+                self.eval_final_dists = self._conv_decoder(emb_eval_dec_inputs, is_training=True)
 
                 k_sample_final_dists_ls = []
                 for emb_samples in k_emb_samples_ls:
@@ -179,7 +179,7 @@ class PointerGenerator(object):
 
                 tf.Print(self.final_dists, self.final_dists, "final list")
                 loss_per_step = get_loss(self.final_dists, self.target_batch, self.dec_padding_mask)
-                eval_loss_per_step = get_loss(eval_final_dists, self.target_batch, self.dec_padding_mask)
+                eval_loss_per_step = get_loss(self.eval_final_dists, self.target_batch, self.dec_padding_mask)
                 self._loss = _avg(loss_per_step, self.dec_padding_mask)
                 self._eval_loss = _avg(eval_loss_per_step, self.dec_padding_mask)
 
@@ -361,6 +361,7 @@ class PointerGenerator(object):
 
         if gan_eval:
             to_return['loss'] = self._eval_loss
+            to_return['eval_final_dists'] = self.eval_final_dists
         else:
             to_return['loss'] = self._loss
         if update:

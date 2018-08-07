@@ -26,6 +26,7 @@ from gan_utils import rouge_l
 from data import strip_pads
 import time
 from data import outputsids2words
+from data import pad_equal_length
 import tensorflow as tf
 from random import randint
 import beam_search
@@ -155,7 +156,7 @@ class Decoder(object):
 
         return enc_states, dec_in_state, np.array(ran_ids), np.array(id_mappings)
 
-    def bs_decode(self, batcher, save2file=True, single_pass=True, sample_rate=0):
+    def bs_decode(self, sess, discriminator, batcher, save2file=True, single_pass=True, sample_rate=0):
         """Decode examples until data is exhausted (if self._hps.single_pass) and
         return, or decode indefinitely, loading latest checkpoint at regular
         intervals"""
@@ -193,11 +194,43 @@ class Decoder(object):
                     else:
                         return average_rouge
 
-                best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+                best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)[0]
                 outputs_ids = [[t for t in hyp.tokens[1:]] for hyp in best_hyps]
+                padded_outputs_ids = pad_equal_length(
+                    outputs_ids, self._vocab.word2id(STOP_DECODING),
+                    self._vocab.word2id(PAD_TOKEN), self._hps.max_dec_steps)
+                # the probs for each sample by the generator distribution
+                sample_mean_generator_probs = [hyp.prob for hyp in best_hyps]
 
                 original_articles = batch.original_articles
                 original_abstracts = batch.original_abstracts
+                article_lens = batch.enc_lens
+                articles = batch.enc_batch
+                emb_articles = sess.run(
+                    self.generator.temp_embedded_seq,
+                    feed_dict={self.generator.temp_batch: articles})
+                emb_samples = sess.run(
+                    self.generator.temp_embedded_seq,
+                    feed_dict={self.generator.temp_batch: padded_outputs_ids})
+
+                feed = {
+                    discriminator.inputs: emb_samples,
+                    discriminator.conditions: emb_articles,
+                    discriminator.condition_lens: article_lens}
+                # probs for each sample by the discriminator
+                sample_dis_probs = sess.run(discriminator.dis_ypred_for_auc, feed).tolist()
+
+                abstracts = batch.padded_abs_ids
+                abstract_mean_generator_probs = self.model.run_one_batch(sess, abstracts, update=False, gan_eval=True)['eval_final_dists']
+                emb_abstracts = sess.run(
+                    self.generator.temp_embedded_seq,
+                    feed_dict={self.generator.temp_batch: abstracts})
+                feed = {
+                    discriminator.inputs: emb_abstracts,
+                    discriminator.conditions: emb_articles,
+                    discriminator.condition_lens: article_lens}
+                # probs for each sample by the discriminator
+                abstract_dis_probs = sess.run(discriminator.dis_ypred_for_auc, feed).tolist()
 
                 sample = randint(0, int(1 / sample_rate) if sample_rate else 0)
 
@@ -236,13 +269,18 @@ class Decoder(object):
                         ref_f.write(sent+"\n")
                     for idx, sent in enumerate(decoded_outputs):
                         dec_f.write(sent+"\n")
-                for artc, refe, hypo in zip(original_articles, original_abstracts, decoded_outputs):
+                for artc, refe, hypo, sdp, smgp, adp, amgp in zip(
+                    original_articles, original_abstracts,
+                    decoded_outputs, sample_dis_probs, sample_mean_generator_probs,
+                    abstract_dis_probs, abstract_mean_generator_probs
+                ):
                     rouge = rouge_l(hypo.split(), refe.split())
                     rouge_scores.append(rouge)
                     if save2file:
                         ove_f.write("article: "+artc+"\n")
                         ove_f.write("reference: "+refe+"\n")
-                        ove_f.write("hypothesis: "+hypo+" --%s--\n" % str(rouge))
+                        ove_f.write("hypothesis: "+hypo+'\n')
+                        ove_f.write("stats: --gen: %s, %s; --dis: %s, %s; --rouge: %s --\n\n" % (str(amgp), str(smgp), str(adp), str(sdp), str(rouge)))
                         ove_f.write("\n")
 
         except KeyboardInterrupt as exc:
@@ -289,105 +327,6 @@ class Decoder(object):
         with open(output_fname, 'w', 'utf-8') as output_file:
             json.dump(to_write, output_file)
         tf.logging.info('Wrote visualization data to %s', output_fname)
-
-    def beam_search(self, batcher, save2file=True, single_pass=True, sample_rate=0):
-        batch = batcher.next_batch()
-        batch_size = len(batch.enc_batch)
-
-        rouge_scores = []
-        # t0 = time.time()
-        if save2file:
-            self.prepare_dir()
-            ref_file = os.path.join(
-                self._rouge_ref_dir, "reference.txt")
-            decoded_file = os.path.join(
-                self._rouge_dec_dir, "decoded.txt")
-            overview_file = os.path.join(
-                self._decode_dir, "overview.txt")
-            ref_f = open(ref_file, "a", 'utf-8')
-            dec_f = open(decoded_file, "a", 'utf-8')
-            ove_f = open(overview_file, "a", 'utf-8')
-
-        counter = 0
-        try:
-            while True:
-                # 1 example repeated across batch
-                batch = batcher.next_batch()
-                if batch is None:
-                    # finished decoding dataset in single_pass mode
-                    assert single_pass, (
-                        "Dataset exhausted, but we are not in single_pass mode")
-                    print("Decoder has finished reading dataset for single_pass.")
-                    if not save2file:
-                        return np.mean(np.array(rouge_scores))
-                    else:
-                        ref_f.close()
-                        dec_f.close()
-                        ove_f.close()
-                        return
-
-                best_seq = self._model.run_beam_search(self._sess, batch)
-                best_seq = best_seq[:, 1, :].tolist()
-                # is the beam_size here 1?
-                outputs_ids = [[t for t in hyp[:hyp.index(data.STOP_DECODING) if data.STOP_DECODING in hyp else -1]]
-                               for hyp in best_seq]
-
-                original_articles = batch.original_articles
-                original_abstracts = batch.original_abstracts
-                # original_abstract_sents = batch.original_abstracts_sents[0]
-                # list of strings
-                sample = randint(0, int(1 / sample_rate) if sample_rate else 0)
-                if sample == 1 or save2file:
-                    sample_n = randint(0, batch_size)
-                    if sample == 1:
-                        print()
-                    decoded_words_list = outputsids2words(
-                        outputs_ids, self._vocab)
-
-                    decoded_outputs = []
-
-                    # Remove the [STOP] token from decoded_words, if necessary
-                    for s_n, decoded_words in enumerate(decoded_words_list):
-                        try:
-                            fst_stop_idx = decoded_words.index(data.STOP_DECODING)
-                            decoded_words = decoded_words[:fst_stop_idx]
-                        except ValueError:
-                            pass
-                        decoded_output = ' '.join(decoded_words)
-                        if sample == 1 and s_n == sample_n:
-                            print("article:\t" + original_articles[sample_n])
-                            print("abstract:\t" + original_abstracts[sample_n])
-                            print("hypothesis:\t" + decoded_output)
-                            print("")
-                        decoded_outputs.append(decoded_output)
-
-                counter += 1  # this is how many examples we've decoded
-                if counter % 10000 == 0:
-                    print("Have decoded %s samples." % (counter * FLAGS.batch_size))
-
-                if save2file:
-                    for idx, sent in enumerate(original_abstracts):
-                        ref_f.write(sent+"\n")
-                    for idx, sent in enumerate(decoded_outputs):
-                        dec_f.write(sent+"\n")
-                for artc, refe, hypo in zip(original_articles, original_abstracts, decoded_outputs):
-
-                    rouges = rouge_l(hypo.split(), refe.split())
-                    rouge_scores.append(rouges)
-
-                    if save2file:
-                        ove_f.write("article: "+artc+"\n")
-                        ove_f.write("reference: "+refe+"\n")
-                        ove_f.write("hypothesis: "+hypo+"\n")
-                        ove_f.write("\n")
-        except KeyboardInterrupt as exc:
-            print(exc)
-            print("Have decoded %s samples." % (counter * FLAGS.batch_size))
-            if save2file:
-                ref_f.close()
-                dec_f.close()
-                ove_f.close()
-
 
 def print_results(articles, abstracts, decoded_outputs):
     """Prints the article, the reference summmary and the decoded summary to

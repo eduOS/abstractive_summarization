@@ -108,7 +108,7 @@ tf.app.flags.DEFINE_integer('char_emb_dim', 300, 'Dimension of character embeddi
 # search is the same as the original beam search
 tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 120
 tf.app.flags.DEFINE_integer('max_dec_steps', 25, 'max timesteps of decoder (max summary tokens)')  # 25
-tf.app.flags.DEFINE_integer('beam_size', 2, 'beam size for beam search decoding.')
+tf.app.flags.DEFINE_integer('beam_size', 10, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('dec_vocab_size', 7500, 'Size of vocabulary of the decoder in the generator.')
 tf.app.flags.DEFINE_integer('enc_vocab_size', 500000, 'Size of vocabulary of the encoder in the generator.')
@@ -135,7 +135,7 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', True, 'Convert a non-co
 
 # ------------------------------------- gan
 tf.app.flags.DEFINE_integer('rollout_start', 1, 'how many times to run the gan')
-tf.app.flags.DEFINE_integer('gan_iter', 200000, 'how many times to run the gan')
+tf.app.flags.DEFINE_integer('gan_iter', 1, 'how many times to run the gan')
 tf.app.flags.DEFINE_integer('gan_dis_iter', 10**8, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 12, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan", "Training directory.")
@@ -155,6 +155,10 @@ assert FLAGS.sample_rate >= 0 and FLAGS.sample_rate <= 0.5, "sample rate should 
 if FLAGS.mode == "train_gan":
     FLAGS.single_pass = False
     FLAGS.beam_size = int(FLAGS.beam_size / 2) if FLAGS.beam_size > 3 else 2
+
+if FLAGS.mode == "batch_size":
+    # batch size for generator is 1, for the discriminator it is beam size
+    FLAGS.batch_size = 1
 
 if FLAGS.min_dec_steps > FLAGS.max_dec_steps / 2:
     FLAGS.min_dec_steps = int(FLAGS.max_dec_steps / 2)
@@ -268,9 +272,9 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
             current_learing_rate = model.get_cur_lr(sess)
 
             # print the print the dashboard
-            current_speed = (time.time() - start_time + epsilon) / ((counter * hps.batch_size) + epsilon)
+            current_speed = (time.time() - start_time + epsilon) / ((counter * hps.gen_batch_size) + epsilon)
             total_training_time = (time.time() - start_time) * global_step / (counter * 3600)
-            print_dashboard("Generator", global_step, hps.batch_size, hps.enc_vocab_size, hps.dec_vocab_size,
+            print_dashboard("Generator", global_step, hps.gen_batch_size, hps.enc_vocab_size, hps.dec_vocab_size,
                             running_avg_loss, eval_loss,
                             total_training_time, current_speed, current_learing_rate,
                             coverage_loss if coverage_loss else "not set")
@@ -290,7 +294,7 @@ def main(argv):
         'decoder',
         'adagrad_init_acc',
         'steps_per_checkpoint',
-        'batch_size',
+        'gen_batch_size',
         'beam_size',
         'cov_loss_wt',
         'coverage',
@@ -342,7 +346,7 @@ def main(argv):
         'hidden_dim',
         'pool_layers',
         'dis_max_gradient',
-        'batch_size',
+        'dis_batch_size',
         'dis_lr',
         'keep_prob',
         'lr_decay_factor',
@@ -371,7 +375,7 @@ def main(argv):
         print("Building generator graph ...")
         gen_decoder_scope = generator.build_graph()
 
-    if FLAGS.mode == 'train_gan' and FLAGS.dis_reward_ratio:
+    if (FLAGS.mode == 'train_gan' and FLAGS.dis_reward_ratio) or FLAGS.mode == "decode":
         with tf.variable_scope("discriminator"), tf.device("/gpu:0"):
             discriminator = Seq2ClassModel(hps_dis)
             print("Building discriminator graph ...")
@@ -612,9 +616,9 @@ def main(argv):
                             _f1, _recall, _precision
                             ))
 
-                if not math.isnan(_f1) and _f1 > 0.9:
+                if not math.isnan(_f1) and _f1 > 0.95:
                     # eve_f1 = eval_dis(gan_batcher_test, decoder, discriminator)
-                    gan_gen_iter = 1
+                    gan_gen_iter = 0
                     break
 
             if gan_gen_iter:
@@ -708,7 +712,7 @@ def main(argv):
     elif FLAGS.mode == "decode":
         print('Going to decode from the generator.')
 
-        decoder.bs_decode(decoder_batcher)
+        decoder.bs_decode(sess, discriminator, decoder_batcher)
         print("Finished decoding..")
         # decode for generating corpus for discriminator
 
