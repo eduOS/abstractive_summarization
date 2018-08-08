@@ -24,6 +24,7 @@ from __future__ import division
 import os
 from gan_utils import rouge_l
 from data import strip_pads
+import math
 import time
 from data import outputsids2words
 from data import pad_equal_length
@@ -223,7 +224,7 @@ class Decoder(object):
                 sample_dis_probs = sess.run(discriminator.dis_ypred_for_auc, feed).tolist()
 
                 abstracts = np.tile(batch.padded_abs_ids, (len(outputs_ids), 1))
-                abstract_mean_generator_probs = self._model.run_one_batch(sess, batch, update=False, gan_eval=True)['gold_probs'][0]
+                abstract_mean_generator_probs = math.e ** self._model.run_one_batch(sess, batch, update=False, gan_eval=True)['log_gold_probs'][0]
 
                 emb_abstracts = sess.run(
                     self._model.temp_embedded_seq,

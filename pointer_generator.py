@@ -183,7 +183,7 @@ class PointerGenerator(object):
                 tf.Print(self.final_dists, self.final_dists, "final list")
                 loss_per_step, _ = get_loss(self.final_dists, self.target_batch, self.dec_padding_mask)
                 eval_loss_per_step, log_gold_probs = get_loss(eval_final_dists, self.target_batch, self.dec_padding_mask)
-                self.gold_probs = math.e ** _avg(log_gold_probs, self.dec_padding_mask, False)
+                self.log_gold_probs = _avg(log_gold_probs, self.dec_padding_mask, False)
                 self._loss = _avg(loss_per_step, self.dec_padding_mask)
                 self._eval_loss = _avg(eval_loss_per_step, self.dec_padding_mask)
 
@@ -365,7 +365,7 @@ class PointerGenerator(object):
 
         if gan_eval:
             to_return['loss'] = self._eval_loss
-            to_return['gold_probs'] = self.gold_probs
+            to_return['log_gold_probs'] = self.log_gold_probs
         else:
             to_return['loss'] = self._loss
         if update:
