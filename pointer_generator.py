@@ -172,8 +172,8 @@ class PointerGenerator(object):
                 for dec_step, dist in enumerate(final_dists):
                     targets = target_batch[:, dec_step]
                     indices = tf.stack((batch_nums, targets), axis=1)
-                    gold_probs = tf.gather_nd(dist, indices) * padding_mask[:, dec_step]
-                    losses = -tf.log(gold_probs)
+                    gold_probs = tf.gather_nd(dist, indices)
+                    losses = -tf.log(gold_probs) * padding_mask[:, dec_step]
                     log_gold_prob.append(-losses)
                     loss_per_step.append(losses * rewards[:, dec_step] if rewards is not None else losses)
                 return loss_per_step, log_gold_prob
