@@ -163,6 +163,8 @@ class Decoder(object):
         intervals"""
 
         rouge_scores = []
+        dis_rouge_scores = []
+        max_dis_rouge_scores = []
         if save2file:
             self.prepare_dir()
             ref_file = os.path.join(
@@ -186,10 +188,14 @@ class Decoder(object):
                         "Dataset exhausted, but we are not in single_pass mode")
                     print("Decoder has finished reading dataset for single_pass.")
                     average_rouge = np.mean(np.array(rouge_scores))
+                    dis_average_rouge = np.mean(np.array(dis_rouge_scores))
+                    max_dis_average_rouge = np.mean(np.array(max_dis_rouge_scores))
                     if save2file:
                         ref_f.close()
                         dec_f.close()
                         ove_f.write("\nThe overall average rouge: %s" % average_rouge)
+                        ove_f.write("\nThe overall average rouge according to dis: %s" % dis_average_rouge)
+                        ove_f.write("\nThe overall average rouge according to max dis: %s" % max_dis_average_rouge)
                         ove_f.close()
                         return average_rouge
                     else:
@@ -273,18 +279,28 @@ class Decoder(object):
                         ref_f.write(sent+"\n")
                     for idx, sent in enumerate(decoded_outputs):
                         dec_f.write(sent+"\n")
+                ii = 0
+                dis_rouge = []
                 for output, sample_prob, sample_gen_prob in zip(
                     decoded_outputs, sample_dis_probs, sample_mean_generator_probs
                 ):
                     rouge = rouge_l(original_abstracts[0].split(), output.split())
-                    rouge_scores.append(rouge)
+                    if ii == 0:
+                        rouge_scores.append(rouge)
+                        mark = 'STARTS'
+                    else:
+                        mark = 'starts'
+                    dis_rouge.append((sample_prob, rouge))
                     if save2file:
                         ove_f.write("article: "+original_articles[0]+"\n")
                         ove_f.write("reference: "+original_abstracts[0]+"\n")
                         ove_f.write("hypothesis: "+output+'\n')
-                        ove_f.write("stats: --gen: %s, %s; --dis: %s, %s; --rouge: %s --\n\n" % (
-                            str(abstract_mean_generator_probs), str(sample_gen_prob), str(abstract_dis_probs), str(sample_prob), str(rouge)))
+                        ove_f.write("%s: --gen: %s, %s; --dis: %s, %s; --rouge: %s --\n\n" % (
+                            mark, str(abstract_mean_generator_probs), str(sample_gen_prob), str(abstract_dis_probs), str(sample_prob), str(rouge)))
                         ove_f.write("\n")
+                    ii += 1
+                    max_dis_rouge_scores.append(sorted(dis_rouge, key=lambda x: x[1], reverse=True)[0][1])
+                    dis_rouge_scores.append(sorted(dis_rouge, key=lambda x: x[0], reverse=True)[0][1])
 
         except KeyboardInterrupt as exc:
             print(exc)

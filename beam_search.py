@@ -30,18 +30,31 @@ FLAGS = tf.app.flags.FLAGS
 
 class Hypothesis(object):
 
-    def __init__(self, tokens, log_probs):
+    def __init__(self, tokens, log_probs, stop_token):
         self._tokens = tokens
         self.log_probs = log_probs
+        self.stop_token = stop_token
+
+#     def set_stop_token(self, stop_token):
+#         self.stop_token = stop_token
 
     def __len__(self):
         return len(self._tokens)
 
-    def extend(self, token, log_prob):
+    def extend(self, token, log_prob, stop_token):
         return Hypothesis(
             tokens=self._tokens + [token],
             log_probs=self.log_probs + [log_prob],
+            stop_token=stop_token,
         )
+
+    @property
+    def useful_length(self):
+        try:
+            leng = self._tokens.index(self.stop_token)
+        except ValueError:
+            leng = len(self._tokens) - 1
+        return leng
 
     @property
     def log_prob(self):
@@ -55,7 +68,7 @@ class Hypothesis(object):
     @property
     def prob(self):
         """probs without start token"""
-        return math.e ** np.mean(np.array(self.log_probs[1:]))
+        return math.e ** self.avg_log_prob
 
     @property
     def latest_token(self):
@@ -63,7 +76,7 @@ class Hypothesis(object):
 
     @property
     def avg_log_prob(self):
-        return self.log_prob / (len(self._tokens) - 1)
+        return self.log_prob / self.useful_length
     # the first 0.0 items should not be considered
 
 
@@ -71,14 +84,18 @@ def run_beam_search(sess, model, vocab, batch):
     batch_size = model.hps.batch_size
     top_k = beam_size = FLAGS.beam_size
     attention_keys, attention_values = model.run_encoder(sess, batch)
+    stop_token = vocab.word2id(data.STOP_DECODING)
+    start_token = vocab.word2id(data.START_DECODING)
+    pad_token = vocab.word2id(data.PAD_TOKEN)
 
     best_k_hyps = []
     batch_hyps = []
     for i in xrange(batch_size):
         hyps = [
             Hypothesis(
-                tokens=[vocab.word2id(data.START_DECODING)],
+                tokens=[start_token],
                 log_probs=[0.0],
+                stop_token=stop_token
             ) for _ in range(beam_size)]
         batch_hyps.append(hyps)
 
@@ -102,14 +119,15 @@ def run_beam_search(sess, model, vocab, batch):
                 h = hyps[i]
                 for j in range(beam_size * 2):
                     new_hyp = h.extend(
-                        token=topk_ids[i, j],
-                        log_prob=topk_log_probs[i, j]
+                        token=pad_token if h.latest_token == stop_token else topk_ids[i, j],
+                        log_prob=0 if h.latest_token == stop_token else topk_log_probs[i, j],
+                        stop_token=stop_token
                     )
                     all_hyps.append(new_hyp)
 
             hyps = []
             for h in sort_hyps(all_hyps):
-                if h.latest_token == vocab.word2id(data.STOP_DECODING):
+                if h.latest_token == stop_token:
                     if steps >= model.hps.min_dec_steps:
                         results.append(h)
                 else:
