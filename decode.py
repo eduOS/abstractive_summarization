@@ -196,22 +196,28 @@ class Decoder(object):
 
                 best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)[0]
                 outputs_ids = [[t for t in hyp.tokens[1:]] for hyp in best_hyps]
+                # 10
                 padded_outputs_ids = pad_equal_length(
                     outputs_ids, self._vocab.word2id(STOP_DECODING),
                     self._vocab.word2id(PAD_TOKEN), self._hps.max_dec_steps)
                 # the probs for each sample by the generator distribution
                 sample_mean_generator_probs = [hyp.prob for hyp in best_hyps]
+                # 10
 
                 original_articles = batch.original_articles
+                # 1
                 original_abstracts = batch.original_abstracts
-                article_lens = batch.enc_lens
-                articles = batch.enc_batch
+                # 1
+                article_lens = np.tile(batch.enc_lens, len(outputs_ids))
+                articles = np.tile(batch.enc_batch, (len(outputs_ids), 1))
+                # TODO: article and article_lens should be expended to the some
+                # shape as padded_outputs_ids
                 emb_articles = sess.run(
-                    self.generator.temp_embedded_seq,
-                    feed_dict={self.generator.temp_batch: articles})
+                    self._model.temp_embedded_seq,
+                    feed_dict={self._model.temp_batch: articles})
                 emb_samples = sess.run(
-                    self.generator.temp_embedded_seq,
-                    feed_dict={self.generator.temp_batch: padded_outputs_ids})
+                    self._model.temp_embedded_seq,
+                    feed_dict={self._model.temp_batch: padded_outputs_ids})
 
                 feed = {
                     discriminator.inputs: emb_samples,
@@ -219,18 +225,22 @@ class Decoder(object):
                     discriminator.condition_lens: article_lens}
                 # probs for each sample by the discriminator
                 sample_dis_probs = sess.run(discriminator.dis_ypred_for_auc, feed).tolist()
+                # 10
 
-                abstracts = batch.padded_abs_ids
-                abstract_mean_generator_probs = self.model.run_one_batch(sess, abstracts, update=False, gan_eval=True)['eval_final_dists']
+                abstracts = np.tile(batch.padded_abs_ids, (len(outputs_ids), 1))
+                abstract_mean_generator_probs = np.mean(self._model.run_one_batch(sess, batch, update=False, gan_eval=True)['eval_final_dists'], axis=1)[0]
+                # 1
+
                 emb_abstracts = sess.run(
-                    self.generator.temp_embedded_seq,
-                    feed_dict={self.generator.temp_batch: abstracts})
+                    self._model.temp_embedded_seq,
+                    feed_dict={self._model.temp_batch: abstracts})
                 feed = {
                     discriminator.inputs: emb_abstracts,
                     discriminator.conditions: emb_articles,
                     discriminator.condition_lens: article_lens}
                 # probs for each sample by the discriminator
-                abstract_dis_probs = sess.run(discriminator.dis_ypred_for_auc, feed).tolist()
+                abstract_dis_probs = sess.run(discriminator.dis_ypred_for_auc, feed)[0]
+                # 1
 
                 sample = randint(0, int(1 / sample_rate) if sample_rate else 0)
 
@@ -269,18 +279,17 @@ class Decoder(object):
                         ref_f.write(sent+"\n")
                     for idx, sent in enumerate(decoded_outputs):
                         dec_f.write(sent+"\n")
-                for artc, refe, hypo, sdp, smgp, adp, amgp in zip(
-                    original_articles, original_abstracts,
-                    decoded_outputs, sample_dis_probs, sample_mean_generator_probs,
-                    abstract_dis_probs, abstract_mean_generator_probs
+                for output, sample_prob, sample_gen_prob in zip(
+                    decoded_outputs, sample_dis_probs, sample_mean_generator_probs
                 ):
-                    rouge = rouge_l(hypo.split(), refe.split())
+                    rouge = rouge_l(original_abstracts[0].split(), output.split())
                     rouge_scores.append(rouge)
                     if save2file:
-                        ove_f.write("article: "+artc+"\n")
-                        ove_f.write("reference: "+refe+"\n")
-                        ove_f.write("hypothesis: "+hypo+'\n')
-                        ove_f.write("stats: --gen: %s, %s; --dis: %s, %s; --rouge: %s --\n\n" % (str(amgp), str(smgp), str(adp), str(sdp), str(rouge)))
+                        ove_f.write("article: "+original_articles[0]+"\n")
+                        ove_f.write("reference: "+original_abstracts[0]+"\n")
+                        ove_f.write("hypothesis: "+output+'\n')
+                        ove_f.write("stats: --gen: %s, %s; --dis: %s, %s; --rouge: %s --\n\n" % (
+                            str(abstract_mean_generator_probs), str(sample_gen_prob), str(abstract_dis_probs), str(sample_prob), str(rouge)))
                         ove_f.write("\n")
 
         except KeyboardInterrupt as exc:

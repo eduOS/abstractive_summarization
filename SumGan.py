@@ -156,7 +156,7 @@ if FLAGS.mode == "train_gan":
     FLAGS.single_pass = False
     FLAGS.beam_size = int(FLAGS.beam_size / 2) if FLAGS.beam_size > 3 else 2
 
-if FLAGS.mode == "batch_size":
+if FLAGS.mode == "decode":
     # batch size for generator is 1, for the discriminator it is beam size
     FLAGS.batch_size = 1
 
@@ -294,7 +294,7 @@ def main(argv):
         'decoder',
         'adagrad_init_acc',
         'steps_per_checkpoint',
-        'gen_batch_size',
+        'batch_size',
         'beam_size',
         'cov_loss_wt',
         'coverage',
@@ -341,12 +341,13 @@ def main(argv):
         'conv_layers',
         'max_steps',
         'kernel_size',
+        'beam_size',
         'early_stop',
         'pool_size',
         'hidden_dim',
         'pool_layers',
         'dis_max_gradient',
-        'dis_batch_size',
+        'batch_size',
         'dis_lr',
         'keep_prob',
         'lr_decay_factor',
@@ -504,9 +505,9 @@ def main(argv):
         gen_global_step = 0
         print('Going to tune the two using Gan')
 
-        ave_rouge = decoder.bs_decode(gan_batcher_test, save2file=False, single_pass=True)
-        best_rouge = ave_rouge
-        print(colored('The starting rouge score is %s.' % ave_rouge, "green"))
+        # ave_rouge = decoder.bs_decode(gan_batcher_test, save2file=False, single_pass=True)
+        # best_rouge = ave_rouge
+        # print(colored('The starting rouge score is %s.' % ave_rouge, "green"))
         for i_gan in range(hps_gan.gan_iter):
             # Train the generator for one step
             g_losses = []
@@ -619,6 +620,7 @@ def main(argv):
                 if not math.isnan(_f1) and _f1 > 0.95:
                     # eve_f1 = eval_dis(gan_batcher_test, decoder, discriminator)
                     gan_gen_iter = 0
+                    print('reached 95')
                     break
 
             if gan_gen_iter:

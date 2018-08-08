@@ -62,12 +62,13 @@ class Seq2ClassModel(object):
     self.conditions = tf.placeholder(tf.float32, shape=[self.batch_size, None, self.layer_size], name="conditions")
     self.condition_lens = tf.placeholder(tf.int32, [self.batch_size], name='condition_lens')
     self.targets = tf.placeholder(tf.float32, shape=[self.batch_size], name="targets")
-
-    self.inputs_splitted = tf.split(self.inputs, self.num_models)
-    self.conditions_splitted = tf.split(self.conditions, self.num_models)
-    self.targets_splitted = tf.split(self.targets, self.num_models)
-    self.condition_lens_splitted = tf.split(self.condition_lens, self.num_models)
     self.rand_unif_init = tf.random_uniform_initializer(-self.hps.rand_unif_init_mag, self.hps.rand_unif_init_mag, seed=123)
+
+    if self.mode == "train_gan":
+        self.inputs_splitted = tf.split(self.inputs, self.num_models)
+        self.conditions_splitted = tf.split(self.conditions, self.num_models)
+        self.targets_splitted = tf.split(self.targets, self.num_models)
+        self.condition_lens_splitted = tf.split(self.condition_lens, self.num_models)
 
   def build_graph(self):
     self._add_placeholders()
@@ -76,51 +77,53 @@ class Seq2ClassModel(object):
     probs = []
     #  ------------------ for evaluation ----------------------
     # return tf.nn.softmax(logits), loss, accuracy
-    f1 = []
-    for m in xrange(self.num_models):
-      with tf.variable_scope("model"+str(m)):
-        prob, _, _, _, _ = self._seq2class_model(
-            self.inputs, self.conditions, self.condition_lens, self.targets)
-        # probs.append(1-prob)
-        probs.append(prob)
-        f1.append(f1)
-        # print(prob.get_shape())
-    self.dis_ypred_for_auc = tf.reduce_mean(tf.cast(tf.stack(probs, 1), tf.float32), 1)
-    # would this lead the value run out to be a list of only one two
-    # dimensional numpy array?
+    if self.mode == "decode":
+      f1 = []
+      for m in xrange(self.num_models):
+        with tf.variable_scope("model"+str(m)):
+          prob, _, _, _, _ = self._seq2class_model(
+              self.inputs, self.conditions, self.condition_lens, self.targets)
+          # probs.append(1-prob)
+          probs.append(prob)
+          f1.append(f1)
+          # print(prob.get_shape())
+      self.dis_ypred_for_auc = tf.reduce_mean(tf.cast(tf.stack(probs, 1), tf.float32), 1)
+      # would this lead the value run out to be a list of only one two
+      # dimensional numpy array?
     #  ------------------ for training ----------------------
-    loss_train = []
-    loss_cv = []
-    self.loaders = []
-    f1 = []
-    pre = []
-    rec = []
-    for m in xrange(self.num_models):
-      with tf.variable_scope("model"+str(m), reuse=True):
-        _, loss, _pre, _rec, _f1 = self._seq2class_model(
-            self.inputs_splitted[m], self.conditions_splitted[m],
-            self.condition_lens_splitted[m], self.targets_splitted[m])
-        loss_train.append(tf.expand_dims(loss, 0))
-        loss_cv.append(tf.expand_dims(loss, 0))
-        f1.append(_f1)
-        pre.append(_pre)
-        rec.append(_rec)
-    loss_train = tf.reduce_mean(tf.concat(loss_train, 0))
-    loss_cv = tf.reduce_mean(tf.concat(loss_cv, 0))
-    self.indicator = loss_cv
-    self.loss = loss_train
-    self.learning_rate = tf.train.exponential_decay(
-        self.hps.dis_lr,               # Base learning rate.
-        self.global_step * self.hps.batch_size,  # Current index into the dataset.
-        100000,             # Decay step.
-        0.95,                # Decay rate.
-        staircase=True)
-    self.f1 = sum(f1) / len(f1)
-    self.p = sum(pre) / len(pre)
-    self.r = sum(rec) / len(rec)
-    self.update = tf.contrib.layers.optimize_loss(
-        self.loss, self.global_step, tf.identity(self.learning_rate),
-        'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
+    else:
+      loss_train = []
+      loss_cv = []
+      self.loaders = []
+      f1 = []
+      pre = []
+      rec = []
+      for m in xrange(self.num_models):
+        with tf.variable_scope("model"+str(m), reuse=True):
+          _, loss, _pre, _rec, _f1 = self._seq2class_model(
+              self.inputs_splitted[m], self.conditions_splitted[m],
+              self.condition_lens_splitted[m], self.targets_splitted[m])
+          loss_train.append(tf.expand_dims(loss, 0))
+          loss_cv.append(tf.expand_dims(loss, 0))
+          f1.append(_f1)
+          pre.append(_pre)
+          rec.append(_rec)
+      loss_train = tf.reduce_mean(tf.concat(loss_train, 0))
+      loss_cv = tf.reduce_mean(tf.concat(loss_cv, 0))
+      self.indicator = loss_cv
+      self.loss = loss_train
+      self.learning_rate = tf.train.exponential_decay(
+          self.hps.dis_lr,               # Base learning rate.
+          self.global_step * self.hps.batch_size,  # Current index into the dataset.
+          100000,             # Decay step.
+          0.95,                # Decay rate.
+          staircase=True)
+      self.f1 = sum(f1) / len(f1)
+      self.p = sum(pre) / len(pre)
+      self.r = sum(rec) / len(rec)
+      self.update = tf.contrib.layers.optimize_loss(
+          self.loss, self.global_step, tf.identity(self.learning_rate),
+          'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
 
   def _seq2class_model(self, emb_inputs, emb_conditions, condition_lens, targets):
     """
