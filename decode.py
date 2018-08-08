@@ -196,18 +196,14 @@ class Decoder(object):
 
                 best_hyps = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)[0]
                 outputs_ids = [[t for t in hyp.tokens[1:]] for hyp in best_hyps]
-                # 10
                 padded_outputs_ids = pad_equal_length(
                     outputs_ids, self._vocab.word2id(STOP_DECODING),
                     self._vocab.word2id(PAD_TOKEN), self._hps.max_dec_steps)
                 # the probs for each sample by the generator distribution
                 sample_mean_generator_probs = [hyp.prob for hyp in best_hyps]
-                # 10
 
                 original_articles = batch.original_articles
-                # 1
                 original_abstracts = batch.original_abstracts
-                # 1
                 article_lens = np.tile(batch.enc_lens, len(outputs_ids))
                 articles = np.tile(batch.enc_batch, (len(outputs_ids), 1))
                 # TODO: article and article_lens should be expended to the some
@@ -225,11 +221,9 @@ class Decoder(object):
                     discriminator.condition_lens: article_lens}
                 # probs for each sample by the discriminator
                 sample_dis_probs = sess.run(discriminator.dis_ypred_for_auc, feed).tolist()
-                # 10
 
                 abstracts = np.tile(batch.padded_abs_ids, (len(outputs_ids), 1))
-                abstract_mean_generator_probs = np.mean(self._model.run_one_batch(sess, batch, update=False, gan_eval=True)['eval_final_dists'], axis=1)[0]
-                # 1
+                abstract_mean_generator_probs = self._model.run_one_batch(sess, batch, update=False, gan_eval=True)['gold_probs'][0]
 
                 emb_abstracts = sess.run(
                     self._model.temp_embedded_seq,
@@ -240,7 +234,6 @@ class Decoder(object):
                     discriminator.condition_lens: article_lens}
                 # probs for each sample by the discriminator
                 abstract_dis_probs = sess.run(discriminator.dis_ypred_for_auc, feed)[0]
-                # 1
 
                 sample = randint(0, int(1 / sample_rate) if sample_rate else 0)
 

@@ -469,7 +469,7 @@ def main(argv):
         utils.load_ckpt(dec_saver, sess, model_dir, mode="val", force=True)
         decoder = Decoder(sess, generator, dec_vocab)
 
-    if FLAGS.mode == "train_gan" and FLAGS.dis_reward_ratio:
+    if (FLAGS.mode == 'train_gan' and FLAGS.dis_reward_ratio) or FLAGS.mode == "decode":
         dis_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "discriminator" in v.name])
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))

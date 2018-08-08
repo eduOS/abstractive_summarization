@@ -22,6 +22,7 @@ from __future__ import division
 
 import time
 import tensorflow as tf
+import math
 from termcolor import colored
 from attention_decoder import conv_attention_decoder
 from utils import conv_encoder
@@ -156,7 +157,7 @@ class PointerGenerator(object):
                 self.topk_log_probs, self.indices = tf.nn.top_k(tf.log(self.final_dists[0]), self.hps.beam_size * 2)
                 self._ran_id = tf.multinomial(tf.log(self.final_dists[0]), 1)
 
-                self.eval_final_dists = self._conv_decoder(emb_eval_dec_inputs, is_training=True)
+                eval_final_dists = self._conv_decoder(emb_eval_dec_inputs, is_training=True)
 
                 k_sample_final_dists_ls = []
                 for emb_samples in k_emb_samples_ls:
@@ -167,19 +168,22 @@ class PointerGenerator(object):
                 batch_nums = tf.range(0, limit=tf.shape(target_batch)[0])
 
                 loss_per_step = []
+                log_gold_prob = []
                 for dec_step, dist in enumerate(final_dists):
                     targets = target_batch[:, dec_step]
                     indices = tf.stack((batch_nums, targets), axis=1)
-                    gold_probs = tf.gather_nd(dist, indices)
-                    losses = -tf.log(gold_probs) * padding_mask[:, dec_step]
+                    gold_probs = tf.gather_nd(dist, indices) * padding_mask[:, dec_step]
+                    losses = -tf.log(gold_probs)
+                    log_gold_prob.append(-losses)
                     loss_per_step.append(losses * rewards[:, dec_step] if rewards is not None else losses)
-                return loss_per_step
+                return loss_per_step, log_gold_prob
 
             with tf.variable_scope('generator_loss'):
 
                 tf.Print(self.final_dists, self.final_dists, "final list")
-                loss_per_step = get_loss(self.final_dists, self.target_batch, self.dec_padding_mask)
-                eval_loss_per_step = get_loss(self.eval_final_dists, self.target_batch, self.dec_padding_mask)
+                loss_per_step, _ = get_loss(self.final_dists, self.target_batch, self.dec_padding_mask)
+                eval_loss_per_step, log_gold_probs = get_loss(eval_final_dists, self.target_batch, self.dec_padding_mask)
+                self.gold_probs = math.e ** _avg(log_gold_probs, self.dec_padding_mask, False)
                 self._loss = _avg(loss_per_step, self.dec_padding_mask)
                 self._eval_loss = _avg(eval_loss_per_step, self.dec_padding_mask)
 
@@ -361,7 +365,7 @@ class PointerGenerator(object):
 
         if gan_eval:
             to_return['loss'] = self._eval_loss
-            to_return['eval_final_dists'] = self.eval_final_dists
+            to_return['gold_probs'] = self.gold_probs
         else:
             to_return['loss'] = self._loss
         if update:
@@ -455,7 +459,7 @@ def _mask_and_avg(values, padding_mask):
     return tf.reduce_mean(values_per_ex)  # overall average
 
 
-def _avg(values, padding_mask):
+def _avg(values, padding_mask, overall=True):
     """Applies mask to values then returns overall average (a scalar)
 
     Args:
@@ -469,7 +473,9 @@ def _avg(values, padding_mask):
 
     dec_lens = tf.reduce_sum(padding_mask, axis=1)  # shape batch_size. float32
     values_per_ex = tf.reduce_sum(tf.stack(values, 1), 1)/dec_lens
-    return tf.reduce_mean(values_per_ex)  # overall average
+    if overall:
+        return tf.reduce_mean(values_per_ex)  # overall average
+    return values_per_ex
 
 
 def _mask(values, padding_mask):

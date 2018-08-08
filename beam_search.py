@@ -55,7 +55,7 @@ class Hypothesis(object):
     @property
     def prob(self):
         """probs without start token"""
-        return np.mean(np.array(map(lambda x: math.e**x, self.log_probs[1:])))
+        return math.e ** np.mean(np.array(self.log_probs[1:]))
 
     @property
     def latest_token(self):
