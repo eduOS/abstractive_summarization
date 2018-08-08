@@ -510,6 +510,8 @@ def conv_decoder_stack(target_embed, attention_keys, attention_values, inputs, e
         else:
             res_inputs = next_layer
         # dropout before input to conv
+        # TODO: add a sentence gate in the first layer for a more effective
+        # attention
         next_layer = tf.contrib.layers.dropout(
             inputs=next_layer,
             keep_prob=dropout_dict['hid'],
