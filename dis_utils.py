@@ -7,11 +7,11 @@ from os.path import join as join_path
 import data
 import tensorflow as tf
 import numpy as np
-from utils import sattolo_cycle
 import sys
 from data import pad_equal_length
 import beam_search
 from data import PAD_TOKEN, STOP_DECODING
+from utils import get_mixed_samples
 
 
 # convolutional layer
@@ -195,9 +195,6 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_s
         if not batch:
             break
 
-        conditions = batch.enc_batch
-        condition_lens = batch.article_lens
-
         # half batch of generated samples and half batch of randomed ground truth
         best_hyps = beam_search.run_beam_search(sess, generator, dis_vocab, batch)
         random_hyps = [np.random.choice(
@@ -208,32 +205,12 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_s
 
         # # generated inputs
         outputs_ids = [[t for t in hyp.tokens[1:]] for hyp in random_hyps]
-        _gen_inputs = pad_equal_length(
+        gen_inputs = pad_equal_length(
             outputs_ids, dis_vocab.word2id(STOP_DECODING),
             dis_vocab.word2id(PAD_TOKEN), hps.max_dec_steps)
 
-        # # random inputs
-        range_ = range(len(conditions))
-        sattolo_cycle(range_)
-        random_indices = np.array(range_)
-        _random_inputs = batch.padded_abs_ids[random_indices]
-
-        range_ = range(2*len(conditions))
-        sattolo_cycle(range_)
-        random_indices = np.array(range_)
-        false_inputs, _ = np.split(np.concatenate((_gen_inputs, _random_inputs))[random_indices], 2)
-        false_conditions, _ = np.split(np.tile(conditions, (2, 1))[random_indices], 2)
-        false_condition_lens, _ = np.split(np.tile(condition_lens, (2, 1))[random_indices], 2)
-
-        # the whole batch of ground truth
-        true_inputs = batch.padded_abs_ids
-        true_conditions = conditions
-        true_condition_lens = condition_lens
-
-        mixed_inputs = np.split(np.concatenate((true_inputs, false_inputs))[random_indices], 2)
-        mixed_conditions = np.split(np.concatenate((true_conditions, false_conditions))[random_indices], 2)
-        mixed_condition_lens = np.split(np.concatenate((true_condition_lens, false_condition_lens))[random_indices], 2)
-        targets = np.split(np.array(len(true_inputs) * [1] + len(false_inputs) * [0])[random_indices], 2)
+        mixed_inputs, mixed_conditions, mixed_condition_lens, mixed_targets = get_mixed_samples(
+            gen_inputs, batch)
 
         for i in range(2):
             inputs = sess.run(
@@ -242,7 +219,7 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_s
             conditions = sess.run(
                 generator.enc_temp_embedded,
                 feed_dict={generator.enc_temp_batch: mixed_conditions[i]})
-            results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], targets[i], uptdat=False)
+            results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], mixed_targets[i], uptdat=False)
             f1.append(results["f1"].item())
             pre.append(results["precision"].item())
             rec.append(results["recall"].item())

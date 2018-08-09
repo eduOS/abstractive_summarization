@@ -628,3 +628,33 @@ def transpose_batch_time(x):
         tensor_shape.TensorShape(
             [x_static_shape[1].value, x_static_shape[0].value]).concatenate(x_static_shape[2:]))
     return x_t
+
+
+def get_mixed_samples(gen_inputs, batch):
+    conditions = batch.enc_batch
+    condition_lens = batch.article_lens
+    # # random inputs
+    batch_size = batch.enc_batch.shape[0]
+    range_ = range(batch_size)
+    sattolo_cycle(range_)
+    random_indices = np.array(range_)
+    _random_inputs = batch.padded_abs_ids[random_indices]
+
+    range_ = range(2*batch_size)
+    sattolo_cycle(range_)
+    random_indices = np.array(range_)
+    false_inputs, _ = np.split(np.concatenate((gen_inputs, _random_inputs))[random_indices], 2)
+    false_conditions, _ = np.split(np.tile(conditions, (2, 1))[random_indices], 2)
+    false_condition_lens, _ = np.split(np.tile(condition_lens, (2, 1))[random_indices], 2)
+
+    # the whole batch of ground truth
+    true_inputs = batch.padded_abs_ids
+    true_conditions = conditions
+    true_condition_lens = condition_lens
+
+    mixed_inputs = np.split(np.concatenate((true_inputs, false_inputs))[random_indices], 2)
+    mixed_conditions = np.split(np.concatenate((true_conditions, false_conditions))[random_indices], 2)
+    mixed_condition_lens = np.split(np.concatenate((true_condition_lens, false_condition_lens))[random_indices], 2)
+    mixed_targets = np.split(np.array(len(true_inputs) * [1] + len(false_inputs) * [0])[random_indices], 2)
+
+    return mixed_inputs, mixed_conditions, mixed_condition_lens, mixed_targets
