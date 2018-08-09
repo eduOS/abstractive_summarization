@@ -82,7 +82,7 @@ class Seq2ClassModel(object):
     _rec_ = []
     for m in xrange(self.num_models):
       with tf.variable_scope("model"+str(m)):
-        prob, _, pre_, rec_, f1_, _ = self._seq2class_model(
+        prob, _, pre_, rec_, f1_ = self._seq2class_model(
             self.inputs, self.conditions, self.condition_lens, self.targets)
         # probs.append(1-prob)
         probs.append(prob)

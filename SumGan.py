@@ -544,7 +544,7 @@ def main(argv):
                         conditions = sess.run(
                             generator.enc_temp_embedded,
                             feed_dict={generator.enc_temp_batch: mixed_conditions[i]})
-                        results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], mixed_targets[i], uptdat=False)
+                        results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], mixed_targets[i], update=False)
                         f1.append(results["f1"].item())
                         pre.append(results["precision"].item())
                         rec.append(results["recall"].item())

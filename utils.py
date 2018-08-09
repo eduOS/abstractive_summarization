@@ -632,23 +632,25 @@ def transpose_batch_time(x):
 
 def get_mixed_samples(gen_inputs, batch):
     conditions = batch.enc_batch
-    condition_lens = batch.article_lens
+    condition_lens = batch.enc_lens
+    inputs = batch.padded_abs_ids
+    assert gen_inputs.shape == inputs.shape, "getn_inputs shape: %s, but inputs shape %s" % (gen_inputs.shape, inputs.shape)
     # # random inputs
     batch_size = batch.enc_batch.shape[0]
     range_ = range(batch_size)
     sattolo_cycle(range_)
     random_indices = np.array(range_)
-    _random_inputs = batch.padded_abs_ids[random_indices]
+    _random_inputs = inputs[random_indices]
 
     range_ = range(2*batch_size)
     sattolo_cycle(range_)
     random_indices = np.array(range_)
     false_inputs, _ = np.split(np.concatenate((gen_inputs, _random_inputs))[random_indices], 2)
     false_conditions, _ = np.split(np.tile(conditions, (2, 1))[random_indices], 2)
-    false_condition_lens, _ = np.split(np.tile(condition_lens, (2, 1))[random_indices], 2)
+    false_condition_lens, _ = np.split(np.tile(condition_lens, (2))[random_indices], 2)
 
     # the whole batch of ground truth
-    true_inputs = batch.padded_abs_ids
+    true_inputs = inputs
     true_conditions = conditions
     true_condition_lens = condition_lens
 
