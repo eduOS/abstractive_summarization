@@ -187,7 +187,7 @@ def print_dashboard(train_accuracies, eval_loss, eval_accuracy):
     print("Eval loss %.4f, train accuracy is %.4f and eval accuracy is %.4f" % (eval_loss, train_accuracy, eval_accuracy))
 
 
-def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab):
+def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_saver, best_f1):
 
     f1 = pre = rec = []
     while True:
@@ -247,4 +247,10 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab):
             pre.append(results["precision"].item())
             rec.append(results["recall"].item())
 
-    return sum(f1)/len(f1), sum(pre)/len(pre), sum(rec)/len(rec)
+    ave_f1 = sum(f1)/len(f1)
+    if ave_f1 > best_f1:
+        best_f1 = ave_f1
+        checkpoint_path = ensure_exists(join_path(hps.model_dir, "discriminator")) + "/model.ckpt"
+        dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
+
+    return ave_f1, sum(pre)/len(pre), sum(rec)/len(rec)

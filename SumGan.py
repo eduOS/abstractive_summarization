@@ -510,6 +510,7 @@ def main(argv):
         # ave_rouge = decoder.bs_decode(gan_batcher_test, save2file=False, single_pass=True)
         # best_rouge = ave_rouge
         # print(colored('The starting rouge score is %s.' % ave_rouge, "green"))
+        best_val_f1 = 0
         for i_gan in range(hps_gan.gan_iter):
             # Train the generator for one step
             g_losses = []
@@ -518,8 +519,6 @@ def main(argv):
             gan_gen_iter = 0 if FLAGS.dis_reward_ratio else 2
 
             # Train the discriminator
-            dis_best_loss = 1000
-            dis_losses = []
             gan_dis_iter = hps_gan.gan_dis_iter if hps_gan.dis_reward_ratio else 0
             if gan_dis_iter:
                 print('\nGoing to train the discriminator.')
@@ -584,7 +583,6 @@ def main(argv):
                         results = discriminator.run_one_batch(sess, inputs[p], conditions[p], condition_lens[p], targets[p])
                         d_loss = results["loss"]
                         if not math.isnan(d_loss):
-                            dis_losses.append(float(d_loss))
                             f1.append(results["f1"].item())
                             pre.append(results["precision"].item())
                             rec.append(results["recall"].item())
@@ -604,34 +602,31 @@ def main(argv):
                     _f1 = sum(f1) / len(f1)
                     _recall = sum(rec) / len(rec)
                     _precision = sum(pre) / len(pre)
-                    if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:
-                        dis_best_loss = sum(dis_losses) / len(dis_losses)
-                        checkpoint_path = ensure_exists(join_path(hps_dis.model_dir, "discriminator")) + "/model.ckpt"
-                        dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
 
-                    f1_, precision_, recall_ = eval_save_dis(sess, hps_dis, generator, discriminator, gen_batcher_val, dec_vocab)
+                    if _f1 > 0.9:
+                        f1_, precision_, recall_, best_val_f1 = eval_save_dis(sess, hps_dis, generator, discriminator, gen_batcher_val, dec_vocab, dis_saver, best_val_f1)
 
-                    print(
-                        "\nDashboard for %s updated %s, finished steps:\t%s\n"
-                        "\tBatch size:\t%s, learning rate:\t%s, model nums: \t%s\n"
-                        "\tTra loss:\t%.4f\n"
-                        "\tAverage tra f1: \t%.4f, Average tra recall:\t%.4f. Average tra precision: \t%.4f\n"
-                        "\tAverage val f1: \t%.4f, Average val recall:\t%.4f. Average val precision: \t%.4f\n" % (
-                            "GAN Discriminator",
-                            datetime.datetime.now().strftime("on %m-%d at %H:%M"),
-                            results["global_step"].item(),
-                            hps_dis.batch_size,
-                            results['learning_rate'],
-                            hps_dis.num_models,
-                            results["loss"].item(),
-                            _f1, _recall, _precision,
-                            f1_, recall_, precision_,
-                            ))
+                        print(
+                            "\nDashboard for %s updated %s, finished steps:\t%s\n"
+                            "\tBatch size:\t%s, learning rate:\t%s, model nums: \t%s\n"
+                            "\tTra loss:\t%.4f\n"
+                            "\tAverage tra f1: \t%.4f, Average tra recall:\t%.4f. Average tra precision: \t%.4f\n"
+                            "\tAverage val f1: \t%.4f, Average val recall:\t%.4f. Average val precision: \t%.4f\n" % (
+                                "GAN Discriminator",
+                                datetime.datetime.now().strftime("on %m-%d at %H:%M"),
+                                results["global_step"].item(),
+                                hps_dis.batch_size,
+                                results['learning_rate'],
+                                hps_dis.num_models,
+                                results["loss"].item(),
+                                _f1, _recall, _precision,
+                                f1_, recall_, precision_,
+                                ))
 
-                    if not math.isnan(f1_) and f1_ > 0.95:
-                        # eve_f1 = eval_dis(gan_batcher_test, decoder, discriminator)
-                        gan_gen_iter = 0
-                        break
+                        if not math.isnan(f1_) and f1_ > 0.95:
+                            # eve_f1 = eval_dis(gan_batcher_test, decoder, discriminator)
+                            gan_gen_iter = 0
+                            break
 
             if gan_gen_iter:
                 print('Going to train the generator, %s times.' % gan_gen_iter)
