@@ -77,21 +77,27 @@ class Seq2ClassModel(object):
     probs = []
     #  ------------------ for evaluation ----------------------
     # return tf.nn.softmax(logits), loss, accuracy
-    if self.mode == "decode":
-      f1 = []
-      for m in xrange(self.num_models):
-        with tf.variable_scope("model"+str(m)):
-          prob, _, _, _, _ = self._seq2class_model(
-              self.inputs, self.conditions, self.condition_lens, self.targets)
-          # probs.append(1-prob)
-          probs.append(prob)
-          f1.append(f1)
-          # print(prob.get_shape())
-      self.dis_ypred_for_auc = tf.reduce_mean(tf.cast(tf.stack(probs, 1), tf.float32), 1)
-      # would this lead the value run out to be a list of only one two
-      # dimensional numpy array?
+    _f1_ = []
+    _pre_ = []
+    _rec_ = []
+    for m in xrange(self.num_models):
+      with tf.variable_scope("model"+str(m)):
+        prob, pre_, rec_, f1_, _ = self._seq2class_model(
+            self.inputs, self.conditions, self.condition_lens, self.targets)
+        # probs.append(1-prob)
+        probs.append(prob)
+        _f1_.append(f1_)
+        _pre_.append(pre_)
+        _rec_.append(rec_)
+        # print(prob.get_shape())
+    self.dis_ypred_for_auc = tf.reduce_mean(tf.cast(tf.stack(probs, 1), tf.float32), 1)
+    self._f1 = sum(_f1_) / len(_f1_)
+    self._p = sum(_pre_) / len(_pre_)
+    self._r = sum(_rec_) / len(_rec_)
+    # would this lead the value run out to be a list of only one two
+    # dimensional numpy array?
     #  ------------------ for training ----------------------
-    else:
+    if self.mode != "decode":
       loss_train = []
       loss_cv = []
       self.loaders = []

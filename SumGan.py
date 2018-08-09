@@ -593,10 +593,10 @@ def main(argv):
                             print(targets[p])
                             raise
 
-                _f1 = sum(f1) / len(f1)
-                _recall = sum(rec) / len(rec)
-                _precision = sum(pre) / len(pre)
                 if d_gan % 300 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
+                    _f1 = sum(f1) / len(f1)
+                    _recall = sum(rec) / len(rec)
+                    _precision = sum(pre) / len(pre)
                     if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:
                         dis_best_loss = sum(dis_losses) / len(dis_losses)
                         checkpoint_path = ensure_exists(join_path(hps_dis.model_dir, "discriminator")) + "/model.ckpt"
@@ -617,11 +617,10 @@ def main(argv):
                             _f1, _recall, _precision
                             ))
 
-                if not math.isnan(_f1) and _f1 > 0.95:
-                    # eve_f1 = eval_dis(gan_batcher_test, decoder, discriminator)
-                    gan_gen_iter = 0
-                    print('reached 95')
-                    break
+                    if not math.isnan(_f1) and _f1 > 0.95:
+                        # eve_f1 = eval_dis(gan_batcher_test, decoder, discriminator)
+                        gan_gen_iter = 0
+                        break
 
             if gan_gen_iter:
                 print('Going to train the generator, %s times.' % gan_gen_iter)

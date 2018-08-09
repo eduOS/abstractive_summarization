@@ -287,9 +287,9 @@ class Decoder(object):
                     rouge = rouge_l(original_abstracts[0].split(), output.split())
                     if ii == 0:
                         rouge_scores.append(rouge)
-                        mark = 'STARTS'
+                        mark = 'STATS'
                     else:
-                        mark = 'starts'
+                        mark = 'stats'
                     dis_rouge.append((sample_prob, rouge))
                     if save2file:
                         ove_f.write("article: "+original_articles[0]+"\n")
@@ -301,6 +301,7 @@ class Decoder(object):
                     ii += 1
                     max_dis_rouge_scores.append(sorted(dis_rouge, key=lambda x: x[1], reverse=True)[0][1])
                     dis_rouge_scores.append(sorted(dis_rouge, key=lambda x: x[0], reverse=True)[0][1])
+                ove_f.write("\n")
 
         except KeyboardInterrupt as exc:
             print(exc)

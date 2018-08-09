@@ -51,13 +51,20 @@ class Hypothesis(object):
     @property
     def useful_length(self):
         try:
-            leng = self._tokens.index(self.stop_token)
+            # exclude the stop token and the start token
+            leng = self._tokens.index(self.stop_token) - 1
         except ValueError:
             leng = len(self._tokens) - 1
+            # exclude the start token
         return leng
 
     @property
     def log_prob(self):
+        try:
+            # exclude the stop token prob
+            self.log_probs[self._tokens.index(self.stop_token)] = 0.0
+        except:
+            pass
         return sum(self.log_probs)
 
     @property
