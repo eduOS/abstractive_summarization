@@ -82,7 +82,7 @@ class Seq2ClassModel(object):
     _rec_ = []
     for m in xrange(self.num_models):
       with tf.variable_scope("model"+str(m)):
-        prob, pre_, rec_, f1_, _ = self._seq2class_model(
+        prob, _, pre_, rec_, f1_, _ = self._seq2class_model(
             self.inputs, self.conditions, self.condition_lens, self.targets)
         # probs.append(1-prob)
         probs.append(prob)
@@ -116,7 +116,6 @@ class Seq2ClassModel(object):
           rec.append(_rec)
       loss_train = tf.reduce_mean(tf.concat(loss_train, 0))
       loss_cv = tf.reduce_mean(tf.concat(loss_cv, 0))
-      self.indicator = loss_cv
       self.loss = loss_train
       self.learning_rate = tf.train.exponential_decay(
           self.hps.dis_lr,               # Base learning rate.
@@ -175,6 +174,8 @@ class Seq2ClassModel(object):
       pred = tf.where(tf.less(tf.fill(tf.shape(prob), 0.5), prob),
                       tf.fill(tf.shape(prob), 1.0), tf.fill(tf.shape(prob), 0.0))
 
+      # TODO: since there are multiple models, the scores should be calculated at
+      # once.
       TP = tf.count_nonzero(pred * targets)
       # TN = tf.count_nonzero((pred - 1) * (targets - 1))
       FP = tf.count_nonzero(pred * (targets - 1))
@@ -207,7 +208,10 @@ class Seq2ClassModel(object):
     # Input feed: encoder inputs, decoder inputs, target_weights, as provided.
     input_feed = {}
 
+    # TODO: the origianl inputs and conditons both for sample and
+    # ground truth should be printed out for checking
     input_feed[self.inputs] = inputs
+    # inputs should not include the start token and the stop token
     input_feed[self.conditions] = conditions
     input_feed[self.condition_lens] = condition_lens
 
@@ -226,10 +230,9 @@ class Seq2ClassModel(object):
       to_return["update"] = self.update
 
     else:
-      to_return["loss"] = self.indicator
-      to_return["f1"] = self.f1
-      to_return["precision"] = self.p
-      to_return["recall"] = self.r
+      to_return["f1"] = self._f1
+      to_return["precision"] = self._p
+      to_return["recall"] = self._r
 
     if do_profiling:
       self.run_metadata = tf.RunMetadata()

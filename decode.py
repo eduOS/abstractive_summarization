@@ -216,11 +216,11 @@ class Decoder(object):
                 # TODO: article and article_lens should be expended to the some
                 # shape as padded_outputs_ids
                 emb_articles = sess.run(
-                    self._model.temp_embedded_seq,
-                    feed_dict={self._model.temp_batch: articles})
+                    self._model.enc_temp_embedded,
+                    feed_dict={self._model.enc_temp_batch: articles})
                 emb_samples = sess.run(
-                    self._model.temp_embedded_seq,
-                    feed_dict={self._model.temp_batch: padded_outputs_ids})
+                    self._model.dec_temp_embedded,
+                    feed_dict={self._model.dec_temp_batch: padded_outputs_ids})
 
                 feed = {
                     discriminator.inputs: emb_samples,
@@ -233,8 +233,8 @@ class Decoder(object):
                 abstract_mean_generator_probs = math.e ** self._model.run_one_batch(sess, batch, update=False, gan_eval=True)['log_gold_probs'][0]
 
                 emb_abstracts = sess.run(
-                    self._model.temp_embedded_seq,
-                    feed_dict={self._model.temp_batch: abstracts})
+                    self._model.dec_temp_embedded,
+                    feed_dict={self._model.dec_temp_batch: abstracts})
                 feed = {
                     discriminator.inputs: emb_abstracts,
                     discriminator.conditions: emb_articles,

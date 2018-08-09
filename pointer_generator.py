@@ -59,7 +59,8 @@ class PointerGenerator(object):
             max_dec_steps = hps.max_dec_steps
 
         self.enc_batch = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch')
-        self.temp_batch = tf.placeholder(tf.int32, [batch_size, None], name='temp_batch_for_embedding')
+        self.enc_temp_batch = tf.placeholder(tf.int32, [batch_size, None], name='temp_batch_for_enc_embedding')
+        self.dec_temp_batch = tf.placeholder(tf.int32, [batch_size, None], name='temp_batch_for_dec_embedding')
         self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
         self.enc_padding_mask = tf.placeholder(tf.float32, [batch_size, None], name='enc_padding_mask')
 
@@ -130,7 +131,8 @@ class PointerGenerator(object):
                 self.enc_emb_saver = tf.train.Saver({"enc_embeddings": self.enc_embeddings})
                 self.dec_emb_saver = tf.train.Saver({"dec_embeddings": self.dec_embeddings})
                 self.emb_enc_inputs = tf.nn.embedding_lookup(self.enc_embeddings, self.enc_batch)
-                self.temp_embedded_seq = tf.nn.embedding_lookup(self.enc_embeddings, self.temp_batch)
+                self.enc_temp_embedded = tf.nn.embedding_lookup(self.enc_embeddings, self.enc_temp_batch)
+                self.dec_temp_embedded = tf.nn.embedding_lookup(self.dec_embeddings, self.dec_temp_batch)
                 emb_dec_inputs = tf.nn.embedding_lookup(self.dec_embeddings, self._dec_batch)
                 emb_eval_dec_inputs = tf.nn.embedding_lookup(self.dec_embeddings, self._eval_dec_batch)
 

@@ -22,6 +22,7 @@ from gan_utils import save_ckpt as gan_save_ckpt
 # from gan_utils import check_rouge
 # from dis_utils import eval_dis
 # from tensorflow.python import debug as tf_debug
+from dis_utils import eval_save_dis
 from utils import sattolo_cycle
 from utils import print_dashboard
 # from dis_utils import dump_chpt
@@ -151,6 +152,7 @@ FLAGS = tf.app.flags.FLAGS
 
 assert FLAGS.mode in ["pretrain_gen", "train_gan", "decode"]
 assert FLAGS.sample_rate >= 0 and FLAGS.sample_rate <= 0.5, "sample rate should be [0, 0.5]"
+assert FLAGS.batch_size % 2 == 0, "batch size should be even, but given odd %s" % FLAGS.batch_size
 
 if FLAGS.mode == "train_gan":
     FLAGS.single_pass = False
@@ -535,26 +537,31 @@ def main(argv):
                 # shuould first tanslate to words to avoid unk
                 n_samples = [samples for samples in n_samples_no_start]
                 for samples in n_samples:
+                    print('\ncheck if the stop token has been removed')
+                    print(samples)
+                    print('check if the stop token has been removed\n')
                     emb_dec_batch = sess.run(
-                        generator.temp_embedded_seq,
-                        feed_dict={generator.temp_batch: batch.padded_abs_ids})
+                        generator.dec_temp_embedded,
+                        feed_dict={generator.dec_temp_batch: batch.padded_abs_ids})
                     emb_conditions = sess.run(
-                        generator.temp_embedded_seq,
-                        feed_dict={generator.temp_batch: batch.enc_batch})
+                        generator.enc_temp_embedded,
+                        feed_dict={generator.enc_temp_batch: batch.enc_batch})
                     # feed_dict={generator.temp_batch: batch.padded_enc_batch})
                     _range = range(len(emb_dec_batch))
                     sattolo_cycle(_range)
                     indices = np.array(_range)
 
                     emb_samples = sess.run(
-                        generator.temp_embedded_seq,
-                        feed_dict={generator.temp_batch: samples})
+                        generator.dec_temp_embedded,
+                        feed_dict={generator.dec_temp_batch: samples})
 
                     emb_samples1, emb_samples2 = np.split(emb_samples, 2)
                     emb_dec_batch1, emb_dec_batch2 = np.split(emb_dec_batch[indices], 2)
                     emb_conditions1, emb_conditions2 = np.split(emb_conditions, 2)
                     enc_lens1, enc_lens2 = np.split(batch.enc_lens, 2)
 
+                    # TODO: the false samples ones should be randomed together
+                    # and then chosen
                     inputs = np.concatenate([emb_samples1, emb_dec_batch, emb_dec_batch2], 0)
                     conditions = np.concatenate([emb_conditions1, emb_conditions, emb_conditions2], 0)
                     condition_lens = np.concatenate([enc_lens1, batch.enc_lens, enc_lens2], 0)
@@ -602,11 +609,14 @@ def main(argv):
                         checkpoint_path = ensure_exists(join_path(hps_dis.model_dir, "discriminator")) + "/model.ckpt"
                         dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
 
+                    f1_, precision_, recall_ = eval_save_dis(sess, hps_dis, generator, discriminator, gen_batcher_val, dec_vocab)
+
                     print(
                         "\nDashboard for %s updated %s, finished steps:\t%s\n"
                         "\tBatch size:\t%s, learning rate:\t%s, model nums: \t%s\n"
-                        "\tTraining loss:\t%.4f. Average training f1: \t%.4f\n"
-                        "\tAverage training recall:\t%.4f. Average training precision: \t%.4f" % (
+                        "\tTra loss:\t%.4f\n"
+                        "\tAverage tra f1: \t%.4f, Average tra recall:\t%.4f. Average tra precision: \t%.4f\n"
+                        "\tAverage val f1: \t%.4f, Average val recall:\t%.4f. Average val precision: \t%.4f\n" % (
                             "GAN Discriminator",
                             datetime.datetime.now().strftime("on %m-%d at %H:%M"),
                             results["global_step"].item(),
@@ -614,10 +624,11 @@ def main(argv):
                             results['learning_rate'],
                             hps_dis.num_models,
                             results["loss"].item(),
-                            _f1, _recall, _precision
+                            _f1, _recall, _precision,
+                            f1_, recall_, precision_,
                             ))
 
-                    if not math.isnan(_f1) and _f1 > 0.95:
+                    if not math.isnan(f1_) and f1_ > 0.95:
                         # eve_f1 = eval_dis(gan_batcher_test, decoder, discriminator)
                         gan_gen_iter = 0
                         break

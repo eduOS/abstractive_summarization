@@ -7,7 +7,11 @@ from os.path import join as join_path
 import data
 import tensorflow as tf
 import numpy as np
+from utils import sattolo_cycle
 import sys
+from data import pad_equal_length
+import beam_search
+from data import PAD_TOKEN, STOP_DECODING
 
 
 # convolutional layer
@@ -183,10 +187,64 @@ def print_dashboard(train_accuracies, eval_loss, eval_accuracy):
     print("Eval loss %.4f, train accuracy is %.4f and eval accuracy is %.4f" % (eval_loss, train_accuracy, eval_accuracy))
 
 
-def eval_dis(batcher, decoder, discriminator):
+def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab):
+
+    f1 = pre = rec = []
     while True:
         batch = batcher.next_batch()
-        if not batch[0]:
-            eval_batcher.reset()
+        if not batch:
             break
-        enc_states, n_samples, n_targets_padding_mask = decoder.mc_generate(batch, s_num=hps_gan.sample_num)
+
+        conditions = batch.enc_batch
+        condition_lens = batch.article_lens
+
+        # half batch of generated samples and half batch of randomed ground truth
+        best_hyps = beam_search.run_beam_search(sess, generator, dis_vocab, batch)
+        random_hyps = [np.random.choice(
+            [hyp for hyp in hyps],
+            size=1,
+            p=[hyp.avg_log_prob for hyp in hyps])
+            for hyps in best_hyps]
+
+        # # generated inputs
+        outputs_ids = [[t for t in hyp.tokens[1:]] for hyp in random_hyps]
+        _gen_inputs = pad_equal_length(
+            outputs_ids, dis_vocab.word2id(STOP_DECODING),
+            dis_vocab.word2id(PAD_TOKEN), hps.max_dec_steps)
+
+        # # random inputs
+        range_ = range(len(conditions))
+        sattolo_cycle(range_)
+        random_indices = np.array(range_)
+        _random_inputs = batch.padded_abs_ids[random_indices]
+
+        range_ = range(2*len(conditions))
+        sattolo_cycle(range_)
+        random_indices = np.array(range_)
+        false_inputs, _ = np.split(np.concatenate((_gen_inputs, _random_inputs))[random_indices], 2)
+        false_conditions, _ = np.split(np.tile(conditions, (2, 1))[random_indices], 2)
+        false_condition_lens, _ = np.split(np.tile(condition_lens, (2, 1))[random_indices], 2)
+
+        # the whole batch of ground truth
+        true_inputs = batch.padded_abs_ids
+        true_conditions = conditions
+        true_condition_lens = condition_lens
+
+        mixed_inputs = np.split(np.concatenate((true_inputs, false_inputs))[random_indices], 2)
+        mixed_conditions = np.split(np.concatenate((true_conditions, false_conditions))[random_indices], 2)
+        mixed_condition_lens = np.split(np.concatenate((true_condition_lens, false_condition_lens))[random_indices], 2)
+        targets = np.split(np.array(len(true_inputs) * [1] + len(false_inputs) * [0])[random_indices], 2)
+
+        for i in range(2):
+            inputs = sess.run(
+                generator.dec_temp_embedded,
+                feed_dict={generator.dec_temp_batch: mixed_inputs[i]})
+            conditions = sess.run(
+                generator.enc_temp_embedded,
+                feed_dict={generator.enc_temp_batch: mixed_conditions[i]})
+            results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], targets[i], uptdat=False)
+            f1.append(results["f1"].item())
+            pre.append(results["precision"].item())
+            rec.append(results["recall"].item())
+
+    return sum(f1)/len(f1), sum(pre)/len(pre), sum(rec)/len(rec)
