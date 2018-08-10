@@ -207,7 +207,7 @@ class Decoder(object):
                     outputs_ids, self._vocab.word2id(STOP_DECODING),
                     self._vocab.word2id(PAD_TOKEN), self._hps.max_dec_steps)
                 # the probs for each sample by the generator distribution
-                sample_mean_generator_probs = [hyp.prob for hyp in best_hyps]
+                sample_mean_generator_probs = [hyp.avg_prob for hyp in best_hyps]
 
                 original_articles = batch.original_articles
                 original_abstracts = batch.original_abstracts

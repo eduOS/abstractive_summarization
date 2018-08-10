@@ -66,7 +66,7 @@ class Hypothesis(object):
         return self._tokens
 
     @property
-    def prob(self):
+    def avg_prob(self):
         """probs without start token"""
         return math.e ** self.avg_log_prob
 

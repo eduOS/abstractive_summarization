@@ -15,7 +15,7 @@ from decode import Decoder
 from pointer_generator import PointerGenerator
 from rollout import Rollout
 from os.path import join as join_path
-from utils import ensure_exists
+from utils import ensure_exists, get_time
 from gen_utils import calc_running_avg_loss
 from gen_utils import get_best_loss_from_chpt
 from gen_utils import save_ckpt as gen_save_ckpt
@@ -24,13 +24,11 @@ from gan_utils import save_ckpt as gan_save_ckpt
 # from dis_utils import eval_dis
 # from tensorflow.python import debug as tf_debug
 from dis_utils import eval_save_dis
-from utils import sattolo_cycle
 from data import pad_equal_length
-from utils import print_dashboard
+from utils import print_dashboard, safe_append
 # from dis_utils import dump_chpt
 import math
 from termcolor import colored
-from data import POSITIVE_LABEL, NEGATIVE_LABEL
 from data import outputsids2words, strip_pads
 from gan_utils import show_sample_reward
 from data import PAD_TOKEN, STOP_DECODING
@@ -39,6 +37,8 @@ from res_discriminator import Seq2ClassModel
 from data import Vocab
 DEBUG = False
 epsilon = sys.float_info.epsilon
+TRAINING_F1_THRESHHOLD = 0.4
+VAL_F1_THRESHHOLD = 0.95
 
 # tf.logging.set_verbosity(tf.logging.ERROR)
 tf.app.flags.DEFINE_string(
@@ -519,12 +519,14 @@ def main(argv):
             # Train the discriminator
             gan_dis_iter = hps_gan.gan_dis_iter if hps_gan.dis_reward_ratio else 0
             if gan_dis_iter:
-                print('\nGoing to train the discriminator.')
+                print('\nGoing to train the discriminator %s.' % get_time())
             for d_gan in range(gan_dis_iter):
                 f1 = []
                 pre = []
                 rec = []
                 batch = gen_batcher_train.next_batch()
+                if not batch:
+                    continue
                 _, n_samples, _ = decoder.mc_generate(
                     batch, s_num=hps_gan.sample_num)
                 assert np.array(n_samples).shape == (hps_gan.sample_num,
@@ -544,12 +546,15 @@ def main(argv):
                         conditions = sess.run(
                             generator.enc_temp_embedded,
                             feed_dict={generator.enc_temp_batch: mixed_conditions[i]})
-                        results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], mixed_targets[i], update=False)
-                        f1.append(results["f1"].item())
-                        pre.append(results["precision"].item())
-                        rec.append(results["recall"].item())
+                        results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], mixed_targets[i])
+                        safe_append(f1, results["f1"].item(), 'f1 in training dis')
+                        safe_append(pre, results["precision"].item(), 'pre in training dis')
+                        safe_append(rec, results["recall"].item(), 'rec in training dis')
 
-                if d_gan % 300 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
+                if d_gan % 10 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
+                    print('The average f1 until the %sth batch: %s' % (d_gan, sum(f1) / len(f1)))
+
+                if d_gan % 30 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
                     _f1 = sum(f1) / len(f1)
                     _recall = sum(rec) / len(rec)
                     _precision = sum(pre) / len(pre)
@@ -557,7 +562,8 @@ def main(argv):
                     pre = []
                     rec = []
 
-                    if _f1 > 0.9:
+                    if _f1 > TRAINING_F1_THRESHHOLD:
+                        print('The training f1 reaches TRAINING_F1_THRESHHOLD %s %s, going to evaluate the dis model..' % (TRAINING_F1_THRESHHOLD, get_time()))
                         f1_, precision_, recall_, best_val_f1 = eval_save_dis(sess, hps_dis, generator, discriminator, gen_batcher_val, dec_vocab, dis_saver, best_val_f1)
 
                         print(
@@ -567,7 +573,7 @@ def main(argv):
                             "\tAverage tra f1: \t%.4f, Average tra recall:\t%.4f. Average tra precision: \t%.4f\n"
                             "\tAverage val f1: \t%.4f, Average val recall:\t%.4f. Average val precision: \t%.4f\n" % (
                                 "GAN Discriminator",
-                                datetime.datetime.now().strftime("on %m-%d at %H:%M"),
+                                get_time(),
                                 results["global_step"].item(),
                                 hps_dis.batch_size,
                                 results['learning_rate'],
@@ -577,7 +583,8 @@ def main(argv):
                                 f1_, recall_, precision_,
                                 ))
 
-                        if not math.isnan(f1_) and f1_ > 0.95:
+                        if not math.isnan(f1_) and f1_ > VAL_F1_THRESHHOLD:
+                            print('The val f1 reaches VAL_F1_THRESHHOLD %s %s, going to terminate training the dis model..' % (VAL_F1_THRESHHOLD, get_time()))
                             # eve_f1 = eval_dis(gan_batcher_test, decoder, discriminator)
                             gan_gen_iter = 0
                             break
@@ -630,10 +637,7 @@ def main(argv):
 
                 # for visualization
                 g_loss = results["loss"]
-                if not math.isnan(g_loss):
-                    g_losses.append(g_loss)
-                else:
-                    print(colored('a nan in gan loss', 'red'))
+                safe_append(g_losses, g_loss, 'in gan loss')
                 current_speed.append(time.time() - start_time)
 
             # Test
@@ -658,7 +662,7 @@ def main(argv):
                         "\tAverage GAN training loss:\t%.4f; "
                         "eval loss:\t%.4f\n"
                         "Average rouge %s; and the best rouge %s." % (
-                            datetime.datetime.now().strftime("on %m-%d at %H:%M"),
+                            get_time(),
                             gen_global_step,
                             hps_gen.batch_size,
                             hps_gen.dec_vocab_size,

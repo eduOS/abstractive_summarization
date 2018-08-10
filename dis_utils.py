@@ -5,6 +5,7 @@ from __future__ import division
 from utils import ensure_exists
 from os.path import join as join_path
 import data
+from utils import safe_append
 import tensorflow as tf
 import numpy as np
 import sys
@@ -12,6 +13,7 @@ from data import pad_equal_length
 import beam_search
 from data import PAD_TOKEN, STOP_DECODING
 from utils import get_mixed_samples
+from sklearn.utils.extmath import softmax
 
 
 # convolutional layer
@@ -190,6 +192,8 @@ def print_dashboard(train_accuracies, eval_loss, eval_accuracy):
 def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_saver, best_f1):
 
     f1 = pre = rec = []
+    stop_id = dis_vocab.word2id(STOP_DECODING)
+    pad_id = dis_vocab.word2id(PAD_TOKEN)
     while True:
         batch = batcher.next_batch()
         if not batch:
@@ -198,16 +202,16 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_s
         # half batch of generated samples and half batch of randomed ground truth
         best_hyps = beam_search.run_beam_search(sess, generator, dis_vocab, batch)
         random_hyps = [np.random.choice(
-            [hyp for hyp in hyps],
+            hyps,
             size=1,
-            p=[hyp.avg_log_prob for hyp in hyps])
+            p=list(softmax(np.array([[hyp.avg_prob for hyp in hyps]]))[0]))
             for hyps in best_hyps]
 
         # # generated inputs
-        outputs_ids = [[t for t in hyp.tokens[1:]] for hyp in random_hyps]
+        outputs_ids = [hyp[0].tokens[1:] for hyp in random_hyps]
         gen_inputs = pad_equal_length(
-            outputs_ids, dis_vocab.word2id(STOP_DECODING),
-            dis_vocab.word2id(PAD_TOKEN), hps.max_dec_steps)
+            outputs_ids, stop_id,
+            pad_id, hps.max_dec_steps)
 
         mixed_inputs, mixed_conditions, mixed_condition_lens, mixed_targets = get_mixed_samples(
             gen_inputs, batch)
@@ -219,10 +223,10 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_s
             conditions = sess.run(
                 generator.enc_temp_embedded,
                 feed_dict={generator.enc_temp_batch: mixed_conditions[i]})
-            results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], mixed_targets[i], uptdat=False)
-            f1.append(results["f1"].item())
-            pre.append(results["precision"].item())
-            rec.append(results["recall"].item())
+            results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], mixed_targets[i], update=False)
+            safe_append(f1, results["f1"].item(), 'f1 in val dis')
+            safe_append(pre, results["precision"].item(), 'pre in val dis')
+            safe_append(rec, results["recall"].item(), 'rec in val dis')
 
     ave_f1 = sum(f1)/len(f1)
     if ave_f1 > best_f1:

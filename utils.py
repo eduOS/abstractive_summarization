@@ -15,6 +15,7 @@ from tensorflow.python import pywrap_tensorflow
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.ops import array_ops
 import datetime
+import math
 import tensorflow as tf
 from random import randrange
 import time
@@ -660,3 +661,25 @@ def get_mixed_samples(gen_inputs, batch):
     mixed_targets = np.split(np.array(len(true_inputs) * [1] + len(false_inputs) * [0])[random_indices], 2)
 
     return mixed_inputs, mixed_conditions, mixed_condition_lens, mixed_targets
+
+
+def print_matrix_to_file(matrix, filename="log.txt"):
+    if str(matrix.dtype) == str('int64'):
+        fmt = str('%i')
+    else:
+        fmt = str('%.3f')
+
+    np.savetxt(filename+'.temp.txt', matrix, fmt=fmt, delimiter='\t')
+
+
+def safe_append(_list, _value, message=''):
+    if math.isnan(_value):
+        print(colored('a nan found %s' % message, 'red'))
+    elif math.isinf(_value):
+        print(colored('an inf found %s' % message, 'red'))
+    else:
+        _list.append(_value)
+
+
+def get_time():
+    return datetime.datetime.now().strftime("on %m-%d at %H:%M")
