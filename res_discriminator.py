@@ -5,7 +5,7 @@ from __future__ import print_function
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 from tensorflow.python.client import timeline
-from utils import lstm_encoder
+from utils import lstm_encoder, linear_mapping_weightnorm
 import dis_utils
 
 
@@ -77,43 +77,35 @@ class Seq2ClassModel(object):
     probs = []
     #  ------------------ for evaluation ----------------------
     # return tf.nn.softmax(logits), loss, accuracy
-    _f1_ = []
-    _pre_ = []
-    _rec_ = []
+    self.TP_ = self.FP_ = self.FN_ = 0
     for m in xrange(self.num_models):
       with tf.variable_scope("model"+str(m)):
-        prob, _, pre_, rec_, f1_ = self._seq2class_model(
+        prob, _, tp_, fp_, fn_ = self._seq2class_model(
             self.inputs, self.conditions, self.condition_lens, self.targets)
         # probs.append(1-prob)
         probs.append(prob)
-        _f1_.append(f1_)
-        _pre_.append(pre_)
-        _rec_.append(rec_)
+        self.TP_ += tp_
+        self.FP_ += fp_
+        self.FN_ += fn_
         # print(prob.get_shape())
     self.dis_ypred_for_auc = tf.reduce_mean(tf.cast(tf.stack(probs, 1), tf.float32), 1)
-    self._f1 = sum(_f1_) / len(_f1_)
-    self._p = sum(_pre_) / len(_pre_)
-    self._r = sum(_rec_) / len(_rec_)
     # would this lead the value run out to be a list of only one two
     # dimensional numpy array?
     #  ------------------ for training ----------------------
     if self.mode != "decode":
       loss_train = []
       loss_cv = []
-      self.loaders = []
-      f1 = []
-      pre = []
-      rec = []
+      self._TP = self._FP = self._FN = 0
       for m in xrange(self.num_models):
         with tf.variable_scope("model"+str(m), reuse=True):
-          _, loss, _pre, _rec, _f1 = self._seq2class_model(
+          _, loss, _tp, _fp, _fn = self._seq2class_model(
               self.inputs_splitted[m], self.conditions_splitted[m],
               self.condition_lens_splitted[m], self.targets_splitted[m])
           loss_train.append(tf.expand_dims(loss, 0))
           loss_cv.append(tf.expand_dims(loss, 0))
-          f1.append(_f1)
-          pre.append(_pre)
-          rec.append(_rec)
+          self._TP += _tp
+          self._FP += _fp
+          self._FN += _fn
       loss_train = tf.reduce_mean(tf.concat(loss_train, 0))
       loss_cv = tf.reduce_mean(tf.concat(loss_cv, 0))
       self.loss = loss_train
@@ -123,9 +115,6 @@ class Seq2ClassModel(object):
           100000,             # Decay step.
           0.95,                # Decay rate.
           staircase=True)
-      self.f1 = sum(f1) / len(f1)
-      self.p = sum(pre) / len(pre)
-      self.r = sum(rec) / len(rec)
       self.update = tf.contrib.layers.optimize_loss(
           self.loss, self.global_step, tf.identity(self.learning_rate),
           'Adam', gradient_noise_scale=None, clip_gradients=None, name="OptimizeLoss")
@@ -145,6 +134,8 @@ class Seq2ClassModel(object):
                                                               trainable=True)
 
     with tf.variable_scope("input_encoder"):
+      emb_inputs = linear_mapping_weightnorm(emb_inputs, emb_inputs.get_shape()[-1], dropout=0.9, var_scope_name="condition_linear")
+
       cnn_emb_inputs = tf.expand_dims(emb_inputs, 1)
       cnn_outputs = dis_utils.ResCNN(
           cnn_emb_inputs, self.conv_layers, self.kernel_size, self.pool_size,
@@ -154,6 +145,7 @@ class Seq2ClassModel(object):
       input_emb = tf.reduce_max(cnn_outputs, axis=1)
 
     with tf.variable_scope("condition_encoder"):
+      emb_conditions = linear_mapping_weightnorm(emb_conditions, emb_conditions.get_shape()[-1], dropout=0.9, var_scope_name="inputs_linear")
       _, condition_emb = lstm_encoder(
           emb_conditions, condition_lens,
           hidden_dim=self.hps.hidden_dim, rand_unif_init=self.rand_unif_init)
@@ -161,14 +153,9 @@ class Seq2ClassModel(object):
       condition_emb = tf.concat(values=[condition_emb.c, condition_emb.h], axis=1)
       with tf.variable_scope("conduction_projection"):
         condition_emb = tf.matmul(condition_emb, condition_weights)
-      # (batch_size, 2*hidden_dim)
 
     with tf.variable_scope("dis_loss"):
-      # prob = tf.reduce_sum(tf.multiply(condition_emb, input_emb), axis=1) / (tf.norm(condition_emb, axis=1) * tf.norm(input_emb, axis=1))
-      # normalized_condition_emb = tf.nn.l2_normalize(condition_emb, dim=1)
-      # normalized_input_emb = tf.nn.l2_normalize(input_emb, dim=1)
       dot_product = tf.reduce_sum(tf.multiply(input_emb, condition_emb), axis=1)
-      # loss = tf.reduce_mean(tf.where(tf.equal(targets, 1), -tf.log(prob), -tf.log(1-prob)))
       loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=dot_product, labels=targets)
       prob = tf.sigmoid(dot_product)
       pred = tf.where(tf.less(tf.fill(tf.shape(prob), 0.5), prob),
@@ -181,10 +168,10 @@ class Seq2ClassModel(object):
       FP = tf.count_nonzero(pred * (targets - 1))
       FN = tf.count_nonzero((pred - 1) * targets)
 
-      precision = TP / (TP + FP)
-      recall = TP / (TP + FN)
-      f1 = 2 * precision * recall / (precision + recall)
-    return prob, loss, precision, recall, f1
+      # precision = TP / (TP + FP)
+      # recall = TP / (TP + FN)
+      # f1 = 2 * precision * recall / (precision + recall)
+    return prob, loss, TP, FP, FN
 
   def run_one_batch(self, sess, inputs, conditions, condition_lens, targets, update=True, do_profiling=False):
     """Run a step of the model feeding the given inputs.
@@ -224,15 +211,15 @@ class Seq2ClassModel(object):
     # Output feed.
     if update:
       to_return["loss"] = self.loss
-      to_return["f1"] = self.f1
-      to_return["precision"] = self.p
-      to_return["recall"] = self.r
+      to_return["tp"] = self._TP
+      to_return["fp"] = self._FP
+      to_return["fn"] = self._FN
       to_return["update"] = self.update
 
     else:
-      to_return["f1"] = self._f1
-      to_return["precision"] = self._p
-      to_return["recall"] = self._r
+      to_return["tp"] = self.TP_
+      to_return["fp"] = self.FP_
+      to_return["fn"] = self.FN_
 
     if do_profiling:
       self.run_metadata = tf.RunMetadata()

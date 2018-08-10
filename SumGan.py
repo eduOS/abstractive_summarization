@@ -4,9 +4,9 @@ from __future__ import division
 import tensorflow as tf
 from collections import namedtuple, deque
 import numpy as np
-import datetime
+import datetime # noqa
 import utils
-import time
+import time # noqa
 import sys
 # import data
 from batcher import GenBatcher
@@ -25,7 +25,7 @@ from gan_utils import save_ckpt as gan_save_ckpt
 # from tensorflow.python import debug as tf_debug
 from dis_utils import eval_save_dis
 from data import pad_equal_length
-from utils import print_dashboard, safe_append
+from utils import print_dashboard, safe_append, cal_dis_stats
 # from dis_utils import dump_chpt
 import math
 from termcolor import colored
@@ -37,7 +37,7 @@ from res_discriminator import Seq2ClassModel
 from data import Vocab
 DEBUG = False
 epsilon = sys.float_info.epsilon
-TRAINING_F1_THRESHHOLD = 0.4
+TRAINING_F1_THRESHHOLD = 0.9
 VAL_F1_THRESHHOLD = 0.95
 
 # tf.logging.set_verbosity(tf.logging.ERROR)
@@ -509,6 +509,7 @@ def main(argv):
         stop_id = dec_vocab.word2id(STOP_DECODING)
         pad_id = dec_vocab.word2id(PAD_TOKEN)
         best_val_f1 = 0
+        _TP = _FP = _FN = 0
         for i_gan in range(hps_gan.gan_iter):
             # Train the generator for one step
             g_losses = []
@@ -521,9 +522,6 @@ def main(argv):
             if gan_dis_iter:
                 print('\nGoing to train the discriminator %s.' % get_time())
             for d_gan in range(gan_dis_iter):
-                f1 = []
-                pre = []
-                rec = []
                 batch = gen_batcher_train.next_batch()
                 if not batch:
                     continue
@@ -547,23 +545,21 @@ def main(argv):
                             generator.enc_temp_embedded,
                             feed_dict={generator.enc_temp_batch: mixed_conditions[i]})
                         results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], mixed_targets[i])
-                        safe_append(f1, results["f1"].item(), 'f1 in training dis')
-                        safe_append(pre, results["precision"].item(), 'pre in training dis')
-                        safe_append(rec, results["recall"].item(), 'rec in training dis')
+                        _TP += results["tp"].item()
+                        _FP += results["fp"].item()
+                        _FN += results["fn"].item()
 
-                if d_gan % 10 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
-                    print('The average f1 until the %sth batch: %s' % (d_gan, sum(f1) / len(f1)))
+                if d_gan % 100 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
+                    _, _, _f1 = cal_dis_stats(_TP, _FP, _FN)
+                    print('The average training f1 until the %sth batch: %s' % (d_gan, _f1))
 
-                if d_gan % 30 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
-                    _f1 = sum(f1) / len(f1)
-                    _recall = sum(rec) / len(rec)
-                    _precision = sum(pre) / len(pre)
-                    f1 = []
-                    pre = []
-                    rec = []
+                if d_gan % 300 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
+                    _precision, _recall, _f1 = cal_dis_stats(_TP, _FP, _FN)
+                    _TP = _FP = _FN = 0
 
                     if _f1 > TRAINING_F1_THRESHHOLD:
                         print('The training f1 reaches TRAINING_F1_THRESHHOLD %s %s, going to evaluate the dis model..' % (TRAINING_F1_THRESHHOLD, get_time()))
+                        # this takes about 35 minutes
                         f1_, precision_, recall_, best_val_f1 = eval_save_dis(sess, hps_dis, generator, discriminator, gen_batcher_val, dec_vocab, dis_saver, best_val_f1)
 
                         print(
@@ -572,12 +568,8 @@ def main(argv):
                             "\tTra loss:\t%.4f\n"
                             "\tAverage tra f1: \t%.4f, Average tra recall:\t%.4f. Average tra precision: \t%.4f\n"
                             "\tAverage val f1: \t%.4f, Average val recall:\t%.4f. Average val precision: \t%.4f\n" % (
-                                "GAN Discriminator",
-                                get_time(),
-                                results["global_step"].item(),
-                                hps_dis.batch_size,
-                                results['learning_rate'],
-                                hps_dis.num_models,
+                                "GAN Discriminator", get_time(), results["global_step"].item(),
+                                hps_dis.batch_size, results['learning_rate'], hps_dis.num_models,
                                 results["loss"].item(),
                                 _f1, _recall, _precision,
                                 f1_, recall_, precision_,

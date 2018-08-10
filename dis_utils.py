@@ -194,6 +194,8 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_s
     f1 = pre = rec = []
     stop_id = dis_vocab.word2id(STOP_DECODING)
     pad_id = dis_vocab.word2id(PAD_TOKEN)
+
+    TP = FP = FN = 0
     while True:
         batch = batcher.next_batch()
         if not batch:
@@ -224,14 +226,18 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_s
                 generator.enc_temp_embedded,
                 feed_dict={generator.enc_temp_batch: mixed_conditions[i]})
             results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], mixed_targets[i], update=False)
-            safe_append(f1, results["f1"].item(), 'f1 in val dis')
-            safe_append(pre, results["precision"].item(), 'pre in val dis')
-            safe_append(rec, results["recall"].item(), 'rec in val dis')
+            TP += results["tp"].item()
+            FP += results["fp"].item()
+            FN += results["fn"].item()
 
-    ave_f1 = sum(f1)/len(f1)
-    if ave_f1 > best_f1:
-        best_f1 = ave_f1
+    precision = TP / (TP + FP)
+    recall = TP / (TP + FN)
+    f1 = 2 * precision * recall / (precision + recall)
+
+    if f1 > best_f1:
+        best_f1 = f1
         checkpoint_path = ensure_exists(join_path(hps.model_dir, "discriminator")) + "/model.ckpt"
         dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
+        best_f1 = f1
 
-    return ave_f1, sum(pre)/len(pre), sum(rec)/len(rec)
+    return f1, pre, rec, best_f1

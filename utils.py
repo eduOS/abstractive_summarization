@@ -183,6 +183,9 @@ def linear(args, output_size, bias, bias_start=0.0, scope=None):
 
 
 def linear_mapping_weightnorm(inputs, out_dim, dropout=1.0, var_scope_name="linear_mapping"):
+  """
+  linear transform and normalize
+  """
   with tf.variable_scope(var_scope_name):
     input_shape = inputs.get_shape().as_list()    # static shape. may has None
     input_shape_tensor = tf.shape(inputs)
@@ -632,6 +635,12 @@ def transpose_batch_time(x):
 
 
 def get_mixed_samples(gen_inputs, batch):
+    """
+    get the whole batch of the ground truth as TRUTH
+    And half of the generated batch and half of the sattolo randomed ground truth as FALSE
+    the two batch sized samples containing one batch sized ground truth and one batch sized false
+    then were randomed to form two batches
+    """
     conditions = batch.enc_batch
     condition_lens = batch.enc_lens
     inputs = batch.padded_abs_ids
@@ -683,3 +692,10 @@ def safe_append(_list, _value, message=''):
 
 def get_time():
     return datetime.datetime.now().strftime("on %m-%d at %H:%M")
+
+
+def cal_dis_stats(TP, FP, FN):
+    precision = TP / (TP + FP)
+    recall = TP / (TP + FN)
+    f1 = 2 * precision * recall / (precision + recall)
+    return precision, recall, f1
