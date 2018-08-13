@@ -41,7 +41,7 @@
 31. separate the discriminator graph and the generator graph but load them together in order to train then separately [check]
 32. train my own vocabulary for the discriminator
   already get a pretrained one, the char embedding is directly input to the discriminator from the generator
-33. rollout weights decay
+33. TODO: rollout weights decay
 34. the beam search is too slow thus a multithread function should be added
 35. it seems that using two dictionaries is less efficient in using the reward
   the embedding from the encoder is put to the discriminator directly
@@ -53,10 +53,10 @@
 41. add the reinforcement rouge reward
 42. collect some keywords from the long content to form a dynamic vocabulary, but how to make use of those keywords remains a problem
 43. the rollout can be move out from the graph to make it less error-prone
-44. vocab acumulative probability to choose the vocab_size
+44. vocab acumulative probability to choose the vocab_size [check]
 https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-python
-45. add the learning rate update
-46. add the checkpoint modification: a particular variable loader for the trained graph is created
+45. add the learning rate update [check]
+46. add the checkpoint modification: a particular variable loader for the trained graph is created [check]
 47. the content can be used to train a value iteration for the reward, if can be found in the content the reward is higher
 48. substitue the MCMC with the stocastic MCMC: https://arxiv.org/pdf/1706.05439.pdf
 49. add the dropout mechenism or maxout better to the network, Selective Encoding for Abstractive Sentence Summarization
@@ -84,6 +84,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 68. generate at once like the way conv encoder decodes, or block by block
 69. unsupervised pre-training using language model
 70. Train discriminator using previous checkpoints, not only the latest one
+71. TODO: for the cnn dataset make bow separated by any punc as encoder unit
 
 # problems
 1. cannot end
