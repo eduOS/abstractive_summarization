@@ -5,7 +5,6 @@ from __future__ import division
 from utils import ensure_exists
 from os.path import join as join_path
 import data
-from utils import safe_append
 import tensorflow as tf
 import numpy as np
 import sys
@@ -24,35 +23,35 @@ def convolution2d(inputs,
                   activation_fn=None,
                   reuse=None,
                   scope=None):
-  """Adds a 2D convolution followed by a maxpool layer.
+    """Adds a 2D convolution followed by a maxpool layer.
 
-  """
-  with tf.variable_scope(scope, 'conv_inputs', [inputs], reuse=reuse):
-    dtype = inputs.dtype.base_dtype
-    num_filters_in = inputs.get_shape()[-1].value
-    num_outputs = num_filters_in
-    weights_shape = [1] + [kernel_size] + [num_filters_in, num_outputs]
-    # 1, 3, emb_dim, emb_dim
-    weights = tf.get_variable(name='weights',
-                              shape=weights_shape,
-                              dtype=dtype,
-                              initializer=tf.contrib.layers.xavier_initializer(),
-                              collections=[tf.GraphKeys.WEIGHTS],
-                              trainable=True)
-    biases = tf.get_variable(name='biases',
-                             shape=[num_outputs, ],
-                             dtype=dtype,
-                             initializer=tf.zeros_initializer(),
-                             collections=[tf.GraphKeys.BIASES],
-                             trainable=True)
-    outputs = tf.nn.conv2d(inputs, weights, [1, 1, 1, 1], padding='SAME')
-    outputs += biases
-    if pool_size:
-      pool_shape = [1, 1] + [pool_size] + [1]
-      outputs = tf.nn.max_pool(outputs, pool_shape, pool_shape, padding='SAME')
-    if activation_fn:
-      outputs = activation_fn(outputs)
-    return outputs
+    """
+    with tf.variable_scope(scope, 'conv_inputs', [inputs], reuse=reuse):
+        dtype = inputs.dtype.base_dtype
+        num_filters_in = inputs.get_shape()[-1].value
+        num_outputs = num_filters_in
+        weights_shape = [1] + [kernel_size] + [num_filters_in, num_outputs]
+        # 1, 3, emb_dim, emb_dim
+        weights = tf.get_variable(name='weights',
+                                  shape=weights_shape,
+                                  dtype=dtype,
+                                  initializer=tf.contrib.layers.xavier_initializer(),
+                                  collections=[tf.GraphKeys.WEIGHTS],
+                                  trainable=True)
+        biases = tf.get_variable(name='biases',
+                                 shape=[num_outputs, ],
+                                 dtype=dtype,
+                                 initializer=tf.zeros_initializer(),
+                                 collections=[tf.GraphKeys.BIASES],
+                                 trainable=True)
+        outputs = tf.nn.conv2d(inputs, weights, [1, 1, 1, 1], padding='SAME')
+        outputs += biases
+        if pool_size:
+            pool_shape = [1, 1] + [pool_size] + [1]
+            outputs = tf.nn.max_pool(outputs, pool_shape, pool_shape, padding='SAME')
+        if activation_fn:
+            outputs = activation_fn(outputs)
+        return outputs
 
 
 def convolution4con(inputs,
@@ -63,50 +62,50 @@ def convolution4con(inputs,
                     inner_conv_layers=2,
                     reuse=None,
                     scope=None):
-  """Adds a 2D convolution followed by a maxpool layer.
+    """Adds a 2D convolution followed by a maxpool layer.
 
-  """
-  with tf.variable_scope(scope, 'conv_con', [inputs], reuse=reuse):
-    dtype = inputs.dtype.base_dtype
-    num_filters_in = inputs.get_shape()[-1].value
-    num_outputs = num_filters_in
+    """
+    with tf.variable_scope(scope, 'conv_con', [inputs], reuse=reuse):
+        dtype = inputs.dtype.base_dtype
+        num_filters_in = inputs.get_shape()[-1].value
+        num_outputs = num_filters_in
 
     for conv_i in range(inner_conv_layers):
-      weights_shape = [1] + [kernel_size * (conv_i+1)] + [num_filters_in, num_outputs]
-      # 1, 3, emb_dim, emb_dim
-      weights = tf.get_variable(name='weights%s' % conv_i,
-                                shape=weights_shape,
-                                dtype=dtype,
-                                initializer=tf.contrib.layers.xavier_initializer(),
-                                collections=[tf.GraphKeys.WEIGHTS],
-                                trainable=True)
-      biases = tf.get_variable(name='biases%s' % conv_i,
-                                    shape=[num_outputs, ],
-                                    dtype=dtype,
-                                    initializer=tf.zeros_initializer(),
-                                    collections=[tf.GraphKeys.BIASES],
-                                    trainable=True)
-      outputs = tf.nn.conv2d(inputs, weights, [1, 1, 1, 1], padding='SAME')
-      outputs += biases
-      inputs = outputs
+        weights_shape = [1] + [kernel_size * (conv_i+1)] + [num_filters_in, num_outputs]
+        # 1, 3, emb_dim, emb_dim
+        weights = tf.get_variable(name='weights%s' % conv_i,
+                                  shape=weights_shape,
+                                  dtype=dtype,
+                                  initializer=tf.contrib.layers.xavier_initializer(),
+                                  collections=[tf.GraphKeys.WEIGHTS],
+                                  trainable=True)
+        biases = tf.get_variable(name='biases%s' % conv_i,
+                                 shape=[num_outputs, ],
+                                 dtype=dtype,
+                                 initializer=tf.zeros_initializer(),
+                                 collections=[tf.GraphKeys.BIASES],
+                                 trainable=True)
+        outputs = tf.nn.conv2d(inputs, weights, [1, 1, 1, 1], padding='SAME')
+        outputs += biases
+        inputs = outputs
 
     if pool_size:
-      pool_shape = [1, 1] + [pool_size] + [1]
-      outputs = tf.nn.max_pool(outputs, pool_shape, pool_shape, padding='SAME')
+        pool_shape = [1, 1] + [pool_size] + [1]
+        outputs = tf.nn.max_pool(outputs, pool_shape, pool_shape, padding='SAME')
     if activation_fn:
-      outputs = activation_fn(outputs)
+        outputs = activation_fn(outputs)
     return outputs
 
 
 def params_decay(decay):
-  """ Add ops to decay weights and biases
+    """ Add ops to decay weights and biases
 
-  """
-  params = tf.get_collection_ref(tf.GraphKeys.WEIGHTS) + tf.get_collection_ref(tf.GraphKeys.BIASES)
-  while len(params) > 0:
-    p = params.pop()
-    tf.add_to_collection(tf.GraphKeys.UPDATE_OPS,
-                         p.assign(decay*p + (1-decay)*tf.truncated_normal(p.get_shape(), stddev=0.01)))
+    """
+    params = tf.get_collection_ref(tf.GraphKeys.WEIGHTS) + tf.get_collection_ref(tf.GraphKeys.BIASES)
+    while len(params) > 0:
+        p = params.pop()
+        tf.add_to_collection(tf.GraphKeys.UPDATE_OPS,
+                             p.assign(decay*p + (1-decay)*tf.truncated_normal(p.get_shape(), stddev=0.01)))
 
 
 # ResCNN
@@ -191,7 +190,6 @@ def print_dashboard(train_accuracies, eval_loss, eval_accuracy):
 
 def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_saver, best_f1):
 
-    f1 = pre = rec = []
     stop_id = dis_vocab.word2id(STOP_DECODING)
     pad_id = dis_vocab.word2id(PAD_TOKEN)
 
@@ -240,4 +238,4 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_s
         dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
         best_f1 = f1
 
-    return f1, pre, rec, best_f1
+    return f1, precision, recall, best_f1

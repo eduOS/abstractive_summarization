@@ -37,7 +37,7 @@ from res_discriminator import Seq2ClassModel
 from data import Vocab
 DEBUG = False
 epsilon = sys.float_info.epsilon
-TRAINING_F1_THRESHHOLD = 0.9
+TRAINING_F1_THRESHHOLD = 0.8
 VAL_F1_THRESHHOLD = 0.95
 
 # tf.logging.set_verbosity(tf.logging.ERROR)
@@ -550,13 +550,11 @@ def main(argv):
                         _FN += results["fn"].item()
 
                 if d_gan % 100 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
-                    _, _, _f1 = cal_dis_stats(_TP, _FP, _FN)
-                    print('The average training f1 until the %sth batch: %s' % (d_gan, _f1))
-
-                if d_gan % 300 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
                     _precision, _recall, _f1 = cal_dis_stats(_TP, _FP, _FN)
+                    print('The average training f1 until the %sth batch %s: %s' % (d_gan, get_time(), _f1))
                     _TP = _FP = _FN = 0
 
+                if d_gan % 300 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
                     if _f1 > TRAINING_F1_THRESHHOLD:
                         print('The training f1 reaches TRAINING_F1_THRESHHOLD %s %s, going to evaluate the dis model..' % (TRAINING_F1_THRESHHOLD, get_time()))
                         # this takes about 35 minutes
