@@ -85,6 +85,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 69. unsupervised pre-training using language model
 70. Train discriminator using previous checkpoints, not only the latest one
 71. TODO: for the cnn dataset make bow separated by any punc as encoder unit
+72. reward: rollout max at each step / normal decode as baseline 
 
 # problems
 1. cannot end
