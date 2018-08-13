@@ -89,6 +89,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 73. discriminator for self-critic reward
 75. rouge discriminator, the rouge score as the discriminator target, target smooth
 76. rouge smooth  for each step while decoding in training
+77. max sample each step for the rouge reward
 
 # problems
 1. cannot end
