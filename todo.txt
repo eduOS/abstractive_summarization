@@ -87,7 +87,7 @@ https://stackoverflow.com/questions/15408371/cumulative-distribution-plots-pytho
 71. check the input of every running,, verify the previous processing
 72. TODO: for the cnn dataset make bow separated by any punc as encoder unit
 73. discriminator for self-critic reward
-75. rouge discriminator, the rouge score as the discriminator target
+75. rouge discriminator, the rouge score as the discriminator target, target smooth
 
 # problems
 1. cannot end
