@@ -4,17 +4,18 @@ from __future__ import division
 import tensorflow as tf
 from collections import namedtuple, deque
 import numpy as np
-import datetime
+import datetime # noqa
 import utils
-import time
+import time # noqa
 import sys
 # import data
 from batcher import GenBatcher
+from utils import get_mixed_samples
 from decode import Decoder
 from pointer_generator import PointerGenerator
 from rollout import Rollout
 from os.path import join as join_path
-from utils import ensure_exists
+from utils import ensure_exists, get_time
 from gen_utils import calc_running_avg_loss
 from gen_utils import get_best_loss_from_chpt
 from gen_utils import save_ckpt as gen_save_ckpt
@@ -22,20 +23,22 @@ from gan_utils import save_ckpt as gan_save_ckpt
 # from gan_utils import check_rouge
 # from dis_utils import eval_dis
 # from tensorflow.python import debug as tf_debug
-from utils import sattolo_cycle
-from utils import print_dashboard
+from dis_utils import eval_save_dis
+from data import pad_equal_length
+from utils import print_dashboard, cal_dis_stats
 # from dis_utils import dump_chpt
 import math
 from termcolor import colored
-from data import POSITIVE_LABEL, NEGATIVE_LABEL
 from data import outputsids2words, strip_pads
 from gan_utils import show_sample_reward
+from data import PAD_TOKEN, STOP_DECODING
 
 from res_discriminator import Seq2ClassModel
 from data import Vocab
 DEBUG = False
-STOP_DECODING = '[STOP]'
 epsilon = sys.float_info.epsilon
+TRAINING_F1_THRESHHOLD = 0.8
+VAL_F1_THRESHHOLD = 0.95
 
 # tf.logging.set_verbosity(tf.logging.ERROR)
 tf.app.flags.DEFINE_string(
@@ -139,7 +142,7 @@ tf.app.flags.DEFINE_integer('gan_iter', 200000, 'how many times to run the gan')
 tf.app.flags.DEFINE_integer('gan_dis_iter', 10**8, 'in each gan step run how many times the generator')
 tf.app.flags.DEFINE_integer('rollout_num', 12, 'how many times to repeat the rollout process.')
 tf.app.flags.DEFINE_string("gan_dir", "gan", "Training directory.")
-tf.app.flags.DEFINE_integer('sample_num', 20, 'beam size for beam search decoding.')
+tf.app.flags.DEFINE_integer('sample_num', 1, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_float('gan_lr', 0.0005, 'learning rate for the gen in GAN training')
 tf.app.flags.DEFINE_float('rouge_reward_ratio', 0, 'The importance of rollout in calculating the reward.')
 tf.app.flags.DEFINE_float('dis_reward_ratio', 0, 'The importance of rollout in calculating the reward.')
@@ -497,12 +500,17 @@ def main(argv):
 
     elif FLAGS.mode == "train_gan":
         gen_best_loss = get_best_loss_from_chpt(val_dir)
-        gen_global_step = 0
         print('Going to tune the two using Gan')
 
         ave_rouge = decoder.bs_decode(gan_batcher_test, save2file=False, single_pass=True)
         best_rouge = ave_rouge
         print(colored('The starting rouge score is %s.' % ave_rouge, "green"))
+
+        dec_stop_id = dec_vocab.word2id(STOP_DECODING)
+        dec_pad_id = dec_vocab.word2id(PAD_TOKEN)
+        _TP = _FP = _FN = 0
+        best_val_f1 = 0
+
         for i_gan in range(hps_gan.gan_iter):
             # Train the generator for one step
             g_losses = []
@@ -511,16 +519,13 @@ def main(argv):
             gan_gen_iter = 0 if FLAGS.dis_reward_ratio else 2
 
             # Train the discriminator
-            dis_best_loss = 1000
-            dis_losses = []
             gan_dis_iter = hps_gan.gan_dis_iter if hps_gan.dis_reward_ratio else 0
             if gan_dis_iter:
-                print('\nGoing to train the discriminator.')
+                print('\nGoing to train the discriminator %s.' % get_time())
             for d_gan in range(gan_dis_iter):
-                f1 = []
-                pre = []
-                rec = []
                 batch = gen_batcher_train.next_batch()
+                if not batch:
+                    continue
                 _, n_samples, _ = decoder.mc_generate(
                     batch, s_num=hps_gan.sample_num)
                 assert np.array(n_samples).shape == (hps_gan.sample_num,
@@ -530,92 +535,50 @@ def main(argv):
                 # shuould first tanslate to words to avoid unk
                 n_samples = [samples for samples in n_samples_no_start]
                 for samples in n_samples:
-                    emb_dec_batch = sess.run(
-                        generator.temp_embedded_seq,
-                        feed_dict={generator.temp_batch: batch.padded_abs_ids})
-                    emb_conditions = sess.run(
-                        generator.temp_embedded_seq,
-                        feed_dict={generator.temp_batch: batch.enc_batch})
-                    # feed_dict={generator.temp_batch: batch.padded_enc_batch})
-                    _range = range(len(emb_dec_batch))
-                    sattolo_cycle(_range)
-                    indices = np.array(_range)
+                    gen_inputs = pad_equal_length(samples, dec_stop_id, dec_pad_id, hps_dis.max_dec_steps)
+                    mixed_inputs, mixed_conditions, mixed_condition_lens, mixed_targets = get_mixed_samples(gen_inputs, batch)
 
-                    emb_samples = sess.run(
-                        generator.temp_embedded_seq,
-                        feed_dict={generator.temp_batch: samples})
+                    for i in range(2):
+                        inputs = sess.run(
+                            generator.dec_temp_embedded,
+                            feed_dict={generator.dec_temp_batch: mixed_inputs[i]})
+                        conditions = sess.run(
+                            generator.enc_temp_embedded,
+                            feed_dict={generator.enc_temp_batch: mixed_conditions[i]})
+                        results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], mixed_targets[i])
+                        _TP += results["tp"].item()
+                        _FP += results["fp"].item()
+                        _FN += results["fn"].item()
 
-                    emb_samples1, emb_samples2 = np.split(emb_samples, 2)
-                    emb_dec_batch1, emb_dec_batch2 = np.split(emb_dec_batch[indices], 2)
-                    emb_conditions1, emb_conditions2 = np.split(emb_conditions, 2)
-                    enc_lens1, enc_lens2 = np.split(batch.enc_lens, 2)
+                if d_gan % 100 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
+                    _precision, _recall, _f1 = cal_dis_stats(_TP, _FP, _FN)
+                    print('The average training f1 until the %sth batch %s: %s' % (d_gan, get_time(), _f1))
+                    _TP = _FP = _FN = 0
 
-                    inputs = np.concatenate([emb_samples1, emb_dec_batch, emb_dec_batch2], 0)
-                    conditions = np.concatenate([emb_conditions1, emb_conditions, emb_conditions2], 0)
-                    condition_lens = np.concatenate([enc_lens1, batch.enc_lens, enc_lens2], 0)
-                    targets = [NEGATIVE_LABEL for _ in emb_samples1] + [POSITIVE_LABEL for _ in emb_dec_batch] + [NEGATIVE_LABEL for _ in emb_dec_batch2]
-                    targets = np.array(targets)
-                    assert len(inputs) == len(conditions) == len(condition_lens) == len(targets)
-
-                    # randomize the samples
-                    _range = range(len(inputs))
-                    sattolo_cycle(_range)
-                    indices = np.array(_range)
-
-                    parts = 2
-                    inputs = np.split(inputs[indices], parts)
-                    conditions = np.split(conditions[indices], parts)
-                    condition_lens = np.split(condition_lens[indices], parts)
-                    targets = np.split(targets[indices], parts)
-
-                    for p in range(parts):
-                        results = discriminator.run_one_batch(sess, inputs[p], conditions[p], condition_lens[p], targets[p])
-                        d_loss = results["loss"]
-                        if not math.isnan(d_loss):
-                            dis_losses.append(float(d_loss))
-                            f1.append(results["f1"].item())
-                            pre.append(results["precision"].item())
-                            rec.append(results["recall"].item())
-                        else:
-                            print(colored('a nan in dis loss', 'red'))
-                            print('inputs[p]')
-                            print(inputs[p])
-                            print('conditions[p]')
-                            print(conditions[p])
-                            print('condition_lens[p]')
-                            print(condition_lens[p])
-                            print('targets[p]')
-                            print(targets[p])
-                            raise
-
-                _f1 = sum(f1) / len(f1)
-                _recall = sum(rec) / len(rec)
-                _precision = sum(pre) / len(pre)
                 if d_gan % 300 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
-                    if (sum(dis_losses) / len(dis_losses)) < dis_best_loss:
-                        dis_best_loss = sum(dis_losses) / len(dis_losses)
-                        checkpoint_path = ensure_exists(join_path(hps_dis.model_dir, "discriminator")) + "/model.ckpt"
-                        dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
+                    if _f1 > TRAINING_F1_THRESHHOLD:
+                        print('The training f1 reaches TRAINING_F1_THRESHHOLD %s %s, going to evaluate the dis model..' % (TRAINING_F1_THRESHHOLD, get_time()))
+                        # this takes about 35 minutes
+                        f1_, precision_, recall_, best_val_f1 = eval_save_dis(sess, hps_dis, generator, discriminator, gen_batcher_val, dec_vocab, dis_saver, best_val_f1)
 
-                    print(
-                        "\nDashboard for %s updated %s, finished steps:\t%s\n"
-                        "\tBatch size:\t%s, learning rate:\t%s, model nums: \t%s\n"
-                        "\tTraining loss:\t%.4f. Average training f1: \t%.4f\n"
-                        "\tAverage training recall:\t%.4f. Average training precision: \t%.4f" % (
-                            "GAN Discriminator",
-                            datetime.datetime.now().strftime("on %m-%d at %H:%M"),
-                            results["global_step"].item(),
-                            hps_dis.batch_size,
-                            results['learning_rate'],
-                            hps_dis.num_models,
-                            results["loss"].item(),
-                            _f1, _recall, _precision
-                            ))
+                        print(
+                            "\nDashboard for %s updated %s, finished steps:\t%s\n"
+                            "\tBatch size:\t%s, learning rate:\t%s, model nums: \t%s\n"
+                            "\tTra loss:\t%.4f\n"
+                            "\tAverage tra f1: \t%.4f, Average tra recall:\t%.4f. Average tra precision: \t%.4f\n"
+                            "\tAverage val f1: \t%.4f, Average val recall:\t%.4f. Average val precision: \t%.4f\n" % (
+                                "GAN Discriminator", get_time(), results["global_step"].item(),
+                                hps_dis.batch_size, results['learning_rate'], hps_dis.num_models,
+                                results["loss"].item(),
+                                _f1, _recall, _precision,
+                                f1_, recall_, precision_,
+                                ))
 
-                if not math.isnan(_f1) and _f1 > 0.9:
-                    # eve_f1 = eval_dis(gan_batcher_test, decoder, discriminator)
-                    gan_gen_iter = 1
-                    break
+                        if not math.isnan(f1_) and f1_ > VAL_F1_THRESHHOLD:
+                            print('The val f1 reaches VAL_F1_THRESHHOLD %s %s, going to terminate training the dis model..' % (VAL_F1_THRESHHOLD, get_time()))
+                            # eve_f1 = eval_dis(gan_batcher_test, decoder, discriminator)
+                            gan_gen_iter = 0
+                            break
 
             if gan_gen_iter:
                 print('Going to train the generator, %s times.' % gan_gen_iter)
@@ -632,36 +595,40 @@ def main(argv):
                 assert np.array(n_targets_padding_mask).shape == (hps_gan.sample_num,
                                                                   hps_gen.batch_size,
                                                                   hps_gen.max_dec_steps)
-                n_samples_no_start = np.array(n_samples)[:, :, 1:]
-                try:
-                    n_rewards = rollout.get_reward(
-                        hps_gan, sess, dec_vocab, batch, enc_states, n_samples,
-                        discriminator if FLAGS.dis_reward_ratio else None)
-                except:
-                    print('enc_states')
-                    print(enc_states)
-                    print('enc_states.shape')
-                    print(enc_states.shape)
-                    for st in enc_states:
-                        print(st.shape)
-                    raise
 
-                # fine tune the generator
                 n_sample_targets = np.array(n_samples)[:, :, 1:]
-                n_samples = np.array(n_samples)[:, :, :-1]
-                # sample_target_padding_mask = pad_sample(sample_target, gen_vocab, hps_gen)
+                # remvoe the stops
+                n_sample_targets_ns = []
+                for st in n_sample_targets:
+                    s = strip_pads(st.tolist(), dec_stop_id, keep_length=True, PAD_ID=dec_pad_id)
+                    n_sample_targets_ns.append(s)
+                n_sample_targets_ns = np.array(n_sample_targets_ns)
+
+                samples = []
+                # remove the stops
+                for sp in n_samples:
+                    s = strip_pads(
+                        sp.tolist(),
+                        dec_stop_id,
+                        keep_length=True,
+                        PAD_ID=dec_pad_id)
+                    samples.append(s)
+                n_samples = np.array(samples)[:, :, :-1]
+                # get the rewards
+                n_rewards = rollout.get_reward(
+                    hps_gan, sess, dec_vocab, batch, enc_states, n_samples, n_sample_targets_ns,
+                    discriminator if FLAGS.dis_reward_ratio else None)
 
                 # to show the reward for each word in the samle
                 if DEBUG:
-                    for samples_no_start, rewards, targets_padding_mask in zip(n_samples_no_start, n_rewards, n_targets_padding_mask):
+                    for samples_no_start, rewards, targets_padding_mask in zip(n_sample_targets, n_rewards, n_targets_padding_mask):
                         show_sample_reward(
-                            outputsids2words(strip_pads(samples_no_start.tolist(), dec_vocab.word2id(STOP_DECODING)), dec_vocab),
+                            outputsids2words(strip_pads(samples_no_start.tolist(), dec_stop_id), dec_vocab),
                             rewards, targets_padding_mask)
 
+                # fine tune the generator
                 results = generator.run_gan_batch(
                     sess, batch, n_samples, n_sample_targets, n_targets_padding_mask, n_rewards)
-
-                gen_global_step = results["global_step"]
 
                 # for visualization
                 g_loss = results["loss"]
@@ -680,7 +647,7 @@ def main(argv):
                 gen_eval_loss, gen_best_loss, eval_rouge, best_rouge = gan_save_ckpt(
                     sess, generator, decoder, gen_best_loss, best_rouge, gan_dir, gan_saver,
                     gen_batcher_val, gan_batcher_test, gan_val_dir, gan_val_saver,
-                    gen_global_step, FLAGS.sample_rate)
+                    results["global_step"], FLAGS.sample_rate)
 
                 if gen_eval_loss:
                     print(
@@ -694,7 +661,7 @@ def main(argv):
                         "eval loss:\t%.4f\n"
                         "Average rouge %s; and the best rouge %s." % (
                             datetime.datetime.now().strftime("on %m-%d at %H:%M"),
-                            gen_global_step,
+                            results["global_step"],
                             hps_gen.batch_size,
                             hps_gen.dec_vocab_size,
                             hps_gen.enc_vocab_size,

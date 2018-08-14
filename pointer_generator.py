@@ -409,7 +409,7 @@ class PointerGenerator(object):
 
         return results['attention_keys'], results['attention_values']
 
-    def decode_onestep(self, emb_dec_inputs):
+    def decode_onestep(self, emb_dec_inputs, sample_fn=tf.multinomial):
         """
         function: decode onestep for rollout
         inputs:
@@ -417,7 +417,7 @@ class PointerGenerator(object):
         """
         final_dists = self._conv_decoder(emb_dec_inputs, is_training=False, mask=False)
         final_dists = final_dists[0]
-        output_id = tf.squeeze(tf.cast(tf.reshape(tf.multinomial(tf.log(final_dists), 1), [self.hps.batch_size]), tf.int32))
+        output_id = tf.squeeze(tf.cast(tf.reshape(sample_fn(tf.log(final_dists), 1), [self.hps.batch_size]), tf.int32))
         return output_id
 
     def run_decode_onestep(self, sess, dec_inputs, attention_keys, attention_values, enc_padding_mask):
