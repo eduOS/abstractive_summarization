@@ -8,12 +8,13 @@ import numpy as np
 from data import strip_pads
 from gan_utils import rouge_l
 from data import outputsids2words
+from data import PAD_TOKEN
+from data import START_DECODING # noqa
+from data import STOP_DECODING
+
 DEBUG = False
 if DEBUG:
     from termcolor import colored # noqa
-PAD_TOKEN = "[PAD]"
-START_DECODING = '[START]'
-STOP_DECODING = '[STOP]'
 
 
 class Rollout(object):
@@ -66,20 +67,26 @@ class Rollout(object):
         rouge_ratio = hps_gan.rouge_reward_ratio
         dis_ratio = hps_gan.dis_reward_ratio
         max_dec_steps = self._gen_hps.max_dec_steps
-        weights = map(lambda i: 0.7**i, range([max_dec_steps - hps_gan.rollout_start + 1]))
+        weights = map(lambda i: 0.8**i, range([max_dec_steps - hps_gan.rollout_start + 1]))
 
         articles = source_batch.enc_batch
         article_lens = source_batch.enc_lens
         # batch_size = int(articles.shape[0])
+        stop_token = dec_vocab.word2id(STOP_DECODING)
         emb_articles = sess.run(
-            self.generator.temp_embedded_seq,
-            feed_dict={self.generator.temp_batch: articles})
+            self.generator.enc_temp_embedded,
+            feed_dict={self.generator.enc_temp_batch: articles})
 
         k_rewards = []
 
         for k, samples in enumerate(k_samples):
             dis_rewards = []
             rouge_rewards = []
+            no_stop_samples = strip_pads(
+                samples.tolist(),
+                stop_token,
+                keep_length=True,
+                PAD_ID=dec_vocab.word2id(PAD_TOKEN))
             for ir in range(rollout_num):
                 for given_num in range(hps_gan.rollout_start, max_dec_steps+1):
                     self.sample_emb_ls = []
@@ -91,9 +98,18 @@ class Rollout(object):
                     feed_dict[self.generator.attention_keys] = enc_states
                     feed_dict[self.generator.emb_enc_inputs] = emb_articles
 
-                    rollout_samples, emb_rollout_samples = sess.run([self.rollout_samples, self.rollout_samples_emb], feed_dict)
+                    rollout_samples = sess.run([self.rollout_samples], feed_dict)
                     # how about multiple generators for one discriminator?
                     if dis_ratio:
+                        rollout_samples_batch = strip_pads(
+                            rollout_samples.tolist(),
+                            stop_token,
+                            keep_length=True,
+                            PAD_ID=dec_vocab.word2id(PAD_TOKEN))
+
+                        emb_rollout_samples = sess.run(
+                            self.generator.dec_temp_embedded,
+                            feed_dict={self.generator.dec_temp_batch: rollout_samples_batch})
 
                         feed = {
                             discriminator.inputs: emb_rollout_samples,
@@ -107,7 +123,7 @@ class Rollout(object):
 
                     if rouge_ratio:
                         rouge_scores = []
-                        summaries = outputsids2words(strip_pads(rollout_samples.tolist(), dec_vocab.word2id(STOP_DECODING)), dec_vocab)
+                        summaries = outputsids2words(strip_pads(rollout_samples.tolist(), stop_token), dec_vocab)
                         references = source_batch.original_abstracts
                         for s, r in zip(summaries, references):
                             rouge = rouge_l(s, r.split())
@@ -123,8 +139,8 @@ class Rollout(object):
 
                 if dis_ratio:
                     emb_samples = sess.run(
-                        self.generator.temp_embedded_seq,
-                        feed_dict={self.generator.temp_batch: samples})
+                        self.generator.dec_temp_embedded,
+                        feed_dict={self.generator.dec_temp_batch: no_stop_samples})
 
                     # the last token reward
                     feed = {
@@ -140,7 +156,7 @@ class Rollout(object):
 
                 if rouge_ratio:
                     rouge_scores = []
-                    summaries = outputsids2words(strip_pads(samples.tolist(), dec_vocab.word2id(STOP_DECODING)), dec_vocab)
+                    summaries = outputsids2words(strip_pads(samples.tolist(), stop_token), dec_vocab)
                     references = source_batch.original_abstracts
                     for s, r in zip(summaries, references):
                         rouge = rouge_l(s, r.split())

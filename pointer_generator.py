@@ -22,6 +22,7 @@ from __future__ import division
 
 import time
 import tensorflow as tf
+# import math
 from termcolor import colored
 from attention_decoder import conv_attention_decoder
 from utils import conv_encoder
@@ -58,7 +59,8 @@ class PointerGenerator(object):
             max_dec_steps = hps.max_dec_steps
 
         self.enc_batch = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch')
-        self.temp_batch = tf.placeholder(tf.int32, [batch_size, None], name='temp_batch_for_embedding')
+        self.enc_temp_batch = tf.placeholder(tf.int32, [batch_size, None], name='temp_batch_for_enc_embedding')
+        self.dec_temp_batch = tf.placeholder(tf.int32, [batch_size, None], name='temp_batch_for_dec_embedding')
         self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
         self.enc_padding_mask = tf.placeholder(tf.float32, [batch_size, None], name='enc_padding_mask')
 
@@ -129,7 +131,8 @@ class PointerGenerator(object):
                 self.enc_emb_saver = tf.train.Saver({"enc_embeddings": self.enc_embeddings})
                 self.dec_emb_saver = tf.train.Saver({"dec_embeddings": self.dec_embeddings})
                 self.emb_enc_inputs = tf.nn.embedding_lookup(self.enc_embeddings, self.enc_batch)
-                self.temp_embedded_seq = tf.nn.embedding_lookup(self.enc_embeddings, self.temp_batch)
+                self.enc_temp_embedded = tf.nn.embedding_lookup(self.enc_embeddings, self.enc_temp_batch)
+                self.dec_temp_embedded = tf.nn.embedding_lookup(self.dec_embeddings, self.dec_temp_batch)
                 emb_dec_inputs = tf.nn.embedding_lookup(self.dec_embeddings, self._dec_batch)
                 emb_eval_dec_inputs = tf.nn.embedding_lookup(self.dec_embeddings, self._eval_dec_batch)
 
@@ -167,19 +170,22 @@ class PointerGenerator(object):
                 batch_nums = tf.range(0, limit=tf.shape(target_batch)[0])
 
                 loss_per_step = []
+                log_gold_prob = []
                 for dec_step, dist in enumerate(final_dists):
                     targets = target_batch[:, dec_step]
                     indices = tf.stack((batch_nums, targets), axis=1)
                     gold_probs = tf.gather_nd(dist, indices)
                     losses = -tf.log(gold_probs) * padding_mask[:, dec_step]
+                    log_gold_prob.append(-losses)
                     loss_per_step.append(losses * rewards[:, dec_step] if rewards is not None else losses)
-                return loss_per_step
+                return loss_per_step, log_gold_prob
 
             with tf.variable_scope('generator_loss'):
 
                 tf.Print(self.final_dists, self.final_dists, "final list")
-                loss_per_step = get_loss(self.final_dists, self.target_batch, self.dec_padding_mask)
-                eval_loss_per_step = get_loss(eval_final_dists, self.target_batch, self.dec_padding_mask)
+                loss_per_step, _ = get_loss(self.final_dists, self.target_batch, self.dec_padding_mask)
+                eval_loss_per_step, log_gold_probs = get_loss(eval_final_dists, self.target_batch, self.dec_padding_mask)
+                self.log_gold_probs = _avg(log_gold_probs, self.dec_padding_mask, False)
                 self._loss = _avg(loss_per_step, self.dec_padding_mask)
                 self._eval_loss = _avg(eval_loss_per_step, self.dec_padding_mask)
 
@@ -361,6 +367,7 @@ class PointerGenerator(object):
 
         if gan_eval:
             to_return['loss'] = self._eval_loss
+            to_return['log_gold_probs'] = self.log_gold_probs
         else:
             to_return['loss'] = self._loss
         if update:
@@ -454,7 +461,7 @@ def _mask_and_avg(values, padding_mask):
     return tf.reduce_mean(values_per_ex)  # overall average
 
 
-def _avg(values, padding_mask):
+def _avg(values, padding_mask, overall=True):
     """Applies mask to values then returns overall average (a scalar)
 
     Args:
@@ -468,7 +475,9 @@ def _avg(values, padding_mask):
 
     dec_lens = tf.reduce_sum(padding_mask, axis=1)  # shape batch_size. float32
     values_per_ex = tf.reduce_sum(tf.stack(values, 1), 1)/dec_lens
-    return tf.reduce_mean(values_per_ex)  # overall average
+    if overall:
+        return tf.reduce_mean(values_per_ex)  # overall average
+    return values_per_ex
 
 
 def _mask(values, padding_mask):

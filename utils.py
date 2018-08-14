@@ -15,6 +15,7 @@ from tensorflow.python import pywrap_tensorflow
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.ops import array_ops
 import datetime
+import math
 import tensorflow as tf
 from random import randrange
 import time
@@ -182,25 +183,28 @@ def linear(args, output_size, bias, bias_start=0.0, scope=None):
 
 
 def linear_mapping_weightnorm(inputs, out_dim, dropout=1.0, var_scope_name="linear_mapping"):
-  with tf.variable_scope(var_scope_name):
-    input_shape = inputs.get_shape().as_list()    # static shape. may has None
-    input_shape_tensor = tf.shape(inputs)
-    #  use weight normalization (Salimans & Kingma, 2016)  w = g* v/2-norm(v)
-    V = tf.get_variable('V', shape=[int(input_shape[-1]), out_dim], dtype=tf.float32, initializer=tf.random_normal_initializer(mean=0, stddev=tf.sqrt(dropout*1.0/int(input_shape[-1]))), trainable=True)
-    V_norm = tf.norm(V.initialized_value(), axis=0)  # V shape is M*N,  V_norm shape is N
-    g = tf.get_variable('g', dtype=tf.float32, initializer=V_norm, trainable=True)
-    b = tf.get_variable('b', shape=[out_dim], dtype=tf.float32, initializer=tf.zeros_initializer(), trainable=True)   # weightnorm bias is init zero
+    """
+    linear transform and normalize
+    """
+    with tf.variable_scope(var_scope_name):
+        input_shape = inputs.get_shape().as_list()    # static shape. may has None
+        input_shape_tensor = tf.shape(inputs)
+        #  use weight normalization (Salimans & Kingma, 2016)  w = g* v/2-norm(v)
+        V = tf.get_variable('V', shape=[int(input_shape[-1]), out_dim], dtype=tf.float32, initializer=tf.random_normal_initializer(mean=0, stddev=tf.sqrt(dropout*1.0/int(input_shape[-1]))), trainable=True)
+        V_norm = tf.norm(V.initialized_value(), axis=0)  # V shape is M*N,  V_norm shape is N
+        g = tf.get_variable('g', dtype=tf.float32, initializer=V_norm, trainable=True)
+        b = tf.get_variable('b', shape=[out_dim], dtype=tf.float32, initializer=tf.zeros_initializer(), trainable=True)   # weightnorm bias is init zero
 
-    assert len(input_shape) == 3
-    inputs = tf.reshape(inputs, [-1, input_shape[-1]])
-    inputs = tf.matmul(inputs, V)
-    inputs = tf.reshape(inputs, [input_shape_tensor[0], -1, out_dim])
-    # inputs = tf.matmul(inputs, V)    # x*v
+        assert len(input_shape) == 3
+        inputs = tf.reshape(inputs, [-1, input_shape[-1]])
+        inputs = tf.matmul(inputs, V)
+        inputs = tf.reshape(inputs, [input_shape_tensor[0], -1, out_dim])
+        # inputs = tf.matmul(inputs, V)    # x*v
 
-    scaler = tf.div(g, tf.norm(V, axis=0))   # g/2-norm(v)
-    inputs = tf.reshape(scaler, [1, out_dim])*inputs + tf.reshape(b, [1, out_dim])  # x*v g/2-norm(v) + b
+        scaler = tf.div(g, tf.norm(V, axis=0))   # g/2-norm(v)
+        inputs = tf.reshape(scaler, [1, out_dim])*inputs + tf.reshape(b, [1, out_dim])  # x*v g/2-norm(v) + b
 
-    return inputs
+        return inputs
 
 
 def variable_names_from_dir(chpt_dir, name_filter=""):
@@ -628,3 +632,70 @@ def transpose_batch_time(x):
         tensor_shape.TensorShape(
             [x_static_shape[1].value, x_static_shape[0].value]).concatenate(x_static_shape[2:]))
     return x_t
+
+
+def get_mixed_samples(gen_inputs, batch):
+    """
+    get the whole batch of the ground truth as TRUTH
+    And half of the generated batch and half of the sattolo randomed ground truth as FALSE
+    the two batch sized samples containing one batch sized ground truth and one batch sized false
+    then were randomed to form two batches
+    """
+    conditions = batch.enc_batch
+    condition_lens = batch.enc_lens
+    inputs = batch.padded_abs_ids
+    assert gen_inputs.shape == inputs.shape, "getn_inputs shape: %s, but inputs shape %s" % (gen_inputs.shape, inputs.shape)
+    # # random inputs
+    batch_size = batch.enc_batch.shape[0]
+    range_ = range(batch_size)
+    sattolo_cycle(range_)
+    random_indices = np.array(range_)
+    _random_inputs = inputs[random_indices]
+
+    range_ = range(2*batch_size)
+    sattolo_cycle(range_)
+    random_indices = np.array(range_)
+    false_inputs, _ = np.split(np.concatenate((gen_inputs, _random_inputs))[random_indices], 2)
+    false_conditions, _ = np.split(np.tile(conditions, (2, 1))[random_indices], 2)
+    false_condition_lens, _ = np.split(np.tile(condition_lens, (2))[random_indices], 2)
+
+    # the whole batch of ground truth
+    true_inputs = inputs
+    true_conditions = conditions
+    true_condition_lens = condition_lens
+
+    mixed_inputs = np.split(np.concatenate((true_inputs, false_inputs))[random_indices], 2)
+    mixed_conditions = np.split(np.concatenate((true_conditions, false_conditions))[random_indices], 2)
+    mixed_condition_lens = np.split(np.concatenate((true_condition_lens, false_condition_lens))[random_indices], 2)
+    mixed_targets = np.split(np.array(len(true_inputs) * [1] + len(false_inputs) * [0])[random_indices], 2)
+
+    return mixed_inputs, mixed_conditions, mixed_condition_lens, mixed_targets
+
+
+def print_matrix_to_file(matrix, filename="log.txt"):
+    if str(matrix.dtype) == str('int64'):
+        fmt = str('%i')
+    else:
+        fmt = str('%.3f')
+
+    np.savetxt(filename+'.temp.txt', matrix, fmt=fmt, delimiter='\t')
+
+
+def safe_append(_list, _value, message=''):
+    if math.isnan(_value):
+        print(colored('a nan found %s' % message, 'red'))
+    elif math.isinf(_value):
+        print(colored('an inf found %s' % message, 'red'))
+    else:
+        _list.append(_value)
+
+
+def get_time():
+    return datetime.datetime.now().strftime("on %m-%d at %H:%M")
+
+
+def cal_dis_stats(TP, FP, FN):
+    precision = TP / (TP + FP)
+    recall = TP / (TP + FN)
+    f1 = 2 * precision * recall / (precision + recall)
+    return precision, recall, f1

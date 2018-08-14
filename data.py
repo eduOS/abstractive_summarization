@@ -354,15 +354,39 @@ def gen_vocab2dis_vocab(gen_ids, gen_vocab, article_oovs, dis_vocab,
     return np.array(samples_ids)
 
 
-def strip_pads(id_batch, STOP_ID):
+def strip_pads(id_batch, STOP_ID, keep_length=False, PAD_ID=None):
     """
     """
-    new_batch = []
-    for sample_ids in id_batch:
+    if keep_length:
+        batch_temp = np.full(np.array(id_batch).shape, PAD_ID)
+    else:
+        new_batch = []
+
+    for i, sample_ids in enumerate(id_batch):
         try:
             fst_stop_idx = sample_ids.index(STOP_ID)  # index of the (first) [STOP] symbol
             sample_ids = sample_ids[:fst_stop_idx]
+            if keep_length:
+                batch_temp[i][:fst_stop_idx] = sample_ids
         except ValueError:
             sample_ids = sample_ids
-        new_batch.append(sample_ids)
+            if keep_length:
+                batch_temp[i] = sample_ids
+        if not keep_length:
+            new_batch.append(sample_ids)
+    if keep_length:
+        return batch_temp
     return new_batch
+
+
+def pad_equal_length(id_batch, _start_id, pad_id, max_lenght):
+    batch_temp = np.full((len(id_batch), max_lenght), pad_id)
+    for i, sample_ids in enumerate(id_batch):
+        if not isinstance(sample_ids, list):
+            sample_ids = sample_ids.tolist()
+        try:
+            fst_stop_idx = sample_ids.index(_start_id)
+            batch_temp[i][:fst_stop_idx] = sample_ids[:fst_stop_idx]
+        except ValueError:
+            batch_temp[i] = sample_ids
+    return batch_temp
