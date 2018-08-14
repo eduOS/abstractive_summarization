@@ -4,6 +4,7 @@ from __future__ import division
 
 from utils import ensure_exists
 from os.path import join as join_path
+from termcolor import colored
 import data
 import tensorflow as tf
 import numpy as np
@@ -236,6 +237,7 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_s
         best_f1 = f1
         checkpoint_path = ensure_exists(join_path(hps.model_dir, "discriminator")) + "/model.ckpt"
         dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
+        print("Model is saved to" + colored(" %s", 'green') % checkpoint_path)
         best_f1 = f1
 
     return f1, precision, recall, best_f1
