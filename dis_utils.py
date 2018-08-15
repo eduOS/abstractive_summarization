@@ -244,7 +244,7 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, enc_vocab, dec_v
         best_f1 = f1
         checkpoint_path = ensure_exists(join_path(hps.model_dir, "discriminator")) + "/model.ckpt"
         dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
-        print("Model with best f1 " + colored('%s', 'green') + "is saved to" + colored(" %s", 'green') % (str(f1), checkpoint_path))
+        print("Model with best f1 " + colored('%s', 'green') % str(f1) + "is saved to" + colored(" %s", 'green') % checkpoint_path)
         best_f1 = f1
 
     return f1, precision, recall, best_f1
