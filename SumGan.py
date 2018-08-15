@@ -109,7 +109,7 @@ tf.app.flags.DEFINE_integer('char_emb_dim', 300, 'Dimension of character embeddi
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
 tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 120
-tf.app.flags.DEFINE_integer('max_dec_steps', 15, 'max timesteps of decoder (max summary tokens)')  # 25
+tf.app.flags.DEFINE_integer('max_dec_steps', 23, 'max timesteps of decoder (max summary tokens)')  # 25
 tf.app.flags.DEFINE_integer('beam_size', 10, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 5, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 tf.app.flags.DEFINE_integer('dec_vocab_size', 7500, 'Size of vocabulary of the decoder in the generator.')
@@ -273,9 +273,9 @@ def pretrain_generator(model, batcher, sess, batcher_val, model_saver, val_saver
             current_learing_rate = model.get_cur_lr(sess)
 
             # print the print the dashboard
-            current_speed = (time.time() - start_time + epsilon) / ((counter * hps.gen_batch_size) + epsilon)
+            current_speed = (time.time() - start_time + epsilon) / ((counter * hps.batch_size) + epsilon)
             total_training_time = (time.time() - start_time) * global_step / (counter * 3600)
-            print_dashboard("Generator", global_step, hps.gen_batch_size, hps.enc_vocab_size, hps.dec_vocab_size,
+            print_dashboard("Generator", global_step, hps.batch_size, hps.enc_vocab_size, hps.dec_vocab_size,
                             running_avg_loss, eval_loss,
                             total_training_time, current_speed, current_learing_rate,
                             coverage_loss if coverage_loss else "not set")
