@@ -12,9 +12,9 @@ import sys
 from data import pad_equal_length
 import beam_search
 from data import PAD_TOKEN, STOP_DECODING
+from utils import tran_idmat2txt
 from utils import get_mixed_samples
 from sklearn.utils.extmath import softmax
-
 
 # convolutional layer
 def convolution2d(inputs,
@@ -189,10 +189,10 @@ def print_dashboard(train_accuracies, eval_loss, eval_accuracy):
     print("Eval loss %.4f, train accuracy is %.4f and eval accuracy is %.4f" % (eval_loss, train_accuracy, eval_accuracy))
 
 
-def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_saver, best_f1):
+def eval_save_dis(sess, hps, generator, discriminator, batcher, enc_vocab, dec_vocab, dis_saver, best_f1, DEBUG):
 
-    stop_id = dis_vocab.word2id(STOP_DECODING)
-    pad_id = dis_vocab.word2id(PAD_TOKEN)
+    stop_id = dec_vocab.word2id(STOP_DECODING)
+    pad_id = dec_vocab.word2id(PAD_TOKEN)
 
     TP = FP = FN = 0
     while True:
@@ -201,7 +201,7 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_s
             break
 
         # half batch of generated samples and half batch of randomed ground truth
-        best_hyps = beam_search.run_beam_search(sess, generator, dis_vocab, batch)
+        best_hyps = beam_search.run_beam_search(sess, generator, dec_vocab, batch)
         random_hyps = [np.random.choice(
             hyps,
             size=1,
@@ -224,6 +224,13 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_s
             conditions = sess.run(
                 generator.enc_temp_embedded,
                 feed_dict={generator.enc_temp_batch: mixed_conditions[i]})
+
+            if DEBUG:
+                tran_idmat2txt(mixed_inputs[i], dec_vocab, 'debug_matrix.txt', mark="val_mixed_inputs %s" % i)
+                tran_idmat2txt(mixed_conditions[i], enc_vocab, 'debug_matrix.txt', mark="val_mixed_condition %s" % i)
+                tran_idmat2txt(mixed_condition_lens[i], None, 'debug_matrix.txt', mark="val_mixed_mixed_condition_lens %s" % i)
+                tran_idmat2txt(mixed_targets[i], None, 'debug_matrix.txt', mark="val_mixed_targets %s" % i)
+
             results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], mixed_targets[i], update=False)
             TP += results["tp"].item()
             FP += results["fp"].item()
@@ -237,7 +244,7 @@ def eval_save_dis(sess, hps, generator, discriminator, batcher, dis_vocab, dis_s
         best_f1 = f1
         checkpoint_path = ensure_exists(join_path(hps.model_dir, "discriminator")) + "/model.ckpt"
         dis_saver.save(sess, checkpoint_path, global_step=results["global_step"])
-        print("Model is saved to" + colored(" %s", 'green') % checkpoint_path)
+        print("Model with best f1 " + colored('%s', 'green') + "is saved to" + colored(" %s", 'green') % (str(f1), checkpoint_path))
         best_f1 = f1
 
     return f1, precision, recall, best_f1

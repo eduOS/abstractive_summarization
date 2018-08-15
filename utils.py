@@ -13,7 +13,9 @@ import os
 from termcolor import colored
 from tensorflow.python import pywrap_tensorflow
 from tensorflow.python.framework import tensor_shape
+from data import PAD_TOKEN, STOP_DECODING
 from tensorflow.python.ops import array_ops
+from codecs import open
 import datetime
 import math
 import tensorflow as tf
@@ -699,3 +701,22 @@ def cal_dis_stats(TP, FP, FN):
     recall = TP / (TP + FN)
     f1 = 2 * precision * recall / (precision + recall)
     return precision, recall, f1
+
+
+def tran_idmat2txt(matrix, vocab, filename="temp", mark="matrix"):
+    """
+    transfer id matrix to text and print it to .txt file
+    """
+    f = open(filename, 'a', 'utf-8')
+    f.write(mark+"\n")
+    matrix_l = matrix.tolist()
+    for m in matrix_l:
+        if vocab:
+            seq = []
+            for c in m:
+                seq.append(vocab.id2word(c))
+            f.write("\t".join(seq) + "\n")
+        else:
+            f.write(str(m) + "\n")
+    f.write("\n")
+    f.close()

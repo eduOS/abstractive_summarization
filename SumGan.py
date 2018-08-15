@@ -25,7 +25,7 @@ from gan_utils import save_ckpt as gan_save_ckpt
 # from tensorflow.python import debug as tf_debug
 from dis_utils import eval_save_dis
 from data import pad_equal_length
-from utils import print_dashboard, safe_append, cal_dis_stats
+from utils import print_dashboard, safe_append, cal_dis_stats, tran_idmat2txt
 # from dis_utils import dump_chpt
 import math
 from termcolor import colored
@@ -35,7 +35,6 @@ from data import PAD_TOKEN, STOP_DECODING
 
 from res_discriminator import Seq2ClassModel
 from data import Vocab
-DEBUG = False
 epsilon = sys.float_info.epsilon
 TRAINING_F1_THRESHHOLD = 0.8
 VAL_F1_THRESHHOLD = 0.95
@@ -50,6 +49,7 @@ tf.app.flags.DEFINE_integer('steps_per_checkpoint', 10000, 'Restore the best mod
 tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decay by this rate')
 tf.app.flags.DEFINE_float('sample_rate', 0.5, 'the sample rate, should be [0, 0.5]')
 tf.app.flags.DEFINE_float('keep_prob', 0.5, 'the dropout prob')
+tf.app.flags.DEFINE_boolean("debug", False, "if output the debug info")
 
 # ------------------------------------- discriminator
 
@@ -150,6 +150,7 @@ tf.app.flags.DEFINE_boolean('subtract', False, "if the reward of the current wor
 # shorter
 
 FLAGS = tf.app.flags.FLAGS
+DEBUG = FLAGS.debug
 
 assert FLAGS.mode in ["pretrain_gen", "train_gan", "decode"]
 assert FLAGS.sample_rate >= 0 and FLAGS.sample_rate <= 0.5, "sample rate should be [0, 0.5]"
@@ -544,6 +545,13 @@ def main(argv):
                         conditions = sess.run(
                             generator.enc_temp_embedded,
                             feed_dict={generator.enc_temp_batch: mixed_conditions[i]})
+
+                        if DEBUG:
+                            tran_idmat2txt(mixed_inputs[i], dec_vocab, 'debug_matrix.txt', mark="train_mixed_inputs %s" % i)
+                            tran_idmat2txt(mixed_conditions[i], enc_vocab, 'debug_matrix.txt', mark="train_mixed_condition %s" % i)
+                            tran_idmat2txt(mixed_condition_lens[i], None, 'debug_matrix.txt', mark="train_mixed_mixed_condition_lens %s" % i)
+                            tran_idmat2txt(mixed_targets[i], None, 'debug_matrix.txt', mark="train_mixed_targets %s" % i)
+
                         results = discriminator.run_one_batch(sess, inputs, conditions, mixed_condition_lens[i], mixed_targets[i])
                         _TP += results["tp"].item()
                         _FP += results["fp"].item()
@@ -556,9 +564,10 @@ def main(argv):
 
                 if d_gan % 300 == 0 or d_gan == hps_gan.gan_dis_iter - 1:
                     if _f1 > TRAINING_F1_THRESHHOLD:
+                        # TRAINING_F1_THRESHHOLD = _f1
                         print('The training f1 reaches TRAINING_F1_THRESHHOLD %s %s, going to evaluate the dis model..' % (TRAINING_F1_THRESHHOLD, get_time()))
                         # this takes about 35 minutes
-                        f1_, precision_, recall_, best_val_f1 = eval_save_dis(sess, hps_dis, generator, discriminator, gen_batcher_val, dec_vocab, dis_saver, best_val_f1)
+                        f1_, precision_, recall_, best_val_f1 = eval_save_dis(sess, hps_dis, generator, discriminator, gen_batcher_val, enc_vocab, dec_vocab, dis_saver, best_val_f1, DEBUG)
 
                         print(
                             "\nDashboard for %s updated %s, finished steps:\t%s\n"

@@ -173,7 +173,7 @@ class Seq2ClassModel(object):
       # f1 = 2 * precision * recall / (precision + recall)
     return prob, loss, TP, FP, FN
 
-  def run_one_batch(self, sess, inputs, conditions, condition_lens, targets, update=True, do_profiling=False):
+  def run_one_batch(self, sess, inputs, conditions, condition_lens, targets, update=True, do_profiling=False, message=""):
     """Run a step of the model feeding the given inputs.
 
     Args:
