@@ -150,8 +150,6 @@ tf.app.flags.DEFINE_boolean('subtract', False, "if the reward of the current wor
 # shorter
 
 FLAGS = tf.app.flags.FLAGS
-DEBUG = FLAGS.debug
-
 assert FLAGS.mode in ["pretrain_gen", "train_gan", "decode"]
 assert FLAGS.sample_rate >= 0 and FLAGS.sample_rate <= 0.5, "sample rate should be [0, 0.5]"
 assert FLAGS.batch_size % 2 == 0, "batch size should be even, but given odd %s" % FLAGS.batch_size
@@ -165,6 +163,8 @@ if FLAGS.mode == "decode":
 
 if FLAGS.min_dec_steps > FLAGS.max_dec_steps / 2:
     FLAGS.min_dec_steps = int(FLAGS.max_dec_steps / 2)
+
+DEBUG = FLAGS.debug
 
 ensure_exists(FLAGS.model_dir)
 
@@ -320,7 +320,7 @@ def main(argv):
     ]
 
     hps_dict = {}
-    for key, val in FLAGS.__flags.iteritems():  # for each flag
+    for key, val in FLAGS.flag_values_dict().iteritems():
         if key in hparam_gen:  # if it's in the list
             hps_dict[key] = val  # add it to the dict
 
@@ -361,7 +361,7 @@ def main(argv):
     ]
 
     hps_dict = {}
-    for key, val in FLAGS.__flags.iteritems():  # for each flag
+    for key, val in FLAGS.flag_values_dict().iteritems():
         if key in hparam_dis:  # if it's in the list
             hps_dict[key] = val  # add it to the dict
 
@@ -395,7 +395,7 @@ def main(argv):
         'subtract',
     ]
     hps_dict = {}
-    for key, val in FLAGS.__flags.iteritems():  # for each flag
+    for key, val in FLAGS.flag_values_dict().iteritems():
         if key in hparam_gan:  # if it's in the list
             hps_dict[key] = val  # add it to the dict
 
@@ -469,6 +469,7 @@ def main(argv):
         decoder = Decoder(sess, generator, dec_vocab)
 
     if (FLAGS.mode == 'train_gan' and FLAGS.dis_reward_ratio) or FLAGS.mode == "decode":
+        print("Restoring the discriminator model from the best checkpoint...")
         dis_saver = tf.train.Saver(
             max_to_keep=3, var_list=[v for v in all_variables if "discriminator" in v.name])
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
