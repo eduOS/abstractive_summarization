@@ -410,6 +410,7 @@ def main(argv):
     all_variables = tf.get_collection_ref(tf.GraphKeys.GLOBAL_VARIABLES) + \
         tf.get_collection_ref(tf.GraphKeys.WEIGHTS) + \
         tf.get_collection_ref(tf.GraphKeys.BIASES)
+    all_variables = set(all_variables)
     sess = tf.Session(config=utils.get_config())
     # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
     # sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
