@@ -371,7 +371,6 @@ def main(argv):
 
     with tf.variable_scope("generator"), tf.device("/gpu:0"):
         generator = PointerGenerator(hps_gen, enc_vocab, dec_vocab)
-        print("Building generator graph ...")
         gen_decoder_scope = generator.build_graph()
 
     if FLAGS.mode == 'train_gan' and FLAGS.dis_reward_ratio:
