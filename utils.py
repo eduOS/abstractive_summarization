@@ -188,6 +188,7 @@ def linear_mapping_weightnorm(inputs, out_dim, dropout=1.0, var_scope_name="line
     #  use weight normalization (Salimans & Kingma, 2016)  w = g* v/2-norm(v)
     V = tf.get_variable('V', shape=[int(input_shape[-1]), out_dim], dtype=tf.float32, initializer=tf.random_normal_initializer(mean=0, stddev=tf.sqrt(dropout*1.0/int(input_shape[-1]))), trainable=True)
     V_norm = tf.norm(V.initialized_value(), axis=0)  # V shape is M*N,  V_norm shape is N
+    # https://stackoverflow.com/a/34887370/3552975
     g = tf.get_variable('g', dtype=tf.float32, initializer=V_norm, trainable=True)
     b = tf.get_variable('b', shape=[out_dim], dtype=tf.float32, initializer=tf.zeros_initializer(), trainable=True)   # weightnorm bias is init zero
 
