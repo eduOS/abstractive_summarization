@@ -20,6 +20,7 @@
 
 # data processing
 ## preprocessing
+
   * replace unprintable characters with space
   ```vim
   :UnicodeToggle
@@ -32,12 +33,12 @@
   ```vim
   :%s/\v\\u([a-f0-9]{4})/ UNCD_\1 /g
   ```
-  * the pos tag for each word, make the tag using unidecode to transliterate all non-asscii to asscii(decoded_unicode), then march the tags to the corresponding items; and get the tf-idf, NER for each word
-    use unidecode transfer UNCD_[a-f0-9]{4} to UNCD_[a-f0-9]{4}_uniCharacter_decodedUnicode_DCNU
-    original file: asscii string
+  * the *pos* tag for each word, make the tag using unidecode to transliterate all non-ascii to ascii(decoded_unicode), then march the tags to the corresponding items; and get the *tf-idf*, *NER* for each word
+    use unidecode transfer UNCD_[a-f0-9]{4} to UNCD_[a-f0-9]{4}
+    original file: ascii string
     middle file: unicode string which is tokenized and contains all information: tag, tf_idf, pos, clause indecies and sentence indecies
 
-  * get the clause index for each word using the unicode character
+  * get the clause index for each word using the unicode character *punc*
       the clause index is the serial number of which clause the word belonging to 
   * in the same vein, get the sentence index for each clause, and the paragraph index for each sentence
 
@@ -45,7 +46,13 @@
 
   * uppercase and lower case issue
 
-## processing
+### unicode problem
+  * abandon those lines of which the abstract contain non-English, because the non-english characters in validation set are only chinese puncs and some chars of non sense. 
+  * since the abstracts are written by human then there should be no unicode value in the the targets then all puncs, both in the contents and in the abstracts should be decoded into ascii puncs
+  * all non ascii characters should be replaced by UNK except puncs. and continuous unks should be combined as one, and if a whole sentence contains only unks ignore it
+  * \ua is a special tag not a unicode mark
+  * TODO: to test if puncs can be removed, to see if it can affect the score
+
+## steps
   * divide sentences
       \.[A-Z]|\\n|
-    
