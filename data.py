@@ -35,14 +35,14 @@ SENTENCE_END = '</s>'
 
 # This has a vocab id, which is used to pad the encoder input, decoder
 # input and target sequence
-PAD_TOKEN = '[PAD]'
+PAD_TOKEN = '[pad]'
 # This has a vocab id, which is used to represent out-of-vocabulary words
-UNKNOWN_TOKEN = '[UNK]'
+UNKNOWN_TOKEN = '[unk]'
 # This has a vocab id, which is used at the start of every decoder input
 # sequence
-START_DECODING = '[START]'
+START_DECODING = '[start]'
 # This has a vocab id, which is used at the end of untruncated target sequences
-STOP_DECODING = '[STOP]'
+STOP_DECODING = '[stop]'
 POSITIVE_LABEL = 1
 NEGATIVE_LABEL = 0
 
