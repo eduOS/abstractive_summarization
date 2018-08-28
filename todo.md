@@ -38,12 +38,14 @@
     original file: ascii string
     middle file: unicode string which is tokenized and contains all information: tag, tf_idf, pos, clause indecies and sentence indecies
 
+  * the tf-idf score is obtained after stemming, and stop words are given lowest scores
   * get the clause index for each word using the unicode character *punc*
       the clause index is the serial number of which clause the word belonging to 
   * in the same vein, get the sentence index for each clause, and the paragraph index for each sentence
   * substitue all links with a mark
   * uppercase and lower case issue
   * TODO: see if someother infor can be used
+  * TODO: manually delete samples with too much non-english characters
 
 ### unicode problem
   * abandon those lines of which the abstract contain non-English, because the non-english characters in validation set are only chinese puncs and some chars of non sense. 
