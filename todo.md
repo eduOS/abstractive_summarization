@@ -43,9 +43,14 @@
       the clause index is the serial number of which clause the word belonging to 
   * in the same vein, get the sentence index for each clause, and the paragraph index for each sentence
   * substitue all links with a mark
-  * uppercase and lower case issue
+  * uppercase and lower case issue: only NNP and NNPS don't need to be lowered
   * TODO: see if someother infor can be used
   * TODO: manually delete samples with too much non-english characters
+  * TODO: consider if the stem of a world should be included in the embedding, or if a vocabulary of it is needed
+    lexeme can reduce the dimension of the vector space representation, so it is necessary
+    https://arxiv.org/pdf/1209.3126v1.pdf
+  * [x] embedding: lemmatization + a_small_num * []. don't relate the lemmatization to embedding
+  * use google embedding
 
 ### unicode problem
   * abandon those lines of which the abstract contain non-English, because the non-english characters in validation set are only chinese puncs and some chars of non sense. 

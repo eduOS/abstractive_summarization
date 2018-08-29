@@ -18,8 +18,10 @@ from nltk import sent_tokenize
 import re
 import unicodedata
 from nltk.stem import PorterStemmer, WordNetLemmatizer
+from nltk.stem import LancasterStemmer
 port = PorterStemmer()
 wnl = WordNetLemmatizer()
+ls = LancasterStemmer()
 
 ENC_VOCAB_SIZE = 500000
 DEC_VOCAB_SIZE = 100000
@@ -168,15 +170,31 @@ def bytes2unicode(line, is_debug=False):
     return line
 
 
-def map_tfidf(tagged_sentences, is_debug=True):
+def map_tfidf(normalized_sentences, is_debug=True):
     # lemmanization and score
+    pass
+
+
+def word_normalize(tagged_sentences, is_debug=False):
+    normalized_sentences = []
     for tagged_sentence in tagged_sentences:
-        ported = ' '.join([port.stem(i) for i in list(map(lambda x: x[0], tagged_sentence))])
-        wnled = " ".join([wnl.lemmatize(i, pos=p) for i, p in list(map(lambda x: (x[0], x[1]), tagged_sentence))])
+        # lower case the first word
+        tagged_sentence[0][0].lower()
+        debug_line('lowered first word in function', str(tagged_sentence))
+        # ported = [port.stem(i) for i in list(map(lambda x: x[0], tagged_sentence))]
+        # lsed = [ls.stem(i) for i in list(map(lambda x: x[0], tagged_sentence))]
+        wnled = [wnl.lemmatize(w, pos='a' if p[0].lower() == 'j' else p[0].lower())
+                 if p[0].lower() in ['j', 'r', 'n', 'v'] else w
+                 for w, p in list(map(lambda x: (x[0], x[1]), tagged_sentence))]
+        normalized_sentences.append(wnled)
+
         if is_debug:
-            debug_line("sentence pos", ported)
-            debug_line("sentence ner", wnled)
+            debug_line("tagged sentence", str(tagged_sentence))
+            # debug_line("sent_stem ported", str(ported))
+            # debug_line("sent_stem lancester", str(lsed))
+            debug_line("sent_lemma wnled", str(wnled))
             input('\n')
+    return normalized_sentences
 
 
 def tokenize_add_prio(sentences, is_debug=False):
@@ -186,7 +204,12 @@ def tokenize_add_prio(sentences, is_debug=False):
     sentences_pos = [pos_tagger.tag(sentence) for sentence in tokenized_sentences]
     sentences_ner = [ner_tagger.tag(sentence) for sentence in tokenized_sentences]
     for sp, sn in zip(sentences_pos, sentences_ner):
-        mapped = list(map(lambda x, y: x + (y[1],), sp, sn))
+        mapped = list(map(
+            lambda i_y: (
+                i_y[1][0][0].lower() if i_y[0] < 2 and i_y[1][0][1] not in ['NNP', 'NNPS'] else i_y[1][0][0],
+                i_y[1][0][1],
+                i_y[1][1][1]),
+            enumerate(zip(sp, sn))))
         tagged_sentences.append(mapped)
         if is_debug:
             debug_line("sentence pos", str(sp))
@@ -208,7 +231,7 @@ def process_title(title, is_debug=False):
 
 def delete_unk_sentences(sentences):
     """
-    delete by hand
+    delete by hand, if too many unks
     """
     return
 
@@ -220,6 +243,10 @@ def read_origin(fi, is_debug=False):
     if is_debug:
         debug_line('origin', line)
     return line
+
+
+def sent_filter(sentences, debug=False):
+    sentences = list(filter(lambda x: len(x) > 2, sentences))
 
 
 def load_json(line, is_debug=False):
@@ -234,7 +261,7 @@ def main(makevocab=True):
     fi = open('./data/dptest.txt', 'rb')
 
     while(True):
-        line = read_origin(fi)
+        line = read_origin(fi, is_debug=True)
         if not line:
             break
 
@@ -247,8 +274,13 @@ def main(makevocab=True):
         sentences = cut_sentence(content, is_debug=False)
         # sentences = delete_unk_sentences(sentences, is_debug=True)
 
+        # sentences = sent_filter(sentences, debug=False)
         tagged_sentences = tokenize_add_prio(sentences, is_debug=False)
-        informative_sentences = map_tfidf(tagged_sentences, is_debug=True)
+        normalized_sentences = word_normalize(tagged_sentences, is_debug=True)
+        # debug_line('the origin sentence changed?', str(tagged_sentences))
+        # the the first word of every sentence in tagged_sentences should be
+        # lower cased
+        # scored_sentences = map_tfidf(normalized_sentences, is_debug=True)
 
         input('\n\n')
         if makevocab:
