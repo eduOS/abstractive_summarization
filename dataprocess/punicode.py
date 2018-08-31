@@ -17,12 +17,17 @@ from os.path import join
 from nltk import sent_tokenize
 import re
 import unicodedata
+from itertools import chain
+import nltk
+from nltk.tree import Tree
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from nltk.stem import LancasterStemmer
+from nltk.corpus import stopwords
+import string
+from sklearn.feature_extraction.text import TfidfVectorizer
 port = PorterStemmer()
 wnl = WordNetLemmatizer()
 ls = LancasterStemmer()
-
 ENC_VOCAB_SIZE = 500000
 DEC_VOCAB_SIZE = 100000
 
@@ -41,6 +46,20 @@ dec_must_include = ['[pad]', '[unk]', '[stop]', '[start]']
 
 # fi = open('./data/dptest.txt', encoding='unicode_escape')
 
+pattern = r"""
+NP: {<DT>?<JJ.?>*(<NN.?>|<NE>)}
+VBD: {<VBD>}
+IN: {<IN>}
+"""
+
+
+def dummy_fun(doc):
+    return doc
+
+stopwords = stopwords.words('english') + list(string.punctuation)
+
+tfidf = TfidfVectorizer(stop_words=stopwords, analyzer='word', tokenizer=dummy_fun, preprocessor=dummy_fun, token_pattern=None)
+
 
 def my_repl(match):
     # how can I add a parameter here?
@@ -57,13 +76,13 @@ def my_repl(match):
             return ' u_n_k '
 
 
-def debug_line(tag, line):
-    tag = colored(tag + ': ', 'green')
-    default_len = 1000
+def debug_line(tag, line, color="green"):
+    tag = colored(tag + ':', color)
+    default_len = 1500
     if len(line) < 1000:
         ipt = "f"
         if tag:
-            print(colored(tag, 'yellow'), end='\t')
+            print(colored(tag, 'yellow'))
     else:
         ipt = input(colored('input the char number to see ', 'yellow') + tag + colored(', f for all chars, default is %s: ' % default_len, 'yellow'))
     # sys.stdout.write('\r')
@@ -91,26 +110,99 @@ def fix_missing_period(line):
   return line + " ."
 
 
-def cut_sentence(line, is_debug=False):
+def cut_sent(line, is_debug=False):
     """
-    the existing tools may be better
+    TODO: combining the existing tools may be better
     """
     line = line.replace("''", '"')
-    sentences = re.sub(r'''((?<![A-Z])\.(?=[A-Z][^.])|\.(?=([ '"]+|by))\)*|[;!?:]['"]*)|(?<![\d ])\.(?=\d\.?)''', r'\1\n', line).split('\n')
-    sentences = [sentence.strip() for sentence in sentences if len(sentence.strip()) > 1]
+    sents = re.sub(r'''((?<![A-Z])\.(?=[A-Z][^.])|\.(?=([ '"]+|by))\)*|[;!?:]['"]*)|(?<![\d ])\.(?=\d\.?)''', r'\1\n', line).split('\n')
+    sents = [sent.strip() for sent in sents if len(sent.strip()) > 1]
 
-    sentences_ = sent_tokenize(line)
+    sents_ = sent_tokenize(line)
     # failed when encountering ; l.U \n .by
 
     if is_debug:
-        for sentence in sentences:
-            debug_line("my cut sentence", sentence)
+        for sent in sents:
+            debug_line("my cut sent", sent)
         input('\n\n')
-        for sentence in sentences_:  # noqa
-            debug_line('corenlp cut', sentence)
+        for sent in sents_:  # noqa
+            debug_line('corenlp cut', sent)
         input('\n\n')
     else:
-        return sentences
+        return sents
+
+
+def pos_repos_tag(tagged_sents, is_debug=0):
+    """
+    pos retag according to the ner tag, the named entity are tagged as <NE>
+    """
+
+    pos_retagged_sents = []
+    for tagged_sent in tagged_sents:
+        current_sent = []
+        continuous_chunk = []
+
+        for (token, p_tag, n_tag) in tagged_sent:
+            if n_tag != "O":
+                continuous_chunk.append(token)
+            else:
+                if continuous_chunk:  # if the current chunk is not empty
+                    if is_debug:
+                        retagged = ("_".join(continuous_chunk), "_NE_")
+                    else:
+                        retagged = (" ".join(continuous_chunk), "NE")
+                    current_sent.append(retagged)
+                    continuous_chunk = []
+                current_sent.append((token, p_tag))
+
+        if is_debug:
+            debug_line("origial sent", str(tagged_sent))
+            debug_line("retagged sent", str(current_sent), 'red')
+        pos_retagged_sents.append(current_sent)
+
+    return pos_retagged_sents
+
+
+def traverse_tree(tree, depth=float('inf'), is_debug=0):
+    """
+    Traversing the Tree depth-first,
+    yield leaves up to `depth` level.
+    """
+    for subtree in tree:
+        if type(subtree) == Tree:
+            if subtree.height() <= depth:
+                leaves = ' '.join(subtree.leaves()).split(' ')
+                yield list(map(lambda x: x.split('/')[0] if not is_debug else x, leaves))
+                traverse_tree(subtree)
+        else:
+            # the named entity should be separated
+            leaves = [leaf.split('/')[0] if not is_debug else leaf for leaf in subtree.split(" ")]
+            yield leaves
+
+
+def index_sent_phrase_no(retagged_sents, scored_sents, is_debug=0):
+    info_sents = []
+    start = -1
+    for i, (sent, scored_sent) in enumerate(zip(retagged_sents, scored_sents)):
+        NPChunker = nltk.RegexpParser(pattern)
+        result = Tree.fromstring(str(NPChunker.parse(sent)))
+        chunked = list(traverse_tree(result, 2, is_debug=is_debug))
+        phrase_mark = list(chain.from_iterable(
+            [len(c)*[j+start+1]
+             for j, c in enumerate(chunked)]))
+        info_sent = list(map(
+            lambda pm_sm_ss: pm_sm_ss[2] + ((pm_sm_ss[0], pm_sm_ss[1]),),
+            zip(phrase_mark, [i]*len(phrase_mark), scored_sent)))
+        info_sents.append(info_sent)
+        if is_debug:
+            debug_line('orig sent', sent)
+            result.pretty_print()
+            debug_line('chunked', str(chunked), 'red')
+            debug_line('index', str(info_sent))
+        assert len(phrase_mark) == len(scored_sent), "num of phrase marks %s != num of original items %s. Something wrong may happened in retagging." % (len(phrase_mark), len(scored_sent))
+        start = max(phrase_mark)
+        input('\n\n')
+    return info_sents
 
 
 def make_vocab(enc_vocab_counter, dec_vocab_counter):
@@ -170,53 +262,63 @@ def bytes2unicode(line, is_debug=False):
     return line
 
 
-def map_tfidf(normalized_sentences, is_debug=True):
-    # lemmanization and score
-    pass
+def map_tfidf(tagged_sents, normalized_sents, is_debug=True):
+    # http://www.davidsbatista.net/blog/2018/02/28/TfidfVectorizer/
+    tfidf.fit(normalized_sents)
+    vocab = tfidf.vocabulary_
+    scored_sents = [
+        [
+            j + (tfidf.transform([d]).toarray()[0][vocab[i]] if i in vocab else 0,) for i, j in zip(d, t)
+        ] for d, t in zip(normalized_sents, tagged_sents)
+    ]
+    if is_debug:
+        for ts in scored_sents:
+            debug_line("tfidf scores", str(ts))
+            input('\n')
+
+    return scored_sents
 
 
-def word_normalize(tagged_sentences, is_debug=False):
-    normalized_sentences = []
-    for tagged_sentence in tagged_sentences:
-        # lower case the first word
-        tagged_sentence[0][0].lower()
-        debug_line('lowered first word in function', str(tagged_sentence))
-        # ported = [port.stem(i) for i in list(map(lambda x: x[0], tagged_sentence))]
-        # lsed = [ls.stem(i) for i in list(map(lambda x: x[0], tagged_sentence))]
-        wnled = [wnl.lemmatize(w, pos='a' if p[0].lower() == 'j' else p[0].lower())
-                 if p[0].lower() in ['j', 'r', 'n', 'v'] else w
-                 for w, p in list(map(lambda x: (x[0], x[1]), tagged_sentence))]
-        normalized_sentences.append(wnled)
+def word_normalize(tagged_sents, is_debug=False):
+    normalized_sents = []
+    for tagged_sent in tagged_sents:
+        # ported = [port.stem(i) for i in list(map(lambda x: x[0], tagged_sent))]
+        # lsed = [ls.stem(i) for i in list(map(lambda x: x[0], tagged_sent))]
+        wnled = [port.stem(wnl.lemmatize(w, pos='a' if p[0].lower() == 'j' else p[0].lower()))
+                 if p[0].lower() in ['j', 'r', 'n', 'v'] and p not in ["NNPS", "NNP"] else w
+                 for w, p in list(map(lambda x: (x[0], x[1]), tagged_sent))]
+        normalized_sents.append(wnled)
 
         if is_debug:
-            debug_line("tagged sentence", str(tagged_sentence))
+            debug_line("tagged sent", str(tagged_sent))
             # debug_line("sent_stem ported", str(ported))
             # debug_line("sent_stem lancester", str(lsed))
             debug_line("sent_lemma wnled", str(wnled))
             input('\n')
-    return normalized_sentences
+    return normalized_sents
 
 
-def tokenize_add_prio(sentences, is_debug=False):
+def tokenize_add_prio(sents, is_debug=False):
 
-    tagged_sentences = []
-    tokenized_sentences = [list(tokenize(sentence)) for sentence in sentences]
-    sentences_pos = [pos_tagger.tag(sentence) for sentence in tokenized_sentences]
-    sentences_ner = [ner_tagger.tag(sentence) for sentence in tokenized_sentences]
-    for sp, sn in zip(sentences_pos, sentences_ner):
+    tagged_sents = []
+    tokenized_sents = [list(tokenize(sent)) for sent in sents]
+    sents_pos = [pos_tagger.tag(sent) for sent in tokenized_sents]
+    sents_ner = [ner_tagger.tag(sent) for sent in tokenized_sents]
+    for sp, sn in zip(sents_pos, sents_ner):
         mapped = list(map(
             lambda i_y: (
-                i_y[1][0][0].lower() if i_y[0] < 2 and i_y[1][0][1] not in ['NNP', 'NNPS'] else i_y[1][0][0],
+                i_y[1][0][0].lower() if i_y[0] < 2 and i_y[1][0][1] not in ['UH', 'NNP', 'NNPS'] else i_y[1][0][0],
                 i_y[1][0][1],
                 i_y[1][1][1]),
             enumerate(zip(sp, sn))))
-        tagged_sentences.append(mapped)
+        # original word, pos_tag, ner_tag
+        tagged_sents.append(mapped)
         if is_debug:
-            debug_line("sentence pos", str(sp))
-            debug_line("sentence ner", str(sn))
-            debug_line("sentence combined", str(mapped))
+            debug_line("sent pos", str(sp))
+            debug_line("sent ner", str(sn))
+            debug_line("sent combined", str(mapped))
             input('\n')
-    return tagged_sentences
+    return sents_pos, tagged_sents
 
 
 def process_title(title, is_debug=False):
@@ -229,7 +331,7 @@ def process_title(title, is_debug=False):
     return title
 
 
-def delete_unk_sentences(sentences):
+def delete_unk_sents(sents):
     """
     delete by hand, if too many unks
     """
@@ -245,8 +347,8 @@ def read_origin(fi, is_debug=False):
     return line
 
 
-def sent_filter(sentences, debug=False):
-    sentences = list(filter(lambda x: len(x) > 2, sentences))
+def sent_filter(sents, debug=False):
+    sents = list(filter(lambda x: len(x) > 2, sents))
 
 
 def load_json(line, is_debug=False):
@@ -261,7 +363,7 @@ def main(makevocab=True):
     fi = open('./data/dptest.txt', 'rb')
 
     while(True):
-        line = read_origin(fi, is_debug=True)
+        line = read_origin(fi, is_debug=0)
         if not line:
             break
 
@@ -271,16 +373,16 @@ def main(makevocab=True):
         title = process_title(title)
         if not title:
             continue
-        sentences = cut_sentence(content, is_debug=False)
-        # sentences = delete_unk_sentences(sentences, is_debug=True)
+        sents = cut_sent(content, is_debug=False)
+        # sents = delete_unk_sents(sents, is_debug=True)
 
-        # sentences = sent_filter(sentences, debug=False)
-        tagged_sentences = tokenize_add_prio(sentences, is_debug=False)
-        normalized_sentences = word_normalize(tagged_sentences, is_debug=True)
-        # debug_line('the origin sentence changed?', str(tagged_sentences))
-        # the the first word of every sentence in tagged_sentences should be
-        # lower cased
-        # scored_sentences = map_tfidf(normalized_sentences, is_debug=True)
+        # sents = sent_filter(sents, debug=False)
+        sents_pos, tagged_sents = tokenize_add_prio(sents, is_debug=0)
+        normalized_sents = word_normalize(tagged_sents, is_debug=0)
+        # debug_line('the origin sent changed?', str(tagged_sents))
+        scored_sents = map_tfidf(tagged_sents, normalized_sents, is_debug=0)
+        ner_pos_tagged_sents = pos_repos_tag(tagged_sents, is_debug=0)
+        indexed_sents = index_sent_phrase_no(ner_pos_tagged_sents, scored_sents, is_debug=1)
 
         input('\n\n')
         if makevocab:
