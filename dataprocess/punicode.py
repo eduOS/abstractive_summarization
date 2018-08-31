@@ -185,7 +185,7 @@ def index_sent_phrase_no(retagged_sents, scored_sents, is_debug=0):
     start = -1
     for i, (sent, scored_sent) in enumerate(zip(retagged_sents, scored_sents)):
         NPChunker = nltk.RegexpParser(pattern)
-        result = Tree.fromstring(str(NPChunker.parse(sent)))
+        result = NPChunker.parse(sent)
         chunked = list(traverse_tree(result, 2, is_debug=is_debug))
         phrase_mark = list(chain.from_iterable(
             [len(c)*[j+start+1]
@@ -196,7 +196,6 @@ def index_sent_phrase_no(retagged_sents, scored_sents, is_debug=0):
         info_sents.append(info_sent)
         if is_debug:
             debug_line('orig sent', sent)
-            result.pretty_print()
             debug_line('chunked', str(chunked), 'red')
             debug_line('index', str(info_sent))
         assert len(phrase_mark) == len(scored_sent), "num of phrase marks %s != num of original items %s. Something wrong may happened in retagging." % (len(phrase_mark), len(scored_sent))
@@ -382,7 +381,7 @@ def main(makevocab=True):
         # debug_line('the origin sent changed?', str(tagged_sents))
         scored_sents = map_tfidf(tagged_sents, normalized_sents, is_debug=0)
         ner_pos_tagged_sents = pos_repos_tag(tagged_sents, is_debug=0)
-        indexed_sents = index_sent_phrase_no(ner_pos_tagged_sents, scored_sents, is_debug=1)
+        indexed_sents = index_sent_phrase_no(ner_pos_tagged_sents, scored_sents, is_debug=0)
 
         input('\n\n')
         if makevocab:
