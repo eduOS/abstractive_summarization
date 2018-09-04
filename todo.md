@@ -58,6 +58,8 @@
   * all non ascii characters should be replaced by UNK except puncs. and continuous unks should be combined as one, and if a whole sentence contains only unks ignore it
   * \ua is a special tag not a unicode mark
   * TODO: to test if puncs can be removed, to see if it can affect the score
+  * TODO: the generated first character doesn't need to be upcased, upcase it afterwards
+  * remove \uac mess by hand
 
 ## steps
   * divide sentences

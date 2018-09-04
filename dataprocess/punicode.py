@@ -17,6 +17,7 @@ from os.path import join
 from nltk import sent_tokenize
 import re
 import unicodedata
+import time
 from itertools import chain
 import nltk
 from nltk.tree import Tree
@@ -47,9 +48,11 @@ dec_must_include = ['[pad]', '[unk]', '[stop]', '[start]']
 # fi = open('./data/dptest.txt', encoding='unicode_escape')
 
 pattern = r"""
-NP: {<DT>?<JJ.?>*(<NN.?>|<NE>)}
+NP: {<DT|PRP\$|CD>?<JJ.?>*(<NN|NNS>|<NE>|<NNP.*>+)}
+    {<NN.?>+(<POS>|')<JJ.?>?<NN.?>}
 VBD: {<VBD>}
 IN: {<IN>}
+JJ: {<RB>?<JJ>}
 """
 
 
@@ -114,12 +117,18 @@ def cut_sent(line, is_debug=False):
     """
     TODO: combining the existing tools may be better
     """
+    if is_debug:
+        debug_line("have quote", line)
     line = line.replace("''", '"')
+    if is_debug:
+        debug_line("replace quote", line)
+
     sents = re.sub(r'''((?<![A-Z])\.(?=[A-Z][^.])|\.(?=([ '"]+|by))\)*|[;!?:]['"]*)|(?<![\d ])\.(?=\d\.?)''', r'\1\n', line).split('\n')
     sents = [sent.strip() for sent in sents if len(sent.strip()) > 1]
 
-    sents_ = sent_tokenize(line)
-    # failed when encountering ; l.U \n .by
+    if is_debug:
+        sents_ = sent_tokenize(line)
+        # failed when encountering ; l.U \n .by
 
     if is_debug:
         for sent in sents:
@@ -139,25 +148,41 @@ def pos_repos_tag(tagged_sents, is_debug=0):
 
     pos_retagged_sents = []
     for tagged_sent in tagged_sents:
+        length = 0
         current_sent = []
         continuous_chunk = []
 
-        for (token, p_tag, n_tag) in tagged_sent:
+        for (pos_token, _, p_tag, n_tag) in tagged_sent:
             if n_tag != "O":
-                continuous_chunk.append(token)
+                continuous_chunk.append(pos_token)
             else:
                 if continuous_chunk:  # if the current chunk is not empty
                     if is_debug:
                         retagged = ("_".join(continuous_chunk), "_NE_")
+                        length += len(continuous_chunk)
                     else:
                         retagged = (" ".join(continuous_chunk), "NE")
+                        length += len(continuous_chunk)
                     current_sent.append(retagged)
                     continuous_chunk = []
-                current_sent.append((token, p_tag))
+                current_sent.append((pos_token, p_tag))
+                length += 1
+
+        # add the last continuous tokens
+        if continuous_chunk:
+            if is_debug:
+                retagged = ("_".join(continuous_chunk), "_NE_")
+                length += len(continuous_chunk)
+            else:
+                retagged = (" ".join(continuous_chunk), "NE")
+                length += len(continuous_chunk)
+            current_sent.append(retagged)
 
         if is_debug:
+            debug_line("is in debug mode, no steps can be followed, error may occur by _", '', "red")
             debug_line("origial sent", str(tagged_sent))
             debug_line("retagged sent", str(current_sent), 'red')
+        assert len(tagged_sent) == length, "length of tagged_sent and current_sent should be the same, but %s and %s\n%s\n%s" % (len(tagged_sent), length, str(tagged_sent), str(current_sent))
         pos_retagged_sents.append(current_sent)
 
     return pos_retagged_sents
@@ -176,31 +201,35 @@ def traverse_tree(tree, depth=float('inf'), is_debug=0):
                 traverse_tree(subtree)
         else:
             # the named entity should be separated
-            leaves = [leaf.split('/')[0] if not is_debug else leaf for leaf in subtree.split(" ")]
+            leaves = [leaf.split('/')[0] if not is_debug else leaf
+                      for leaf in subtree.split(" ")]
             yield leaves
 
 
 def index_sent_phrase_no(retagged_sents, scored_sents, is_debug=0):
+    # original_word, pos_tag, named entity, tfidf, phrase_index, sentence_index
     info_sents = []
     start = -1
-    for i, (sent, scored_sent) in enumerate(zip(retagged_sents, scored_sents)):
+    for i, (retagged_sent, scored_sent) in enumerate(zip(retagged_sents, scored_sents)):
         NPChunker = nltk.RegexpParser(pattern)
-        result = NPChunker.parse(sent)
-        chunked = list(traverse_tree(result, 2, is_debug=is_debug))
+        result = Tree.fromstring(str(NPChunker.parse(retagged_sent)))
+        chunked = list(traverse_tree(result, 2, is_debug=0))
         phrase_mark = list(chain.from_iterable(
             [len(c)*[j+start+1]
              for j, c in enumerate(chunked)]))
         info_sent = list(map(
-            lambda pm_sm_ss: pm_sm_ss[2] + ((pm_sm_ss[0], pm_sm_ss[1]),),
+            lambda pm_sm_ss: pm_sm_ss[2][1:] + (pm_sm_ss[0], pm_sm_ss[1]),
             zip(phrase_mark, [i]*len(phrase_mark), scored_sent)))
         info_sents.append(info_sent)
         if is_debug:
-            debug_line('orig sent', sent)
+            debug_line('orig retagged_sent', retagged_sent)
             debug_line('chunked', str(chunked), 'red')
+            debug_line('scored sent', scored_sent)
             debug_line('index', str(info_sent))
-        assert len(phrase_mark) == len(scored_sent), "num of phrase marks %s != num of original items %s. Something wrong may happened in retagging." % (len(phrase_mark), len(scored_sent))
+        assert len(phrase_mark) == len(scored_sent), "num of phrase marks %s != num of original items %s\n. \nSomething wrong may happened in retagging. in %sth sentence" % (len(phrase_mark), len(scored_sent), i)
         start = max(phrase_mark)
-        input('\n\n')
+        if is_debug:
+            input('\n\n')
     return info_sents
 
 
@@ -208,41 +237,78 @@ def make_vocab(enc_vocab_counter, dec_vocab_counter):
     print("Writing vocab file...")
     enc_vocab_counter.pop("", "null exists")
     dec_vocab_counter.pop("", "null exists")
-    dec_total_vocab = sum(dec_vocab_counter.values())
-    enc_total_vocab = sum(enc_vocab_counter.values())
-    dec_vocab_size = dec_total_vocab if DEC_VOCAB_SIZE > dec_total_vocab else DEC_VOCAB_SIZE
-    enc_vocab_size = dec_total_vocab if ENC_VOCAB_SIZE > enc_total_vocab else ENC_VOCAB_SIZE
-    input("Total decoder vocab size: %s, encoder vocab size: %s" % (dec_total_vocab, enc_total_vocab))
+    dec_total_words = sum(dec_vocab_counter.values())
+    enc_total_words = sum(enc_vocab_counter.values())
     # stats and input vocab size
-
-    dec_most_common = dec_vocab_counter.most_common(dec_vocab_size-len(dec_must_include))
-    for dec_key in dec_most_common:
-        enc_vocab_counter.pop(dec_key, None)
-
-    enc_most_common = enc_vocab_counter.most_common(enc_vocab_size-len(enc_must_include)-dec_vocab_size)
+    dec_most_common = dec_vocab_counter.most_common()
+    enc_most_common = enc_vocab_counter.most_common()
 
     acc_p = 0
-    dec_writer = open(join(finished_files_dir, "dec_vocab"), 'w', 'utf-8')
-    enc_writer = open(join(finished_files_dir, "enc_vocab"), 'w', 'utf-8')
+    dec_writer = open(join(finished_files_dir, "dec_words"), 'w', 'utf-8')
+    enc_writer = open(join(finished_files_dir, "enc_words"), 'w', 'utf-8')
 
     for word, count in dec_most_common:
-        acc_p += (count / dec_total_vocab)
-        # if acc_p > 0.96:
-        #     break
+        acc_p += (count / dec_total_words)
         dec_writer.write(word + ' ' + str(count) + " " + str(acc_p) + '\n')
-        enc_writer.write(word + ' ' + str(count) + " " + str(acc_p) + '\n')
-    for mi in dec_must_include:
-        dec_writer.write(mi + ' ' + "1" + " 0.0" + '\n')
     dec_writer.close()
     print("Finished writing dec_vocab file")
-    for mi in enc_must_include:
-        enc_writer.write(mi + ' ' + "1" + " 0.0" + '\n')
 
     acc_p = 0
     for word, count in enc_most_common:
-        acc_p += (count / enc_total_vocab)
+        acc_p += (count / enc_total_words)
         enc_writer.write(word + ' ' + str(count) + " " + str(acc_p) + '\n')
     enc_writer.close()
+    print("Finished writing enc_vocab file")
+
+
+def list_duplicates(seq):
+    seen = set()
+    seen_add = seen.add
+    # adds all elements it doesn't know yet to seen and all other to seen_twice
+    seen_twice = set(x for x in seq if x in seen or seen_add(x))
+    # turn the set into a list (as requested)
+    return list(seen_twice)
+
+
+def process_vocab(enc_vocab_file, dec_vocab_file, enc_vocab_size, dec_vocab_size):
+    missed_words = 0
+    missed = open(join(finished_files_dir, 'missedfromenc.txt'), 'w', 'utf-8')
+    enc_words = [line.strip().split(" ")[0]
+                 for line in open(enc_vocab_file, "r", "utf-8").readlines()]
+    dec_vocab = [line.strip().split(' ')[0]
+                 for line in open(dec_vocab_file, "r", "utf-8").readlines()[:dec_vocab_size-4]]
+
+    assert len(enc_words) >= enc_vocab_size, 'enc vocab should less than enc words'
+    assert len(dec_vocab) == dec_vocab_size-4, 'dec vocab should less than dec words'
+
+    for dec_key in dec_vocab:
+        try:
+            enc_words.remove(dec_key)
+        except:
+            missed_words += 1
+            missed.write(dec_key+"\n")
+            pass
+
+    dec_vocab.extend(dec_must_include)
+    assert len(dec_vocab) == len(set(dec_vocab)), "duplicates in dec vocab %s" % str(list_duplicates(dec_vocab))
+    dec_writer = open(join(finished_files_dir, "dec_vocab"), 'w', 'utf-8')
+    enc_writer = open(join(finished_files_dir, "enc_vocab"), 'w', 'utf-8')
+    for w in dec_vocab[:-2]:
+        dec_writer.write(w+"\n")
+        enc_writer.write(w+"\n")
+
+    for w in dec_vocab[-2:]:
+        dec_writer.write(w+"\n")
+
+    enc_vocab_left = enc_vocab_size - dec_vocab_size + 2
+    enc_vocab = enc_words[:enc_vocab_left]
+    assert len(enc_vocab) == len(set(enc_vocab)), "duplicates in dec vocab %s" % str(list_duplicates(enc_vocab))
+    for w in enc_vocab:
+        enc_writer.write(w+"\n")
+
+    dec_writer.close()
+    enc_writer.close()
+
     print("Finished writing enc_vocab file")
 
 
@@ -261,7 +327,7 @@ def bytes2unicode(line, is_debug=False):
     return line
 
 
-def map_tfidf(tagged_sents, normalized_sents, is_debug=True):
+def map_tfidf(tagged_sents, normalized_sents, is_debug=0):
     # http://www.davidsbatista.net/blog/2018/02/28/TfidfVectorizer/
     tfidf.fit(normalized_sents)
     vocab = tfidf.vocabulary_
@@ -284,8 +350,9 @@ def word_normalize(tagged_sents, is_debug=False):
         # ported = [port.stem(i) for i in list(map(lambda x: x[0], tagged_sent))]
         # lsed = [ls.stem(i) for i in list(map(lambda x: x[0], tagged_sent))]
         wnled = [port.stem(wnl.lemmatize(w, pos='a' if p[0].lower() == 'j' else p[0].lower()))
-                 if p[0].lower() in ['j', 'r', 'n', 'v'] and p not in ["NNPS", "NNP"] else w
-                 for w, p in list(map(lambda x: (x[0], x[1]), tagged_sent))]
+                 if p[0].lower() in ['j', 'r', 'n', 'v'] and p not in ["NNPS", "NNP"] and w not in stopwords else w
+                 for w, p in list(map(lambda x: (x[1], x[2]), tagged_sent))]
+        assert len(tagged_sent) == len(wnled), "word_normalize: tagged length %s should be equal of standarded len %s\n%s\n%s" % (len(tagged_sent), len(wnled), str(tagged_sent), str(wnled))
         normalized_sents.append(wnled)
 
         if is_debug:
@@ -303,31 +370,58 @@ def tokenize_add_prio(sents, is_debug=False):
     tokenized_sents = [list(tokenize(sent)) for sent in sents]
     sents_pos = [pos_tagger.tag(sent) for sent in tokenized_sents]
     sents_ner = [ner_tagger.tag(sent) for sent in tokenized_sents]
-    for sp, sn in zip(sents_pos, sents_ner):
-        mapped = list(map(
-            lambda i_y: (
-                i_y[1][0][0].lower() if i_y[0] < 2 and i_y[1][0][1] not in ['UH', 'NNP', 'NNPS'] else i_y[1][0][0],
-                i_y[1][0][1],
-                i_y[1][1][1]),
-            enumerate(zip(sp, sn))))
+    for sp, sn, st in zip(sents_pos, sents_ner, tokenized_sents):
+        assert len(sp) == len(sn), "tokenize_add_prio: pos and ner length should be the same, but %s and %s, \n%s\n%s" % (str(sp), str(sn), len(sn), len(sn))
+        mapped = []
+        case = 1
+        for p, n, t in zip(sp, sn, st):
+            if case and t.isalpha() and (p[1] not in ['NNP', 'NNPS'] or n[1] == "O"):
+                mapped.append((p[0], t.lower(), p[1], n[1]))
+                case = 0
+            elif case and (p[1] in ['NNP', 'NNPS'] or n[1] != "O"):
+                mapped.append((p[0], t, p[1], n[1]))
+                case = 0
+            else:
+                mapped.append((p[0], t, p[1], n[1]))
+
         # original word, pos_tag, ner_tag
         tagged_sents.append(mapped)
         if is_debug:
             debug_line("sent pos", str(sp))
             debug_line("sent ner", str(sn))
-            debug_line("sent combined", str(mapped))
+            debug_line("sent combined", str(mapped), 'red')
             input('\n')
     return sents_pos, tagged_sents
 
 
 def process_title(title, is_debug=False):
     if 'u_n_k' in title:
-        return None
+        return title, None
     else:
         title = title.replace("''", '"')
-        title = tokenize(title)
-        title = ' '.join(list(title)).lower()
-    return title
+        title = list(tokenize(title))
+        if is_debug:
+            debug_line("tokenized title", str(title))
+        title_pos = pos_tagger.tag(title)
+        if is_debug:
+            debug_line("pos tagged title", str(title_pos))
+        title_ner = ner_tagger.tag(title)
+        if is_debug:
+            debug_line("ner tagged title", str(title_ner))
+        case = 1
+        lowercased = []
+        for p, n in zip(title_pos, title_ner):
+            if case and p[0].isalpha() and (p[1] not in ['NNP', 'NNPS'] or n[1] == "O"):
+                lowercased.append(p[0].lower())
+                case = 0
+            elif case and (p[1] in ['NNP', 'NNPS'] or n[1] != "O"):
+                lowercased.append(p[0])
+                case = 0
+            else:
+                lowercased.append(p[0])
+        if is_debug:
+            debug_line("lower cased title", str(title))
+    return title, True
 
 
 def delete_unk_sents(sents):
@@ -355,46 +449,114 @@ def load_json(line, is_debug=False):
     return _json['id'], _json['title'], _json['content']
 
 
-def main(makevocab=True):
-    if makevocab:
-        enc_vocab_counter = collections.Counter()
-        dec_vocab_counter = collections.Counter()
-    fi = open('./data/dptest.txt', 'rb')
+def get_pairs_from_corpus(in_file, is_debug=0):
+    fi = open(in_file, 'rb')
+    lines_count = 0
+    illegal_num = 0
+    illegal = open(join(finished_files_dir, 'illegal.txt'), 'w', 'utf-8')
+    if is_debug:
+        frequency = 5
+    else:
+        frequency = 50000
 
     while(True):
         line = read_origin(fi, is_debug=0)
         if not line:
+            illegal.write("\n\n" + str(illegal_num))
+            illegal.close()
             break
 
         line = bytes2unicode(line)
         _id, title, content = load_json(line)
 
-        title = process_title(title)
-        if not title:
+        title, state = process_title(title, is_debug=0)
+
+        if not state:
+            illegal.write(title + '\n' + content + "\n\n")
+            illegal_num += 1
+            illegal.flush()
             continue
-        sents = cut_sent(content, is_debug=False)
+        sents = cut_sent(content, is_debug=0)
         # sents = delete_unk_sents(sents, is_debug=True)
 
         # sents = sent_filter(sents, debug=False)
+
         sents_pos, tagged_sents = tokenize_add_prio(sents, is_debug=0)
+        # tagged_sents: pos_tag_word, original word, pos_tag, named entity
+
+        # normalized words only for tfidf scores
         normalized_sents = word_normalize(tagged_sents, is_debug=0)
+        # lemmatized and stemmed word, all lowered, stopwords
+        # are kept
+
         # debug_line('the origin sent changed?', str(tagged_sents))
         scored_sents = map_tfidf(tagged_sents, normalized_sents, is_debug=0)
+        # pos_tag_word, original word, pos_tag, named entity, tfidf
+
         ner_pos_tagged_sents = pos_repos_tag(tagged_sents, is_debug=0)
+        # repos_tag_word, repos_tag
+
         indexed_sents = index_sent_phrase_no(ner_pos_tagged_sents, scored_sents, is_debug=0)
+        # original_word, pos_tag, named entity, tfidf, phrase_index, sentence_index
 
-        input('\n\n')
-        if makevocab:
-            enc_vocab_counter.update(content.split(" "))
-            dec_vocab_counter.update(title.split(" "))
+        infor_content = list(chain.from_iterable(indexed_sents))
 
-    # write vocab to file
+        if is_debug:
+            input('\n\n')
+        lines_count += 1
+        if lines_count % frequency == 0:
+            print(lines_count)
+            print(str(title))
+        yield title, infor_content
+
+
+def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0):
+    out_file = join(finished_files_dir, out_file)
+    print('parse corpus from %s to %s' % (in_file, out_file))
     if makevocab:
+        enc_vocab_counter = collections.Counter()
+        dec_vocab_counter = collections.Counter()
+
+    file_num = 0
+    length = 0
+
+    writer = open(out_file + "_" + str(file_num), 'w', 'utf-8')
+
+    for title, infor_content in get_pairs_from_corpus(in_file, is_debug=0):
+        if is_debug:
+            debug_line('title written', str(title))
+        original_words, pos_tags, ner_tags, tfidf_scores, phrase_indices, sent_indices = zip(*infor_content)
+        if makevocab:
+            enc_vocab_counter.update(original_words)
+            dec_vocab_counter.update(title)
+        if length >= max_length:
+            file_num += 1
+            writer.close()
+            writer = open(out_file + "_" + str(file_num), 'w', 'utf-8')
+            length = 0
+        line = "\t".join(
+            [" ".join(title),
+             " ".join(original_words),
+             " ".join(pos_tags),
+             " ".join(ner_tags),
+             " ".join(map(str, tfidf_scores)),
+             " ".join(map(str, phrase_indices)),
+             " ".join(map(str, sent_indices))
+             ]) + "\n"
+        if is_debug:
+            debug_line('line written', line)
+        writer.write(line)
+        length += 1
+
+    writer.close()
+    if makevocab:
+        # write vocab to file
         make_vocab(enc_vocab_counter, dec_vocab_counter)
 
 
-def test():
-    main(makevocab=False)
-
 if __name__ == '__main__':
-    test()
+    in_file = './data/dptest.txt'
+    start = time.time()
+    write_to_text(in_file, "temp", is_debug=0)
+    spent = time.time() - start
+    print('finished, %s munites spent' % str(spent/60))
