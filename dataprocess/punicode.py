@@ -20,17 +20,20 @@ import unicodedata
 import time
 from itertools import chain
 import nltk
+from utils import timeit
 from nltk.tree import Tree
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from nltk.stem import LancasterStemmer
 from nltk.corpus import stopwords
 import string
 from sklearn.feature_extraction.text import TfidfVectorizer
+import multiprocessing
 port = PorterStemmer()
 wnl = WordNetLemmatizer()
 ls = LancasterStemmer()
 ENC_VOCAB_SIZE = 500000
 DEC_VOCAB_SIZE = 100000
+NUM_WORKERS = multiprocessing.cpu_count() * 2
 
 END_TOKENS = ['.', '!', '?', '...', "'", "`", '"', ")"]
 
@@ -48,7 +51,7 @@ dec_must_include = ['[pad]', '[unk]', '[stop]', '[start]']
 # fi = open('./data/dptest.txt', encoding='unicode_escape')
 
 pattern = r"""
-NP: {<DT|PRP\$|CD>?<JJ.?>*(<NN|NNS>|<NE>|<NNP.*>+)}
+NP: {<DT|PRP\$|CD>?<JJ.?>*(<NN|NNS>|<NE>|<NNP.?>+)}
     {<NN.?>+(<POS>|')<JJ.?>?<NN.?>}
 VBD: {<VBD>}
 IN: {<IN>}
@@ -113,7 +116,8 @@ def fix_missing_period(line):
   return line + " ."
 
 
-def cut_sent(line, is_debug=False):
+@timeit
+def cut_sent(line, is_debug=False, log_time=0):
     """
     TODO: combining the existing tools may be better
     """
@@ -141,7 +145,8 @@ def cut_sent(line, is_debug=False):
         return sents
 
 
-def pos_repos_tag(tagged_sents, is_debug=0):
+@timeit
+def pos_repos_tag(tagged_sents, is_debug=0, log_time=0):
     """
     pos retag according to the ner tag, the named entity are tagged as <NE>
     """
@@ -206,7 +211,8 @@ def traverse_tree(tree, depth=float('inf'), is_debug=0):
             yield leaves
 
 
-def index_sent_phrase_no(retagged_sents, scored_sents, is_debug=0):
+@timeit
+def index_sent_phrase_no(retagged_sents, scored_sents, is_debug=0, log_time=0):
     # original_word, pos_tag, named entity, tfidf, phrase_index, sentence_index
     info_sents = []
     start = -1
@@ -222,10 +228,10 @@ def index_sent_phrase_no(retagged_sents, scored_sents, is_debug=0):
             zip(phrase_mark, [i]*len(phrase_mark), scored_sent)))
         info_sents.append(info_sent)
         if is_debug:
-            debug_line('orig retagged_sent', retagged_sent)
-            debug_line('chunked', str(chunked), 'red')
-            debug_line('scored sent', scored_sent)
-            debug_line('index', str(info_sent))
+            # debug_line('orig retagged_sent', retagged_sent)
+            # debug_line('chunked', str(chunked), 'red')
+            # debug_line('scored sent', scored_sent)
+            debug_line('indexed and pos words removed', str(info_sent))
         assert len(phrase_mark) == len(scored_sent), "num of phrase marks %s != num of original items %s\n. \nSomething wrong may happened in retagging. in %sth sentence" % (len(phrase_mark), len(scored_sent), i)
         start = max(phrase_mark)
         if is_debug:
@@ -233,7 +239,8 @@ def index_sent_phrase_no(retagged_sents, scored_sents, is_debug=0):
     return info_sents
 
 
-def make_vocab(enc_vocab_counter, dec_vocab_counter):
+@timeit
+def make_vocab(enc_vocab_counter, dec_vocab_counter, log_time=0):
     print("Writing vocab file...")
     enc_vocab_counter.pop("", "null exists")
     dec_vocab_counter.pop("", "null exists")
@@ -270,7 +277,8 @@ def list_duplicates(seq):
     return list(seen_twice)
 
 
-def process_vocab(enc_vocab_file, dec_vocab_file, enc_vocab_size, dec_vocab_size):
+@timeit
+def process_vocab(enc_vocab_file, dec_vocab_file, enc_vocab_size, dec_vocab_size, log_time=0):
     missed_words = 0
     missed = open(join(finished_files_dir, 'missedfromenc.txt'), 'w', 'utf-8')
     enc_words = [line.strip().split(" ")[0]
@@ -327,7 +335,8 @@ def bytes2unicode(line, is_debug=False):
     return line
 
 
-def map_tfidf(tagged_sents, normalized_sents, is_debug=0):
+@timeit
+def map_tfidf(tagged_sents, normalized_sents, is_debug=0, log_time=0):
     # http://www.davidsbatista.net/blog/2018/02/28/TfidfVectorizer/
     tfidf.fit(normalized_sents)
     vocab = tfidf.vocabulary_
@@ -364,7 +373,8 @@ def word_normalize(tagged_sents, is_debug=False):
     return normalized_sents
 
 
-def tokenize_add_prio(sents, is_debug=False):
+@timeit
+def tokenize_add_prio(sents, is_debug=False, log_time=0):
 
     tagged_sents = []
     tokenized_sents = [list(tokenize(sent)) for sent in sents]
@@ -394,34 +404,36 @@ def tokenize_add_prio(sents, is_debug=False):
     return sents_pos, tagged_sents
 
 
-def process_title(title, is_debug=False):
-    if 'u_n_k' in title:
-        return title, None
-    else:
-        title = title.replace("''", '"')
-        title = list(tokenize(title))
-        if is_debug:
-            debug_line("tokenized title", str(title))
-        title_pos = pos_tagger.tag(title)
-        if is_debug:
-            debug_line("pos tagged title", str(title_pos))
-        title_ner = ner_tagger.tag(title)
-        if is_debug:
-            debug_line("ner tagged title", str(title_ner))
-        case = 1
-        lowercased = []
-        for p, n in zip(title_pos, title_ner):
-            if case and p[0].isalpha() and (p[1] not in ['NNP', 'NNPS'] or n[1] == "O"):
-                lowercased.append(p[0].lower())
-                case = 0
-            elif case and (p[1] in ['NNP', 'NNPS'] or n[1] != "O"):
-                lowercased.append(p[0])
-                case = 0
+@timeit
+def process_title(title, uppercased, is_debug=False, log_time=0):
+    title = title.replace("''", '"')
+    tokenized_title = list(tokenize(title))
+    if is_debug:
+        debug_line("tokenized title", tokenized_title)
+        debug_line("uppercased", uppercased)
+
+    title_pos = pos_tagger.tag(tokenized_title)
+    if is_debug:
+        debug_line("pos tagged title", str(title_pos))
+    title_ner = ner_tagger.tag(tokenized_title)
+    if is_debug:
+        debug_line("ner tagged title", str(title_ner))
+    lowercased = []
+    for p, n, t in zip(title_pos, title_ner, tokenized_title):
+        if t[0].isupper() and t.isalpha() and (p[1] in ['NNP', 'NNPS'] or n[1] != "O"):
+            if t in uppercased:
+                if is_debug:
+                    debug_line("upcase", t)
+                lowercased.append(t)
             else:
-                lowercased.append(p[0])
-        if is_debug:
-            debug_line("lower cased title", str(title))
-    return title, True
+                if is_debug:
+                    debug_line("lowered", t)
+                lowercased.append(t.lower())
+        else:
+            lowercased.append(t.lower())
+    if is_debug:
+        debug_line("lower cased title", str(lowercased))
+    return lowercased
 
 
 def delete_unk_sents(sents):
@@ -469,23 +481,30 @@ def get_pairs_from_corpus(in_file, is_debug=0):
         line = bytes2unicode(line)
         _id, title, content = load_json(line)
 
-        title, state = process_title(title, is_debug=0)
-
-        if not state:
+        if 'u_n_k' in title:
             illegal.write(title + '\n' + content + "\n\n")
             illegal_num += 1
             illegal.flush()
             continue
+
         sents = cut_sent(content, is_debug=0)
         # sents = delete_unk_sents(sents, is_debug=True)
 
         # sents = sent_filter(sents, debug=False)
 
         sents_pos, tagged_sents = tokenize_add_prio(sents, is_debug=0)
+        # the tokenized original words are lowercased if needed
         # tagged_sents: pos_tag_word, original word, pos_tag, named entity
 
+        uppercased = set(filter(
+            lambda x: x[0].isupper(),
+            map(
+                lambda x: x[1], chain.from_iterable(tagged_sents)
+            )))
+        title = process_title(title, list(uppercased), is_debug=0)
+
         # normalized words only for tfidf scores
-        normalized_sents = word_normalize(tagged_sents, is_debug=0)
+        normalized_sents = word_normalize(tagged_sents, is_debug=0, log_time=1)
         # lemmatized and stemmed word, all lowered, stopwords
         # are kept
 
@@ -502,6 +521,8 @@ def get_pairs_from_corpus(in_file, is_debug=0):
         infor_content = list(chain.from_iterable(indexed_sents))
 
         if is_debug:
+            debug_line("title", str(title))
+            debug_line("infor_content", str(infor_content))
             input('\n\n')
         lines_count += 1
         if lines_count % frequency == 0:
@@ -511,6 +532,8 @@ def get_pairs_from_corpus(in_file, is_debug=0):
 
 
 def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0):
+    start = time.time()
+    sample_count = 0
     out_file = join(finished_files_dir, out_file)
     print('parse corpus from %s to %s' % (in_file, out_file))
     if makevocab:
@@ -522,7 +545,8 @@ def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0
 
     writer = open(out_file + "_" + str(file_num), 'w', 'utf-8')
 
-    for title, infor_content in get_pairs_from_corpus(in_file, is_debug=0):
+    for title, infor_content in get_pairs_from_corpus(in_file, is_debug=1):
+        sample_count += 1
         if is_debug:
             debug_line('title written', str(title))
         original_words, pos_tags, ner_tags, tfidf_scores, phrase_indices, sent_indices = zip(*infor_content)
@@ -553,10 +577,10 @@ def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0
         # write vocab to file
         make_vocab(enc_vocab_counter, dec_vocab_counter)
 
+    spent = time.time() - start
+    print('finished, %s munites spent, %s seconds per sample' % (str(spent/60), spent/sample_count))
+
 
 if __name__ == '__main__':
     in_file = './data/dptest.txt'
-    start = time.time()
     write_to_text(in_file, "temp", is_debug=0)
-    spent = time.time() - start
-    print('finished, %s munites spent' % str(spent/60))

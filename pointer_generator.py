@@ -122,6 +122,8 @@ class PointerGenerator(object):
             k_rewards_ls = tf.unstack(self.k_rewards, axis=0)
 
             with tf.variable_scope('embeddings'):
+                self.shared_embeddings = tf.get_variable(
+                    'enc_embeddings', [self._enc_vocab.size(), hps.word_emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
                 self.enc_embeddings = tf.get_variable(
                     'enc_embeddings', [self._enc_vocab.size(), hps.word_emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
                 self.dec_embeddings = tf.get_variable(
