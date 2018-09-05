@@ -22,7 +22,7 @@ from __future__ import division
 import random
 import Queue
 from random import shuffle
-from termcolor import colored
+# from termcolor import colored
 from threading import Thread
 import time
 import numpy as np
@@ -31,7 +31,6 @@ import data
 import gzip
 import os
 from collections import defaultdict as dd
-from cntk.tokenizer import text2charlist
 from codecs import open
 from utils import red_assert, red_print
 
