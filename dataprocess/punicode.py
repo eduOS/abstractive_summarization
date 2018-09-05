@@ -5,7 +5,6 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 
-from nltk.parse.corenlp import CoreNLPParser
 from unidecode import unidecode
 # from codecs import open
 import collections
@@ -19,12 +18,20 @@ import re
 import unicodedata
 import time
 from itertools import chain
+
 import nltk
 from utils import timeit
 from nltk.tree import Tree
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from nltk.stem import LancasterStemmer
 from nltk.corpus import stopwords
+from nltk.parse.corenlp import CoreNLPParser
+
+# for spacy
+from spacy.en import English, LOCAL_DATA_DIR
+import spacy.en
+import os
+
 import string
 from sklearn.feature_extraction.text import TfidfVectorizer
 import multiprocessing
@@ -382,15 +389,24 @@ def word_normalize(tagged_sents, is_debug=False, log_time=0):
     return normalized_sents
 
 
+def tagging(tokenized_sents, tag_type='corenlp', is_debug=0, log_time=0):
+    if tag_type == "corenlp":
+        sents_pos = [pos_tagger.tag(sent) for sent in tokenized_sents]
+        # TODO: only a limited ner classes to speed up the process
+        sents_ner = [ner_tagger.tag(sent) for sent in tokenized_sents]
+    elif tag_type == 'spacy':
+        pass
+
+    return sents_pos, sents_ner
+
+
 @timeit
 def tokenize_add_prio(sents, is_debug=False, log_time=0):
 
     tagged_sents = []
     # these three cost most of the time
     tokenized_sents = [list(tokenize(sent)) for sent in sents]
-    sents_pos = [pos_tagger.tag(sent) for sent in tokenized_sents]
-    # TODO: only a limited ner classes to speed up the process
-    sents_ner = [ner_tagger.tag(sent) for sent in tokenized_sents]
+    sents_pos, sents_ner = tagging(tokenized_sents, tag_type="corenlp", is_debug=0, log_time=1)
 
     if is_debug:
         for sent in tokenized_sents:
