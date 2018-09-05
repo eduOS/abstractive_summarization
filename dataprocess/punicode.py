@@ -353,7 +353,16 @@ def map_tfidf(tagged_sents, normalized_sents, is_debug=0, log_time=0):
     return scored_sents
 
 
-def word_normalize(tagged_sents, is_debug=False):
+def lemma_and_stem(tagged_sent):
+    wnled = [port.stem(wnl.lemmatize(w, pos='a' if p[0].lower() == 'j' else p[0].lower()))
+             if p[0].lower() in ['j', 'r', 'n', 'v'] and p not in ["NNPS", "NNP"] and w not in stopwords else w
+             for w, p in list(map(lambda x: (x[1], x[2]), tagged_sent))]
+    assert len(tagged_sent) == len(wnled), "word_normalize: tagged length %s should be equal of standarded len %s\n%s\n%s" % (len(tagged_sent), len(wnled), str(tagged_sent), str(wnled))
+    return wnled
+
+
+@timeit
+def word_normalize(tagged_sents, is_debug=False, log_time=0):
     normalized_sents = []
     for tagged_sent in tagged_sents:
         # ported = [port.stem(i) for i in list(map(lambda x: x[0], tagged_sent))]
@@ -377,9 +386,17 @@ def word_normalize(tagged_sents, is_debug=False):
 def tokenize_add_prio(sents, is_debug=False, log_time=0):
 
     tagged_sents = []
+    # these three cost most of the time
     tokenized_sents = [list(tokenize(sent)) for sent in sents]
     sents_pos = [pos_tagger.tag(sent) for sent in tokenized_sents]
+    # TODO: only a limited ner classes to speed up the process
     sents_ner = [ner_tagger.tag(sent) for sent in tokenized_sents]
+
+    if is_debug:
+        for sent in tokenized_sents:
+            if len(sent) > 70:
+                debug_line('len longer than 70', " ".join(sent), 'red')
+
     for sp, sn, st in zip(sents_pos, sents_ner, tokenized_sents):
         assert len(sp) == len(sn), "tokenize_add_prio: pos and ner length should be the same, but %s and %s, \n%s\n%s" % (str(sp), str(sn), len(sn), len(sn))
         mapped = []
@@ -399,7 +416,7 @@ def tokenize_add_prio(sents, is_debug=False, log_time=0):
         if is_debug:
             debug_line("sent pos", str(sp))
             debug_line("sent ner", str(sn))
-            debug_line("sent combined", str(mapped), 'red')
+            debug_line("sent combined", str(mapped))
             input('\n')
     return sents_pos, tagged_sents
 
@@ -487,12 +504,12 @@ def get_pairs_from_corpus(in_file, is_debug=0):
             illegal.flush()
             continue
 
-        sents = cut_sent(content, is_debug=0)
+        sents = cut_sent(content, is_debug=0, log_time=1)
         # sents = delete_unk_sents(sents, is_debug=True)
 
         # sents = sent_filter(sents, debug=False)
 
-        sents_pos, tagged_sents = tokenize_add_prio(sents, is_debug=0)
+        sents_pos, tagged_sents = tokenize_add_prio(sents, is_debug=0, log_time=1)
         # the tokenized original words are lowercased if needed
         # tagged_sents: pos_tag_word, original word, pos_tag, named entity
 
@@ -501,7 +518,7 @@ def get_pairs_from_corpus(in_file, is_debug=0):
             map(
                 lambda x: x[1], chain.from_iterable(tagged_sents)
             )))
-        title = process_title(title, list(uppercased), is_debug=0)
+        title = process_title(title, list(uppercased), is_debug=0, log_time=1)
 
         # normalized words only for tfidf scores
         normalized_sents = word_normalize(tagged_sents, is_debug=0, log_time=1)
@@ -509,13 +526,13 @@ def get_pairs_from_corpus(in_file, is_debug=0):
         # are kept
 
         # debug_line('the origin sent changed?', str(tagged_sents))
-        scored_sents = map_tfidf(tagged_sents, normalized_sents, is_debug=0)
+        scored_sents = map_tfidf(tagged_sents, normalized_sents, is_debug=0, log_time=1)
         # pos_tag_word, original word, pos_tag, named entity, tfidf
 
-        ner_pos_tagged_sents = pos_repos_tag(tagged_sents, is_debug=0)
+        ner_pos_tagged_sents = pos_repos_tag(tagged_sents, is_debug=0, log_time=1)
         # repos_tag_word, repos_tag
 
-        indexed_sents = index_sent_phrase_no(ner_pos_tagged_sents, scored_sents, is_debug=0)
+        indexed_sents = index_sent_phrase_no(ner_pos_tagged_sents, scored_sents, is_debug=0, log_time=1)
         # original_word, pos_tag, named entity, tfidf, phrase_index, sentence_index
 
         infor_content = list(chain.from_iterable(indexed_sents))
@@ -531,7 +548,8 @@ def get_pairs_from_corpus(in_file, is_debug=0):
         yield title, infor_content
 
 
-def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0):
+@timeit
+def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0, log_time=0):
     start = time.time()
     sample_count = 0
     out_file = join(finished_files_dir, out_file)
@@ -545,7 +563,7 @@ def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0
 
     writer = open(out_file + "_" + str(file_num), 'w', 'utf-8')
 
-    for title, infor_content in get_pairs_from_corpus(in_file, is_debug=1):
+    for title, infor_content in get_pairs_from_corpus(in_file, is_debug=0):
         sample_count += 1
         if is_debug:
             debug_line('title written', str(title))
@@ -575,7 +593,7 @@ def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0
     writer.close()
     if makevocab:
         # write vocab to file
-        make_vocab(enc_vocab_counter, dec_vocab_counter)
+        make_vocab(enc_vocab_counter, dec_vocab_counter, log_time=1)
 
     spent = time.time() - start
     print('finished, %s munites spent, %s seconds per sample' % (str(spent/60), spent/sample_count))
@@ -583,4 +601,4 @@ def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0
 
 if __name__ == '__main__':
     in_file = './data/dptest.txt'
-    write_to_text(in_file, "temp", is_debug=0)
+    write_to_text(in_file, "temp", is_debug=0, log_time=1)

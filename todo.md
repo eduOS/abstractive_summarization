@@ -60,6 +60,7 @@
   * TODO: to test if puncs can be removed, to see if it can affect the score
   * TODO: the generated first character doesn't need to be upcased, upcase it afterwards
   * remove \uac mess by hand
+  * tokenize and tag ahead 
 
 ## steps
   * divide sentences

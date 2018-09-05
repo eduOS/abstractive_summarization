@@ -3,6 +3,7 @@
 from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
+from termcolor import colored
 
 # from cntk.tokenizer import JiebaTokenizer
 # from cntk.cleanser import Cleanser
@@ -34,7 +35,9 @@ def timeit(method):
         result = method(*args, **kw)
         te = time.time()
         if 'log_time' in kw and kw['log_time']:
-            print('%r  %2.2f ms' %
-                  (method.__name__, (te - ts) * 1000))
+            if te - ts > 1:
+                print(colored('%r  %2.2f ms' % (method.__name__, (te - ts) * 1000), 'red'))
+            else:
+                print('%r  %2.2f ms' % (method.__name__, (te - ts) * 1000))
         return result
     return timed
