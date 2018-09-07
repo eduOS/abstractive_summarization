@@ -8,7 +8,7 @@ from __future__ import division
 # from codecs import open
 import collections
 import json
-from utils import read_origin, bytes2unicode, cut_sent, load_json, colored
+from utils import read_origin, bytes2unicode, prep_cut_sent, load_json, colored
 from codecs import open
 import os
 from os.path import join
@@ -22,6 +22,7 @@ import pymongo
 import nltk
 from utils import timeit
 from nltk.tree import Tree
+from nltk.corpus import wordnet as wn
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from nltk.stem import LancasterStemmer
 from nltk.corpus import stopwords
@@ -32,9 +33,6 @@ import spacy
 import string
 from sklearn.feature_extraction.text import TfidfVectorizer
 import multiprocessing
-port = PorterStemmer()
-wnl = WordNetLemmatizer()
-ls = LancasterStemmer()
 ENC_VOCAB_SIZE = 500000
 DEC_VOCAB_SIZE = 100000
 NUM_WORKERS = multiprocessing.cpu_count() * 2
@@ -65,14 +63,10 @@ nlp = spacy.load('en')
 @timeit
 def toConll(tokenize, pos_tagger, ner_tagger, sents, log_time=0):
 
-    tokenized_sents = [list(tokenize(sent)) for sent in sents]
     for sent in tokenized_sents:
         if len(sent) > 80:
             sent
 
-    sents_pos = [pos_tagger.tag(sent) for sent in tokenized_sents]
-    # TODO: only a limited ner classes to speed up the process
-    sents_ner = [ner_tagger.tag(sent) for sent in tokenized_sents]
 
     # a = []
     # for i, sent in enumerate(sents):
@@ -87,7 +81,7 @@ def dummy_fun(doc):
 
 stopwords = stopwords.words('english') + list(string.punctuation)
 
-tfidf = TfidfVectorizer(stop_words=stopwords, analyzer='word', tokenizer=dummy_fun, preprocessor=dummy_fun, token_pattern=None)
+
 
 
 def debug_list(list_text, file_name):
@@ -104,7 +98,6 @@ def fix_missing_period(line):
   return line + " ."
 
 
-@timeit
 def pos_repos_tag(tagged_sents, is_debug=0, log_time=0):
     """
     pos retag according to the ner tag, the named entity are tagged as <NE>
@@ -170,7 +163,6 @@ def traverse_tree(tree, depth=float('inf'), is_debug=0):
             yield leaves
 
 
-@timeit
 def index_sent_phrase_no(retagged_sents, scored_sents, is_debug=0, log_time=0):
     # original_word, pos_tag, named entity, tfidf, phrase_index, sentence_index
     info_sents = []
@@ -191,14 +183,14 @@ def index_sent_phrase_no(retagged_sents, scored_sents, is_debug=0, log_time=0):
             # debug_line('chunked', str(chunked), 'red')
             # debug_line('scored sent', scored_sent)
             debug_line('indexed and pos words removed', str(info_sent))
-        assert len(phrase_mark) == len(scored_sent), "num of phrase marks %s != num of original items %s\n. \nSomething wrong may happened in retagging. in %sth sentence" % (len(phrase_mark), len(scored_sent), i)
+        assert len(phrase_mark) == len(scored_sent), "num of phrase marks %s\n%s != num of original items %s\n%s\n. The retagged sent is %s; \nSomething wrong may happened in retagging. in %sth sentence" % (
+            len(phrase_mark), str(phrase_mark), len(scored_sent), str(scored_sent), str(retagged_sent), i)
         start = max(phrase_mark)
         if is_debug:
             input('\n\n')
     return info_sents
 
 
-@timeit
 def make_vocab(enc_vocab_counter, dec_vocab_counter, log_time=0):
     print("Writing vocab file...")
     enc_vocab_counter.pop("", "null exists")
@@ -279,8 +271,7 @@ def process_vocab(enc_vocab_file, dec_vocab_file, enc_vocab_size, dec_vocab_size
     print("Finished writing enc_vocab file")
 
 
-@timeit
-def map_tfidf(tagged_sents, normalized_sents, is_debug=0, log_time=0):
+def map_tfidf(tagged_sents, normalized_sents, tfidf, is_debug=0, log_time=0):
     # http://www.davidsbatista.net/blog/2018/02/28/TfidfVectorizer/
     tfidf.fit(normalized_sents)
     vocab = tfidf.vocabulary_
@@ -305,8 +296,7 @@ def lemma_and_stem(tagged_sent):
     return wnled
 
 
-@timeit
-def word_normalize(tagged_sents, is_debug=False, log_time=0):
+def word_normalize(tagged_sents, port, wnl, is_debug=False, log_time=0):
     normalized_sents = []
     for tagged_sent in tagged_sents:
         # ported = [port.stem(i) for i in list(map(lambda x: x[0], tagged_sent))]
@@ -326,13 +316,17 @@ def word_normalize(tagged_sents, is_debug=False, log_time=0):
     return normalized_sents
 
 
-@timeit
-def tokenize_add_prio(sents, is_debug=False, log_time=0):
+def tokenize_add_prio(sents, tokenize, pos_tagger, ner_tagger, is_debug=False, log_time=0):
 
     tagged_sents = []
     # these three cost most of the time
 
-    tokenized_sents, sents_ner, sents_pos = "something"
+    tokenized_sents = []
+    for sent in sents:
+        tokenized_sents.append(list(chain.from_iterable([tok.split(' ') for tok in tokenize(sent)])))
+    sents_pos = [pos_tagger.tag(sent) for sent in tokenized_sents]
+    # TODO: only a limited ner classes to speed up the process
+    sents_ner = [ner_tagger.tag(sent) for sent in tokenized_sents]
 
     if is_debug:
         for sent in tokenized_sents:
@@ -363,8 +357,7 @@ def tokenize_add_prio(sents, is_debug=False, log_time=0):
     return sents_pos, tagged_sents
 
 
-@timeit
-def process_title(title, uppercased, is_debug=False, log_time=0):
+def process_title(title, tokenize, pos_tagger, ner_tagger, uppercased, is_debug=False, log_time=0):
     title = title.replace("''", '"')
     tokenized_title = list(tokenize(title))
     if is_debug:
@@ -406,83 +399,91 @@ def sent_filter(sents, debug=False):
     sents = list(filter(lambda x: len(x) > 2, sents))
 
 
-def process(st=0):
+@timeit
+def process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, wnl, tfidf, log_time=0):
+    try:
+        triple = generator.next()
+    except TypeError:
+        print(colored('None object and break', 'red'))
+        return False
+    _id, title, content = triple['id_'], triple['orig_title'], triple['content_sents']
+    # sents = prep_cut_sent(content, is_debug=0, log_time=0)
+    sents = [sent.strip() for sent in content.split('\n') if len(sent.strip()) > 1]
+
+    # sents = delete_unk_sents(sents, is_debug=True)
+    # sents = sent_filter(sents, debug=False)
+
+    # the tokenized original words are lowercased if needed
+    sents_pos, tagged_sents = tokenize_add_prio(sents, tokenize, pos_tagger, ner_tagger, is_debug=0, log_time=1)
+    # tagged_sents: pos_tag_word, original word, pos_tag, named entity
+
+    uppercased = set(filter(
+        lambda x: x[0].isupper(),
+        map(
+            lambda x: x[1], chain.from_iterable(tagged_sents)
+        )))
+    title = process_title(title, tokenize, pos_tagger, ner_tagger, list(uppercased), is_debug=0, log_time=1)
+
+    # normalized words only for tfidf scores
+    normalized_sents = word_normalize(tagged_sents, port, wnl, is_debug=0, log_time=1)
+    # lemmatized and stemmed word, all lowered, stopwords
+    # are kept
+
+    # debug_line('the origin sent changed?', str(tagged_sents))
+    scored_sents = map_tfidf(tagged_sents, normalized_sents, tfidf, is_debug=0, log_time=1)
+    # pos_tag_word, original word, pos_tag, named entity, tfidf
+
+    ner_pos_tagged_sents = pos_repos_tag(tagged_sents, is_debug=0, log_time=1)
+    # repos_tag_word, repos_tag
+
+    indexed_sents = index_sent_phrase_no(ner_pos_tagged_sents, scored_sents, is_debug=0, log_time=1)
+    # original_word, pos_tag, named entity, tfidf, phrase_index, sentence_index
+
+    infor_content = list(chain.from_iterable(indexed_sents))
+    original_words, pos_tags, ner_tags, tfidf_scores, phrase_indices, sent_indices = zip(*infor_content)
+    mydb.bytecup_2018.update_many(
+        {"_id": _id},
+        {
+            "$set": {
+                "original_words": original_words,
+                "pos_tags": pos_tags,
+                "ner_tags": ner_tags,
+                "tfidf_scores": tfidf_scores,
+                "phrase_indices": phrase_indices,
+                "sent_indices": sent_indices,
+            }
+        }, upsert=False)
+    return True
+
+
+def processor(st=0, is_debug=0, log_time=0):
     tokenize = CoreNLPParser(url='http://localhost:9000').tokenize
     pos_tagger = CoreNLPParser(url='http://localhost:9000', tagtype='pos')
     ner_tagger = CoreNLPParser(url='http://localhost:9000', tagtype='ner')
+    tfidf = TfidfVectorizer(stop_words=stopwords, analyzer='word', tokenizer=dummy_fun, preprocessor=dummy_fun, token_pattern=None)
+
+    port = PorterStemmer()
+    wnl = WordNetLemmatizer()
+    # ls = LancasterStemmer()
 
     myclient = pymongo.MongoClient("mongodb://localhost:27017/")
     mydb = myclient["mydatabase"]
-    generator = mydb.bytecup2018.find({"id_": {"$gt": st, "$lt": st+50000}})
-    lines_count = 0
+    generator = mydb.bytecup_2018.find({"id_": {"$gt": st, "$lt": st+50000}})
     while(True):
-        try:
-            triple = generator.next()
-        except TypeError:
-            print(colored('None object and break'))
+        state = process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, wnl, tfidf, log_time=2)
+        if not state:
             break
-        _id, title, content = triple['id_'], triple['orig_title'], triple['content_sents']
-        # if is_debug:
-        #     debug_line('content from mongodb', content)
-        #     input('\n')
-        sents = cut_sent(content, is_debug=0, log_time=0)
-        # sents = content.split('\n')
-
-        try:
-            toConll(tokenize, pos_tagger, ner_tagger, sents, log_time=2)
-            lines_count += 1
-        except:
-            print(lines_count)
-            print(str(sents))
-            raise
-        # sents = delete_unk_sents(sents, is_debug=True)
-
-        # sents = sent_filter(sents, debug=False)
-
-        # sents_pos, tagged_sents = tokenize_add_prio(sents, is_debug=0, log_time=1)
-        # the tokenized original words are lowercased if needed
-        # tagged_sents: pos_tag_word, original word, pos_tag, named entity
-
-        # uppercased = set(filter(
-        #     lambda x: x[0].isupper(),
-        #     map(
-        #         lambda x: x[1], chain.from_iterable(tagged_sents)
-        #     )))
-        # title = process_title(title, list(uppercased), is_debug=0, log_time=1)
-
-        # normalized words only for tfidf scores
-        # normalized_sents = word_normalize(tagged_sents, is_debug=0, log_time=1)
-        # lemmatized and stemmed word, all lowered, stopwords
-        # are kept
-
-        # debug_line('the origin sent changed?', str(tagged_sents))
-        # scored_sents = map_tfidf(tagged_sents, normalized_sents, is_debug=0, log_time=1)
-        # pos_tag_word, original word, pos_tag, named entity, tfidf
-
-        # ner_pos_tagged_sents = pos_repos_tag(tagged_sents, is_debug=0, log_time=1)
-        # repos_tag_word, repos_tag
-
-        # indexed_sents = index_sent_phrase_no(ner_pos_tagged_sents, scored_sents, is_debug=0, log_time=1)
-        # original_word, pos_tag, named entity, tfidf, phrase_index, sentence_index
-
-        # infor_content = list(chain.from_iterable(indexed_sents))
-
-        # if lines_count % frequency == 0:
-            # print(lines_count)
-            # print(str(title))
-        # yield title, infor_content
 
 
-def process_pairs(fi=None, is_debug=0):
+def multi_process_corpus(fi=None, is_debug=0):
 
-    channels = list(range(0, 10**6, 50000))[:10]
+    channels = list(range(0, 10**6, 5000))[:20]
+    wn.ensure_loaded()
     threads = []
     for i in channels:
-        new_t = Thread(target=process, kwargs={"st": i})
+        new_t = Thread(target=processor, kwargs={"st": i})
         threads.append(new_t)
-        threads[-1].daemon = True
         threads[-1].start()
-        threads[-1].join()
         print(str(threads[-1]) + ' starts')
 
 
@@ -539,5 +540,5 @@ def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0
 
 if __name__ == '__main__':
     in_file = './data/bytecup.corpus.train.txt'
-    process_pairs()
+    multi_process_corpus()
     # write_to_text(in_file, "temp", is_debug=0, log_time=0)

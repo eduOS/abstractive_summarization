@@ -89,8 +89,7 @@ def load_json(line, is_debug=False):
     return _json['id'], _json['title'], _json['content']
 
 
-@timeit
-def cut_sent(line, max_sent_words=60, max_sents=90, is_debug=False, log_time=0):
+def prep_cut_sent(line, max_sent_words=60, max_sents=90, is_debug=False, log_time=0):
     """
     TODO: combining the existing tools may be better
     """
@@ -111,6 +110,8 @@ def cut_sent(line, max_sent_words=60, max_sents=90, is_debug=False, log_time=0):
         if len(sent) < 1:
             continue
         sp_sent = sent.split()
+        if sp_sent.count('u_n_k') > len(sp_sent) / 2:
+            continue
         if len(sp_sent) > max_sent_words:
             if is_debug:
                 debug_line("large sent", sent, 'red')

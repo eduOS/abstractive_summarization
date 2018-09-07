@@ -8,7 +8,7 @@ import numpy as np
 import glob
 import time
 from codecs import open
-from utils import read_origin, bytes2unicode, cut_sent, load_json, debug_line
+from utils import read_origin, bytes2unicode, prep_cut_sent, load_json, debug_line
 import pymongo
 
 data_path = "./data/*.txt_*"
@@ -74,7 +74,9 @@ def analyze(infile, is_debug=0):
 
         pas_len.append(len(content.split()))
         title_len.append(len(title.split()))
-        sents = cut_sent(content, is_debug=0, log_time=0)
+        sents = prep_cut_sent(content, is_debug=0, log_time=0)
+        if not sents:
+            continue
         sent_len.extend(list(map(lambda x: len(x.split()), sents)))
         pas_sen_len.append(len(sents))
         content_sents = "\n".join(sents)
