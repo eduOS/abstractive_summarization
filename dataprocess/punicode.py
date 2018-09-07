@@ -5,19 +5,19 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 
-from unidecode import unidecode
 # from codecs import open
 import collections
 import json
-from termcolor import colored
+from utils import read_origin, bytes2unicode, cut_sent, load_json, colored
 from codecs import open
 import os
 from os.path import join
-from nltk import sent_tokenize
 import re
-import unicodedata
 import time
+from threading import Thread
 from itertools import chain
+from utils import debug_line
+import pymongo
 
 import nltk
 from utils import timeit
@@ -28,10 +28,7 @@ from nltk.corpus import stopwords
 from nltk.parse.corenlp import CoreNLPParser
 
 # for spacy
-from spacy.en import English, LOCAL_DATA_DIR
-import spacy.en
-import os
-
+import spacy
 import string
 from sklearn.feature_extraction.text import TfidfVectorizer
 import multiprocessing
@@ -42,15 +39,12 @@ ENC_VOCAB_SIZE = 500000
 DEC_VOCAB_SIZE = 100000
 NUM_WORKERS = multiprocessing.cpu_count() * 2
 
+
 END_TOKENS = ['.', '!', '?', '...', "'", "`", '"', ")"]
 
 finished_files_dir = "./finished_files/"
 if not os.path.exists(finished_files_dir):
     os.makedirs(finished_files_dir)
-
-tokenize = CoreNLPParser(url='http://localhost:9000').tokenize
-pos_tagger = CoreNLPParser(url='http://localhost:9000', tagtype='pos')
-ner_tagger = CoreNLPParser(url='http://localhost:9000', tagtype='ner')
 
 enc_must_include = ['[pad]', '[unk]']
 dec_must_include = ['[pad]', '[unk]', '[stop]', '[start]']
@@ -65,6 +59,28 @@ IN: {<IN>}
 JJ: {<RB>?<JJ>}
 """
 
+nlp = spacy.load('en')
+
+
+@timeit
+def toConll(tokenize, pos_tagger, ner_tagger, sents, log_time=0):
+
+    tokenized_sents = [list(tokenize(sent)) for sent in sents]
+    for sent in tokenized_sents:
+        if len(sent) > 80:
+            sent
+
+    sents_pos = [pos_tagger.tag(sent) for sent in tokenized_sents]
+    # TODO: only a limited ner classes to speed up the process
+    sents_ner = [ner_tagger.tag(sent) for sent in tokenized_sents]
+
+    # a = []
+    # for i, sent in enumerate(sents):
+    #     doc = nlp(sent)
+    #     for word in enumerate(doc):
+    #         aoa = (word.text, word.tag_, word.ent_type_)
+    #         a.append(aoa)
+
 
 def dummy_fun(doc):
     return doc
@@ -72,41 +88,6 @@ def dummy_fun(doc):
 stopwords = stopwords.words('english') + list(string.punctuation)
 
 tfidf = TfidfVectorizer(stop_words=stopwords, analyzer='word', tokenizer=dummy_fun, preprocessor=dummy_fun, token_pattern=None)
-
-
-def my_repl(match):
-    # how can I add a parameter here?
-    uni = match.group('uni')
-    if uni:
-        if unicodedata.category(uni).startswith("P"):
-            # if color:
-            #     return colored("[" + unidecode(uni) + "]", color or 'green')
-            uni = unidecode(uni)
-            return "''" if uni == '"' else uni
-        else:
-            # if color:
-            #     return colored("[" + ' UNK ' + "]", color or 'green')
-            return ' u_n_k '
-
-
-def debug_line(tag, line, color="green"):
-    tag = colored(tag + ':', color)
-    default_len = 1500
-    if len(line) < 1000:
-        ipt = "f"
-        if tag:
-            print(colored(tag, 'yellow'))
-    else:
-        ipt = input(colored('input the char number to see ', 'yellow') + tag + colored(', f for all chars, default is %s: ' % default_len, 'yellow'))
-    # sys.stdout.write('\r')
-    if ipt == "f":
-        print(line)
-    elif not ipt:
-        print(line[:default_len], end="")
-        print("...")
-    elif ipt:
-        print(line[:int(ipt)], end="")
-        print("...")
 
 
 def debug_list(list_text, file_name):
@@ -121,35 +102,6 @@ def fix_missing_period(line):
   if line[-1] in END_TOKENS:
       return line
   return line + " ."
-
-
-@timeit
-def cut_sent(line, is_debug=False, log_time=0):
-    """
-    TODO: combining the existing tools may be better
-    """
-    if is_debug:
-        debug_line("have quote", line)
-    line = line.replace("''", '"')
-    if is_debug:
-        debug_line("replace quote", line)
-
-    sents = re.sub(r'''((?<![A-Z])\.(?=[A-Z][^.])|\.(?=([ '"]+|by))\)*|[;!?:]['"]*)|(?<![\d ])\.(?=\d\.?)''', r'\1\n', line).split('\n')
-    sents = [sent.strip() for sent in sents if len(sent.strip()) > 1]
-
-    if is_debug:
-        sents_ = sent_tokenize(line)
-        # failed when encountering ; l.U \n .by
-
-    if is_debug:
-        for sent in sents:
-            debug_line("my cut sent", sent)
-        input('\n\n')
-        for sent in sents_:  # noqa
-            debug_line('corenlp cut', sent)
-        input('\n\n')
-    else:
-        return sents
 
 
 @timeit
@@ -327,21 +279,6 @@ def process_vocab(enc_vocab_file, dec_vocab_file, enc_vocab_size, dec_vocab_size
     print("Finished writing enc_vocab file")
 
 
-def bytes2unicode(line, is_debug=False):
-    line = line.replace(b'\\"', b"''")
-    if is_debug:
-        debug_line('replaced "', line)
-
-    line = line.decode('unicode_escape', errors='ignore')
-    if is_debug:
-        debug_line('escape decoded unicode', line)
-
-    line = re.sub(pattern=r'(?P<uni>[^\x00-\x7f])', repl=my_repl, string=line)
-    if is_debug:
-        debug_line('unidecoded', line)
-    return line
-
-
 @timeit
 def map_tfidf(tagged_sents, normalized_sents, is_debug=0, log_time=0):
     # http://www.davidsbatista.net/blog/2018/02/28/TfidfVectorizer/
@@ -389,24 +326,13 @@ def word_normalize(tagged_sents, is_debug=False, log_time=0):
     return normalized_sents
 
 
-def tagging(tokenized_sents, tag_type='corenlp', is_debug=0, log_time=0):
-    if tag_type == "corenlp":
-        sents_pos = [pos_tagger.tag(sent) for sent in tokenized_sents]
-        # TODO: only a limited ner classes to speed up the process
-        sents_ner = [ner_tagger.tag(sent) for sent in tokenized_sents]
-    elif tag_type == 'spacy':
-        pass
-
-    return sents_pos, sents_ner
-
-
 @timeit
 def tokenize_add_prio(sents, is_debug=False, log_time=0):
 
     tagged_sents = []
     # these three cost most of the time
-    tokenized_sents = [list(tokenize(sent)) for sent in sents]
-    sents_pos, sents_ner = tagging(tokenized_sents, tag_type="corenlp", is_debug=0, log_time=1)
+
+    tokenized_sents, sents_ner, sents_pos = "something"
 
     if is_debug:
         for sent in tokenized_sents:
@@ -476,92 +402,88 @@ def delete_unk_sents(sents):
     return
 
 
-def read_origin(fi, is_debug=False):
-    line = fi.readline()
-    if not line:
-        return None
-    if is_debug:
-        debug_line('origin', line)
-    return line
-
-
 def sent_filter(sents, debug=False):
     sents = list(filter(lambda x: len(x) > 2, sents))
 
 
-def load_json(line, is_debug=False):
-    _json = json.loads(line, strict=False)
-    return _json['id'], _json['title'], _json['content']
+def process(st=0):
+    tokenize = CoreNLPParser(url='http://localhost:9000').tokenize
+    pos_tagger = CoreNLPParser(url='http://localhost:9000', tagtype='pos')
+    ner_tagger = CoreNLPParser(url='http://localhost:9000', tagtype='ner')
 
-
-def get_pairs_from_corpus(in_file, is_debug=0):
-    fi = open(in_file, 'rb')
+    myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+    mydb = myclient["mydatabase"]
+    generator = mydb.bytecup2018.find({"id_": {"$gt": st, "$lt": st+50000}})
     lines_count = 0
-    illegal_num = 0
-    illegal = open(join(finished_files_dir, 'illegal.txt'), 'w', 'utf-8')
-    if is_debug:
-        frequency = 5
-    else:
-        frequency = 50000
-
     while(True):
-        line = read_origin(fi, is_debug=0)
-        if not line:
-            illegal.write("\n\n" + str(illegal_num))
-            illegal.close()
+        try:
+            triple = generator.next()
+        except TypeError:
+            print(colored('None object and break'))
             break
+        _id, title, content = triple['id_'], triple['orig_title'], triple['content_sents']
+        # if is_debug:
+        #     debug_line('content from mongodb', content)
+        #     input('\n')
+        sents = cut_sent(content, is_debug=0, log_time=0)
+        # sents = content.split('\n')
 
-        line = bytes2unicode(line)
-        _id, title, content = load_json(line)
-
-        if 'u_n_k' in title:
-            illegal.write(title + '\n' + content + "\n\n")
-            illegal_num += 1
-            illegal.flush()
-            continue
-
-        sents = cut_sent(content, is_debug=0, log_time=1)
+        try:
+            toConll(tokenize, pos_tagger, ner_tagger, sents, log_time=2)
+            lines_count += 1
+        except:
+            print(lines_count)
+            print(str(sents))
+            raise
         # sents = delete_unk_sents(sents, is_debug=True)
 
         # sents = sent_filter(sents, debug=False)
 
-        sents_pos, tagged_sents = tokenize_add_prio(sents, is_debug=0, log_time=1)
+        # sents_pos, tagged_sents = tokenize_add_prio(sents, is_debug=0, log_time=1)
         # the tokenized original words are lowercased if needed
         # tagged_sents: pos_tag_word, original word, pos_tag, named entity
 
-        uppercased = set(filter(
-            lambda x: x[0].isupper(),
-            map(
-                lambda x: x[1], chain.from_iterable(tagged_sents)
-            )))
-        title = process_title(title, list(uppercased), is_debug=0, log_time=1)
+        # uppercased = set(filter(
+        #     lambda x: x[0].isupper(),
+        #     map(
+        #         lambda x: x[1], chain.from_iterable(tagged_sents)
+        #     )))
+        # title = process_title(title, list(uppercased), is_debug=0, log_time=1)
 
         # normalized words only for tfidf scores
-        normalized_sents = word_normalize(tagged_sents, is_debug=0, log_time=1)
+        # normalized_sents = word_normalize(tagged_sents, is_debug=0, log_time=1)
         # lemmatized and stemmed word, all lowered, stopwords
         # are kept
 
         # debug_line('the origin sent changed?', str(tagged_sents))
-        scored_sents = map_tfidf(tagged_sents, normalized_sents, is_debug=0, log_time=1)
+        # scored_sents = map_tfidf(tagged_sents, normalized_sents, is_debug=0, log_time=1)
         # pos_tag_word, original word, pos_tag, named entity, tfidf
 
-        ner_pos_tagged_sents = pos_repos_tag(tagged_sents, is_debug=0, log_time=1)
+        # ner_pos_tagged_sents = pos_repos_tag(tagged_sents, is_debug=0, log_time=1)
         # repos_tag_word, repos_tag
 
-        indexed_sents = index_sent_phrase_no(ner_pos_tagged_sents, scored_sents, is_debug=0, log_time=1)
+        # indexed_sents = index_sent_phrase_no(ner_pos_tagged_sents, scored_sents, is_debug=0, log_time=1)
         # original_word, pos_tag, named entity, tfidf, phrase_index, sentence_index
 
-        infor_content = list(chain.from_iterable(indexed_sents))
+        # infor_content = list(chain.from_iterable(indexed_sents))
 
-        if is_debug:
-            debug_line("title", str(title))
-            debug_line("infor_content", str(infor_content))
-            input('\n\n')
-        lines_count += 1
-        if lines_count % frequency == 0:
-            print(lines_count)
-            print(str(title))
-        yield title, infor_content
+        # if lines_count % frequency == 0:
+            # print(lines_count)
+            # print(str(title))
+        # yield title, infor_content
+
+
+def process_pairs(fi=None, is_debug=0):
+
+    channels = list(range(0, 10**6, 50000))[:10]
+    threads = []
+    for i in channels:
+        new_t = Thread(target=process, kwargs={"st": i})
+        threads.append(new_t)
+        threads[-1].daemon = True
+        threads[-1].start()
+        threads[-1].join()
+        print(str(threads[-1]) + ' starts')
 
 
 @timeit
@@ -579,7 +501,7 @@ def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0
 
     writer = open(out_file + "_" + str(file_num), 'w', 'utf-8')
 
-    for title, infor_content in get_pairs_from_corpus(in_file, is_debug=0):
+    for title, infor_content in process_pairs():
         sample_count += 1
         if is_debug:
             debug_line('title written', str(title))
@@ -616,5 +538,6 @@ def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0
 
 
 if __name__ == '__main__':
-    in_file = './data/dptest.txt'
-    write_to_text(in_file, "temp", is_debug=0, log_time=1)
+    in_file = './data/bytecup.corpus.train.txt'
+    process_pairs()
+    # write_to_text(in_file, "temp", is_debug=0, log_time=0)

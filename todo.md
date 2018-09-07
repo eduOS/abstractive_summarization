@@ -19,6 +19,14 @@
 * noise should be injected to the labels 
 
 # data processing
+## data stats:
+558 words per passage on average, the std variation is 405
+33 sentences per passage on average, the std variation is 28
+17 words per sentence on average, the std variation is 12
+
+The unique sample size: 709540
+
+
 ## preprocessing
 
   * replace unprintable characters with space
@@ -51,6 +59,9 @@
     https://arxiv.org/pdf/1209.3126v1.pdf
   * [x] embedding: lemmatization + a_small_num * []. don't relate the lemmatization to embedding
   * use google embedding
+  * in validation max_len can be ignored which are employed in training
+  * TODO: find the unique corpus, many samples are duplicated [check]
+  * TODO: train with the daily mail and cnn dataset
 
 ### unicode problem
   * abandon those lines of which the abstract contain non-English, because the non-english characters in validation set are only chinese puncs and some chars of non sense. 
