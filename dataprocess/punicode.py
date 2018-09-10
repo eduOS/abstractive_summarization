@@ -18,6 +18,7 @@ from threading import Thread
 from itertools import chain
 from utils import debug_line
 import pymongo
+from six.moves import queue as Queue
 
 import nltk
 from utils import timeit
@@ -29,13 +30,14 @@ from nltk.corpus import stopwords
 from nltk.parse.corenlp import CoreNLPParser
 
 # for spacy
-import spacy
 import string
 from sklearn.feature_extraction.text import TfidfVectorizer
 import multiprocessing
 ENC_VOCAB_SIZE = 500000
 DEC_VOCAB_SIZE = 100000
-NUM_WORKERS = multiprocessing.cpu_count() * 2
+NUM_WORKERS = multiprocessing.cpu_count()
+# NUM_WORKERS = 1
+queue = Queue.Queue()
 
 
 END_TOKENS = ['.', '!', '?', '...', "'", "`", '"', ")"]
@@ -57,31 +59,11 @@ IN: {<IN>}
 JJ: {<RB>?<JJ>}
 """
 
-nlp = spacy.load('en')
-
-
-@timeit
-def toConll(tokenize, pos_tagger, ner_tagger, sents, log_time=0):
-
-    for sent in tokenized_sents:
-        if len(sent) > 80:
-            sent
-
-
-    # a = []
-    # for i, sent in enumerate(sents):
-    #     doc = nlp(sent)
-    #     for word in enumerate(doc):
-    #         aoa = (word.text, word.tag_, word.ent_type_)
-    #         a.append(aoa)
-
 
 def dummy_fun(doc):
     return doc
 
 stopwords = stopwords.words('english') + list(string.punctuation)
-
-
 
 
 def debug_list(list_text, file_name):
@@ -109,7 +91,7 @@ def pos_repos_tag(tagged_sents, is_debug=0, log_time=0):
         current_sent = []
         continuous_chunk = []
 
-        for (pos_token, _, p_tag, n_tag) in tagged_sent:
+        for (pos_token, p_tag, n_tag) in tagged_sent:
             if n_tag != "O":
                 continuous_chunk.append(pos_token)
             else:
@@ -153,37 +135,45 @@ def traverse_tree(tree, depth=float('inf'), is_debug=0):
     for subtree in tree:
         if type(subtree) == Tree:
             if subtree.height() <= depth:
-                leaves = ' '.join(subtree.leaves()).split(' ')
-                yield list(map(lambda x: x.split('/')[0] if not is_debug else x, leaves))
+                leaves = subtree.leaves()
+                yield list(chain.from_iterable(list(map(lambda x: x[0].split(" "), leaves))))
                 traverse_tree(subtree)
         else:
             # the named entity should be separated
-            leaves = [leaf.split('/')[0] if not is_debug else leaf
-                      for leaf in subtree.split(" ")]
+            leaves = subtree[0].split(" ")
             yield leaves
 
 
-def index_sent_phrase_no(retagged_sents, scored_sents, is_debug=0, log_time=0):
+def index_sent_phrase_no(retagged_sents, scored_sents, NPChunker, is_debug=0, log_time=0):
     # original_word, pos_tag, named entity, tfidf, phrase_index, sentence_index
     info_sents = []
     start = -1
     for i, (retagged_sent, scored_sent) in enumerate(zip(retagged_sents, scored_sents)):
-        NPChunker = nltk.RegexpParser(pattern)
-        result = Tree.fromstring(str(NPChunker.parse(retagged_sent)))
+        try:
+            result = NPChunker.parse(retagged_sent)
+        except Exception as e:
+            print(str(retagged_sent))
+            print()
+            print(str(result))
+            print()
+            print(e)
+            continue
         chunked = list(traverse_tree(result, 2, is_debug=0))
         phrase_mark = list(chain.from_iterable(
             [len(c)*[j+start+1]
              for j, c in enumerate(chunked)]))
         info_sent = list(map(
-            lambda pm_sm_ss: pm_sm_ss[2][1:] + (pm_sm_ss[0], pm_sm_ss[1]),
+            lambda pm_sm_ss: pm_sm_ss[2] + (pm_sm_ss[0], pm_sm_ss[1]),
             zip(phrase_mark, [i]*len(phrase_mark), scored_sent)))
         info_sents.append(info_sent)
         if is_debug:
-            # debug_line('orig retagged_sent', retagged_sent)
-            # debug_line('chunked', str(chunked), 'red')
-            # debug_line('scored sent', scored_sent)
-            debug_line('indexed and pos words removed', str(info_sent))
-        assert len(phrase_mark) == len(scored_sent), "num of phrase marks %s\n%s != num of original items %s\n%s\n. The retagged sent is %s; \nSomething wrong may happened in retagging. in %sth sentence" % (
+            debug_line('phrase mark', phrase_mark)
+            debug_line('orig retagged_sent', retagged_sent)
+            debug_line('chunked', chunked, 'red')
+            debug_line('scored sent', scored_sent)
+            debug_line('indexed', info_sent)
+        assert len(phrase_mark) == len(scored_sent), "num of phrase marks %s\n%s != num of original items %s\n%s\n. \
+            The retagged sent is %s; \nSomething wrong may happened in retagging. in %sth sentence" % (
             len(phrase_mark), str(phrase_mark), len(scored_sent), str(scored_sent), str(retagged_sent), i)
         start = max(phrase_mark)
         if is_debug:
@@ -288,22 +278,14 @@ def map_tfidf(tagged_sents, normalized_sents, tfidf, is_debug=0, log_time=0):
     return scored_sents
 
 
-def lemma_and_stem(tagged_sent):
-    wnled = [port.stem(wnl.lemmatize(w, pos='a' if p[0].lower() == 'j' else p[0].lower()))
-             if p[0].lower() in ['j', 'r', 'n', 'v'] and p not in ["NNPS", "NNP"] and w not in stopwords else w
-             for w, p in list(map(lambda x: (x[1], x[2]), tagged_sent))]
-    assert len(tagged_sent) == len(wnled), "word_normalize: tagged length %s should be equal of standarded len %s\n%s\n%s" % (len(tagged_sent), len(wnled), str(tagged_sent), str(wnled))
-    return wnled
-
-
 def word_normalize(tagged_sents, port, wnl, is_debug=False, log_time=0):
     normalized_sents = []
     for tagged_sent in tagged_sents:
         # ported = [port.stem(i) for i in list(map(lambda x: x[0], tagged_sent))]
         # lsed = [ls.stem(i) for i in list(map(lambda x: x[0], tagged_sent))]
         wnled = [port.stem(wnl.lemmatize(w, pos='a' if p[0].lower() == 'j' else p[0].lower()))
-                 if p[0].lower() in ['j', 'r', 'n', 'v'] and p not in ["NNPS", "NNP"] and w not in stopwords else w
-                 for w, p in list(map(lambda x: (x[1], x[2]), tagged_sent))]
+                 if p[0].lower() in ['j', 'r', 'n', 'v'] and w not in stopwords else w
+                 for w, p in list(map(lambda x: (x[0], x[1]), tagged_sent))]
         assert len(tagged_sent) == len(wnled), "word_normalize: tagged length %s should be equal of standarded len %s\n%s\n%s" % (len(tagged_sent), len(wnled), str(tagged_sent), str(wnled))
         normalized_sents.append(wnled)
 
@@ -321,9 +303,7 @@ def tokenize_add_prio(sents, tokenize, pos_tagger, ner_tagger, is_debug=False, l
     tagged_sents = []
     # these three cost most of the time
 
-    tokenized_sents = []
-    for sent in sents:
-        tokenized_sents.append(list(chain.from_iterable([tok.split(' ') for tok in tokenize(sent)])))
+    tokenized_sents = [list(tokenize(sent)) for sent in sents]
     sents_pos = [pos_tagger.tag(sent) for sent in tokenized_sents]
     # TODO: only a limited ner classes to speed up the process
     sents_ner = [ner_tagger.tag(sent) for sent in tokenized_sents]
@@ -334,18 +314,12 @@ def tokenize_add_prio(sents, tokenize, pos_tagger, ner_tagger, is_debug=False, l
                 debug_line('len longer than 70', " ".join(sent), 'red')
 
     for sp, sn, st in zip(sents_pos, sents_ner, tokenized_sents):
-        assert len(sp) == len(sn), "tokenize_add_prio: pos and ner length should be the same, but %s and %s, \n%s\n%s" % (str(sp), str(sn), len(sn), len(sn))
+        assert len(sp) == len(sn), (
+            "tokenize_add_prio: pos, ner and tokenized words length should be the same, but %s, %s, \n%s\n%s" % (len(sp), len(sn), str(sp), str(sn))
+        )
         mapped = []
-        case = 1
         for p, n, t in zip(sp, sn, st):
-            if case and t.isalpha() and (p[1] not in ['NNP', 'NNPS'] or n[1] == "O"):
-                mapped.append((p[0], t.lower(), p[1], n[1]))
-                case = 0
-            elif case and (p[1] in ['NNP', 'NNPS'] or n[1] != "O"):
-                mapped.append((p[0], t, p[1], n[1]))
-                case = 0
-            else:
-                mapped.append((p[0], t, p[1], n[1]))
+            mapped.append((p[0].lower(), p[1], n[1]))
 
         # original word, pos_tag, ner_tag
         tagged_sents.append(mapped)
@@ -370,19 +344,8 @@ def process_title(title, tokenize, pos_tagger, ner_tagger, uppercased, is_debug=
     title_ner = ner_tagger.tag(tokenized_title)
     if is_debug:
         debug_line("ner tagged title", str(title_ner))
-    lowercased = []
-    for p, n, t in zip(title_pos, title_ner, tokenized_title):
-        if t[0].isupper() and t.isalpha() and (p[1] in ['NNP', 'NNPS'] or n[1] != "O"):
-            if t in uppercased:
-                if is_debug:
-                    debug_line("upcase", t)
-                lowercased.append(t)
-            else:
-                if is_debug:
-                    debug_line("lowered", t)
-                lowercased.append(t.lower())
-        else:
-            lowercased.append(t.lower())
+
+    lowercased = list(map(lambda x: x.lower(), tokenized_title))
     if is_debug:
         debug_line("lower cased title", str(lowercased))
     return lowercased
@@ -400,7 +363,7 @@ def sent_filter(sents, debug=False):
 
 
 @timeit
-def process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, wnl, tfidf, log_time=0):
+def process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, wnl, tfidf, NPChunker, log_time=0):
     try:
         triple = generator.next()
     except TypeError:
@@ -436,7 +399,7 @@ def process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, 
     ner_pos_tagged_sents = pos_repos_tag(tagged_sents, is_debug=0, log_time=1)
     # repos_tag_word, repos_tag
 
-    indexed_sents = index_sent_phrase_no(ner_pos_tagged_sents, scored_sents, is_debug=0, log_time=1)
+    indexed_sents = index_sent_phrase_no(ner_pos_tagged_sents, scored_sents, NPChunker, is_debug=0, log_time=1)
     # original_word, pos_tag, named entity, tfidf, phrase_index, sentence_index
 
     infor_content = list(chain.from_iterable(indexed_sents))
@@ -461,6 +424,7 @@ def processor(st=0, is_debug=0, log_time=0):
     pos_tagger = CoreNLPParser(url='http://localhost:9000', tagtype='pos')
     ner_tagger = CoreNLPParser(url='http://localhost:9000', tagtype='ner')
     tfidf = TfidfVectorizer(stop_words=stopwords, analyzer='word', tokenizer=dummy_fun, preprocessor=dummy_fun, token_pattern=None)
+    NPChunker = nltk.RegexpParser(pattern)
 
     port = PorterStemmer()
     wnl = WordNetLemmatizer()
@@ -469,15 +433,15 @@ def processor(st=0, is_debug=0, log_time=0):
     myclient = pymongo.MongoClient("mongodb://localhost:27017/")
     mydb = myclient["mydatabase"]
     generator = mydb.bytecup_2018.find({"id_": {"$gt": st, "$lt": st+50000}})
+
     while(True):
-        state = process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, wnl, tfidf, log_time=2)
+        state = process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, wnl, tfidf, NPChunker, log_time=2)
         if not state:
             break
 
 
-def multi_process_corpus(fi=None, is_debug=0):
-
-    channels = list(range(0, 10**6, 5000))[:20]
+def multi_process_corpus(is_debug=0):
+    channels = list(range(0, 10**6, 5000))[:NUM_WORKERS]
     wn.ensure_loaded()
     threads = []
     for i in channels:
@@ -493,10 +457,6 @@ def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0
     sample_count = 0
     out_file = join(finished_files_dir, out_file)
     print('parse corpus from %s to %s' % (in_file, out_file))
-    if makevocab:
-        enc_vocab_counter = collections.Counter()
-        dec_vocab_counter = collections.Counter()
-
     file_num = 0
     length = 0
 
@@ -540,5 +500,5 @@ def write_to_text(in_file, out_file, max_length=10*5, makevocab=True, is_debug=0
 
 if __name__ == '__main__':
     in_file = './data/bytecup.corpus.train.txt'
-    multi_process_corpus()
+    multi_process_corpus(make_vocab)
     # write_to_text(in_file, "temp", is_debug=0, log_time=0)

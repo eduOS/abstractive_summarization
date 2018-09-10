@@ -65,6 +65,8 @@ def read_origin(fi, is_debug=False):
 
 
 def debug_line(tag, line, color="green"):
+    leng = str(len(line))
+    line = str(line)
     tag = colored(tag + ':', color)
     default_len = 1500
     if len(line) < 1000:
@@ -75,12 +77,12 @@ def debug_line(tag, line, color="green"):
         ipt = input(colored('input the char number to see ', 'yellow') + tag + colored(', f for all chars, default is %s: ' % default_len, 'yellow'))
     # sys.stdout.write('\r')
     if ipt == "f":
-        print(line)
+        print(line + "\t" + leng)
     elif not ipt:
-        print(line[:default_len], end="")
+        print(line[:default_len] + "\t" + leng, end="")
         print("...")
     elif ipt:
-        print(line[:int(ipt)], end="")
+        print(line[:int(ipt)] + "\t" + leng, end="")
         print("...")
 
 
