@@ -7,14 +7,13 @@ from __future__ import division
 
 # from codecs import open
 from collections import Counter
-import json
-from utils import read_origin, bytes2unicode, prep_cut_sent, load_json, colored
+# import json
+from utils import colored
 from codecs import open
 import os
-from os.path import join
-import re
+# from os.path import join
+# import re
 import time
-from multiprocessing import Process
 from threading import Thread
 from itertools import chain
 from utils import debug_line
@@ -26,12 +25,11 @@ from utils import timeit
 from nltk.tree import Tree
 from nltk.corpus import wordnet as wn
 from nltk.stem import PorterStemmer, WordNetLemmatizer
-from nltk.stem import LancasterStemmer
+# from nltk.stem import LancasterStemmer
 from nltk.corpus import stopwords
 from nltk.parse.corenlp import CoreNLPParser
 from pymongo.errors import CursorNotFound
 
-# for spacy
 import string
 from sklearn.feature_extraction.text import TfidfVectorizer
 import multiprocessing
@@ -228,6 +226,9 @@ def make_vocab(log_time=0):
     mydb = myclient["mydatabase"]
     enc_dict = dict(enc_vocab_counter)
     dec_dict = dict(dec_vocab_counter)
+    if list(mydb.bytecup_2018.find({"_id": "vocab_freq_dict"})):
+        mydb.bytecup_2018.remove({"_id": "vocab_freq_dict"})
+
     mydb.bytecup_2018.insert_one(
         {
             "_id": "vocab_freq_dict",
@@ -345,7 +346,10 @@ def process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, 
         return False
     except CursorNotFound:
         print(colored('cursor not found timeout error', 'red'))
-        return False
+        return "error"
+    except Exception as e:
+        print(e)
+        return "error"
     _id, title, content = triple['new_id'], triple['orig_title'], triple['content_sents']
     # sents = prep_cut_sent(content, is_debug=0, log_time=0)
     sents = content.split('\n')
@@ -420,7 +424,7 @@ def processor(st=0, ed=0, makevocab=0, is_debug=0, log_time=0):
             print(count)
             generator.close()
             break
-        else:
+        elif state != "error":
             count += 1
 
 
@@ -433,6 +437,7 @@ def multi_process_corpus(makevocab=0, is_debug=0):
     total_sample = int(total_sample / 10)
     width = int(total_sample/NUM_WORKERS)
     print("%s threads, %s samples for each" % (NUM_WORKERS, width))
+    generator.close()
 
     channels = list(range(0, total_sample, width))
     wn.ensure_loaded()
@@ -444,7 +449,7 @@ def multi_process_corpus(makevocab=0, is_debug=0):
         new_t = Thread(target=processor, kwargs={"st": st, 'ed': st+width, "makevocab": makevocab})
         threads.append(new_t)
         threads[-1].start()
-        print(str(threads[-1]) + ' starts(%s-%s)' % (st, st+width))
+        print(str(threads[-1]) + ' starts for sample %s-%s' % (st, st+width))
     print('start counting words')
     count_words()
     print('start making vocabulary')
