@@ -31,6 +31,7 @@ def analyze(infile, is_debug=0):
     illegal_length_file = open('illegal_length_log', 'w', 'utf-8')
     log_file = open('corpus_log', 'a', 'utf-8')
     pas_len = []
+    new_id = 0
     lines = 0
     sent_len = []
     pas_sen_len = []
@@ -57,7 +58,7 @@ def analyze(infile, is_debug=0):
 
         line = bytes2unicode(ori_line)
         try:
-            id_, title, content = load_json(line)
+            old_id, title, content = load_json(line)
         except:
             json_illegal_num += 1
             json_illegal_file.write(str(ori_line.decode('utf-8')))
@@ -81,7 +82,7 @@ def analyze(infile, is_debug=0):
         pas_sen_len.append(len(sents))
         content_sents = "\n".join(sents)
         if len(content_sents) < len(content) / 2:
-            illegal_length_file.write("\n\n---" + str(id_) + "---" + title + "\n" + content + "\n" + content_sents + "------\n\n")
+            illegal_length_file.write("\n\n---" + str(old_id) + "---" + title + "\n" + content + "\n" + content_sents + "------\n\n")
             illegal_length += 1
         # debug_line('content_sents', content_sents)
         _id = hash(title + content)
@@ -89,12 +90,14 @@ def analyze(infile, is_debug=0):
             mycol.insert_one(
                 {
                     "_id": _id,
-                    "id_": id_,
+                    "old_id": old_id,
+                    "new_id": new_id,
                     "orig_title": title,
+                    "orig_content": content,
                     "content_sents": content_sents,
-                    "orig_content": content
                 }
             )
+            new_id += 1
         except:
             dup = list(mycol.find({"_id": _id}))[0]
             _title = dup["orig_title"]
@@ -104,10 +107,10 @@ def analyze(infile, is_debug=0):
                 duplicated_file.write('\n+++++\n\n')
                 duplicated_illegal_num += 1
             else:
-                duplicated_file.write("\n-----"+id_+"\n-----")
+                duplicated_file.write("\n-----"+old_id+"\n-----")
                 dup = mycol.find_one({"_id": _id})
-                print(dup['id_'])
-                print(id_)
+                print(dup['old_id'])
+                print(old_id)
                 print(title)
                 print(dup['orig_title'])
                 print(content_sents)

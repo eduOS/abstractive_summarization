@@ -14,6 +14,7 @@ import os
 from os.path import join
 import re
 import time
+from multiprocessing import Process
 from threading import Thread
 from itertools import chain
 from utils import debug_line
@@ -28,6 +29,7 @@ from nltk.stem import PorterStemmer, WordNetLemmatizer
 from nltk.stem import LancasterStemmer
 from nltk.corpus import stopwords
 from nltk.parse.corenlp import CoreNLPParser
+from pymongo.errors import CursorNotFound
 
 # for spacy
 import string
@@ -35,7 +37,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import multiprocessing
 ENC_VOCAB_SIZE = 500000
 DEC_VOCAB_SIZE = 100000
-NUM_WORKERS = multiprocessing.cpu_count()
+NUM_WORKERS = int(multiprocessing.cpu_count() / 2)
 # NUM_WORKERS = 1
 enc_queue = Queue.Queue()
 dec_queue = Queue.Queue()
@@ -192,17 +194,22 @@ def count_words(log_time=0):
         if not enc_queue.empty():
             e_words = enc_queue.get()
             enc_vocab_counter.update(e_words)
+            l = 0
+            time.sleep(0.5)
         else:
             case += 1
         if not dec_queue.empty():
             d_words = dec_queue.get()
             dec_vocab_counter.update(d_words)
+            l = 0
+            time.sleep(0.5)
         else:
             case += 1
 
         if case == 2:
             l += 1
-            print('sleeping %s seconds' % str(l))
+            if l > 5:
+                print('sleeping %s seconds.. length of enc counter %s' % (str(l), str(len(enc_vocab_counter))))
             time.sleep(l)
 
 
@@ -219,10 +226,13 @@ def list_duplicates(seq):
 def make_vocab(log_time=0):
     myclient = pymongo.MongoClient("mongodb://localhost:27017/")
     mydb = myclient["mydatabase"]
+    enc_dict = dict(enc_vocab_counter)
+    dec_dict = dict(dec_vocab_counter)
     mydb.bytecup_2018.insert_one(
         {
-            "enc_vocab_dict": dict(enc_vocab_counter),
-            "dec_vocab_dict": dict(dec_vocab_counter)
+            "_id": "vocab_freq_dict",
+            "enc_vocab_dict": list(zip(enc_dict.keys(), enc_dict.values())),
+            "dec_vocab_dict": list(zip(dec_dict.keys(), dec_dict.values())),
         }
     )
 
@@ -333,6 +343,9 @@ def process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, 
     except TypeError:
         print(colored('None object and break', 'red'))
         return False
+    except CursorNotFound:
+        print(colored('cursor not found timeout error', 'red'))
+        return False
     _id, title, content = triple['new_id'], triple['orig_title'], triple['content_sents']
     # sents = prep_cut_sent(content, is_debug=0, log_time=0)
     sents = content.split('\n')
@@ -398,41 +411,45 @@ def processor(st=0, ed=0, makevocab=0, is_debug=0, log_time=0):
 
     myclient = pymongo.MongoClient("mongodb://localhost:27017/")
     mydb = myclient["mydatabase"]
-    generator = mydb.bytecup_2018.find({"new_id": {"$gt": st, "$lt": ed}})
+    generator = mydb.bytecup_2018.find({"new_id": {"$gt": st, "$lt": ed}}, no_cursor_timeout=True)
+    count = 0
 
     while(True):
-        state = process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, wnl, tfidf, NPChunker, makevocab=0, log_time=2)
+        state = process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, wnl, tfidf, NPChunker, makevocab=makevocab, log_time=2)
         if not state:
+            print(count)
+            generator.close()
             break
+        else:
+            count += 1
 
 
 def multi_process_corpus(makevocab=0, is_debug=0):
     myclient = pymongo.MongoClient("mongodb://localhost:27017/")
     mydb = myclient["mydatabase"]
     generator = mydb.bytecup_2018.find({})
-    total_sample = len(list(map(lambda x: x['new_id'], generator)))
+    total_sample = len(list(map(lambda x: x['_id'], generator)))
     print("the total number of samples is %s" % str(total_sample))
     total_sample = int(total_sample / 10)
     width = int(total_sample/NUM_WORKERS)
+    print("%s threads, %s samples for each" % (NUM_WORKERS, width))
 
     channels = list(range(0, total_sample, width))
     wn.ensure_loaded()
     threads = []
     for i, st in enumerate(channels):
+        time.sleep(3)
         if i == len(channels)-1:
             width = width + NUM_WORKERS
         new_t = Thread(target=processor, kwargs={"st": st, 'ed': st+width, "makevocab": makevocab})
         threads.append(new_t)
         threads[-1].start()
-        print(str(threads[-1]) + ' starts')
-    wcthread = Thread(target=count_words)
-    wcthread.start()
-    mwthread = Thread(target=make_vocab)
-    mwthread.start()
+        print(str(threads[-1]) + ' starts(%s-%s)' % (st, st+width))
+    print('start counting words')
+    count_words()
+    print('start making vocabulary')
+    make_vocab()
     print('vocab make thread starts')
-
-    wcthread.join()
-    mwthread.join()
 
 
 if __name__ == '__main__':

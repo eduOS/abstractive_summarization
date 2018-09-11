@@ -44,8 +44,10 @@ def timeit(method):
         result = method(*args, **kw)
         count_s += 1
         te = time.time()
-        if 'log_time' in kw and kw['log_time'] == 2 and count_s % 20 == 0:
-            print(colored('%r  %2.2f ms per sample on everage' % (method.__name__, (te-t_time) * 1000/count_s), 'green'))
+        if 'log_time' in kw and kw['log_time'] == 2 and count_s % 200 == 0:
+            speed = count_s/(te-t_time)
+            print(colored('%r  %2.2f samples per second on everage, time left: %2.2f hours' % (method.__name__, speed, (702484 - count_s)/(speed * 3600)), 'green'))
+
         elif 'log_time' in kw and kw['log_time'] == 1:
             if te - ts > 1:
                 print(colored('%r  %2.2f ms' % (method.__name__, (te - ts) * 1000), 'red'))
