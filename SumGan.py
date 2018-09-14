@@ -51,7 +51,7 @@ tf.app.flags.DEFINE_float('keep_prob', 0.5, 'the dropout prob')
 # ------------------------------------- discriminator
 
 # Model parameters
-tf.app.flags.DEFINE_integer("layer_size", 300, "Size of each model layer.")
+tf.app.flags.DEFINE_integer("layer_size", 321, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("conv_layers", 2, "Number of convolution layers in the model.")
 tf.app.flags.DEFINE_integer("pool_layers", 2, "Number of pooling layers in the model.")
 tf.app.flags.DEFINE_integer("kernel_size", 3, "the kernel size of the conv")
@@ -102,8 +102,7 @@ tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be sa
 
 # Hyperparameters
 tf.app.flags.DEFINE_integer('hidden_dim', 500, 'Dimension of RNN hidden states')
-tf.app.flags.DEFINE_integer('word_emb_dim', 300, 'Dimension of word embeddings.')
-tf.app.flags.DEFINE_integer('char_emb_dim', 300, 'Dimension of character embeddings.')
+tf.app.flags.DEFINE_integer('emb_dim', 300, 'Dimension of word embeddings.')
 # if batch_size is one and beam size is not one in the decode mode then the beam
 # search is the same as the original beam search
 tf.app.flags.DEFINE_integer('max_enc_steps', 73, 'max timesteps of encoder (max source text tokens)')  # 120
@@ -323,8 +322,8 @@ def main(argv):
     hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
 
     print("Building vocabulary for generator ...")
-    enc_vocab = Vocab(join_path(hps_gen.data_path, hps_gen.enc_vocab_file), hps_gen.enc_vocab_size)
-    dec_vocab = Vocab(join_path(hps_gen.data_path, hps_gen.dec_vocab_file), hps_gen.dec_vocab_size)
+    enc_vocab = Vocab("enc_vocab")
+    dec_vocab = Vocab("dec_vocab")
 
     hparam_dis = [
         'mode',
@@ -409,7 +408,6 @@ def main(argv):
     sess = tf.Session(config=utils.get_config())
     # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
     # sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
-    sess.run(tf.variables_initializer(all_variables))
     if FLAGS.mode == "pretrain_gen":
         print("Restoring the generator model from the latest checkpoint...")
         var_list = [v for v in all_variables if "generator" in v.name]
@@ -423,25 +421,11 @@ def main(argv):
         # gen_dir = ensure_exists(FLAGS.model_dir)
         # temp_saver = tf.train.Saver(
         #     var_list=[v for v in all_variables if "generator" in v.name and "Adagrad" not in v.name])
-        ckpt_path = utils.load_ckpt(gen_saver, sess, gen_dir, mode="train")
-        print('going to restore embeddings from checkpoint')
-        if not ckpt_path:
-            emb_path = join_path(FLAGS.model_dir, "generator", "init_embed")
-            ckpt_state = tf.train.get_checkpoint_state(emb_path)
-            if ckpt_state:
-                ckpt = ckpt_state.model_checkpoint_path
-                try:
-                    generator.dec_emb_saver.restore(sess, ckpt)
-                    print(colored("successfully restored embeddings for decoder form %s" % emb_path, 'green'))
-                except:
-                    print(colored("Failed to restore embeddings for decoder in %s" % emb_path, 'red'))
-                try:
-                    generator.enc_emb_saver.restore(sess, ckpt)
-                    print(colored("successfully restored embeddings for encoder form %s" % emb_path, 'green'))
-                except:
-                    print(colored("Failed to restore embeddings for encoder in %s" % emb_path, 'red'))
-            else:
-                print(colored("No embeddings restored in %s" % emb_path, 'red'))
+        ckpt_path = utils.load_ckpt(gen_saver, None, gen_dir, mode="train")
+        if ckpt_path:
+            gen_saver.restore(sess, ckpt_path)
+        else:
+            sess.run(tf.variables_initializer(all_variables))
 
     elif FLAGS.mode in ["decode", "train_gan"]:
         print("Restoring the generator model from the best checkpoint...")
@@ -470,7 +454,7 @@ def main(argv):
         dis_dir = ensure_exists(join_path(FLAGS.model_dir, 'discriminator'))
         mode = "val"
         # ckpt = utils.load_ckpt(dis_saver, sess, dis_dir, mode=mode, force=(FLAGS.mode == "train_gan"))
-        ckpt = utils.load_ckpt(dis_saver, sess, dis_dir, mode=mode, force=False)
+        utils.load_ckpt(dis_saver, sess, dis_dir, mode=mode, force=False)
         del mode
 
     # --------------- train models ---------------

@@ -58,8 +58,9 @@ def load_ckpt(saver, sess, dire, mode="train", force=False, lastest_filename="ch
             second_step_num = int(second_ckpt_state.model_checkpoint_path.split('-')[-1])
             ckpt_state = first_ckpt_state if first_step_num > second_step_num else second_ckpt_state
             try:
-                print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
-                saver.restore(sess, ckpt_state.model_checkpoint_path)
+                if sess:
+                    print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
+                    saver.restore(sess, ckpt_state.model_checkpoint_path)
                 return ckpt_state.model_checkpoint_path
             except Exception as ex:
                 print(ex)
@@ -69,8 +70,9 @@ def load_ckpt(saver, sess, dire, mode="train", force=False, lastest_filename="ch
             ckpt_state = first_ckpt_state if first_ckpt_state else second_ckpt_state
             ckpt_dir = first_ckpt_dir if first_ckpt_state else second_ckpt_dir
             try:
-                print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
-                saver.restore(sess, ckpt_state.model_checkpoint_path)
+                if sess:
+                    print('Loading checkpoint' + colored(' %s', 'yellow') % ckpt_state.model_checkpoint_path)
+                    saver.restore(sess, ckpt_state.model_checkpoint_path)
                 return ckpt_state.model_checkpoint_path
             except Exception as ex:
                 print(ex)

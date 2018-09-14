@@ -20,7 +20,7 @@ len_abs = []
 
 myclient = pymongo.MongoClient("mongodb://localhost:27017/")
 mydb = myclient["mydatabase"]
-mycol = mydb["bytecup_2018"]
+mycol = mydb["bytecup2018"]
 
 
 def analyze(infile, is_debug=0):

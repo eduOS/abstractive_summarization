@@ -30,9 +30,11 @@ import glob
 import data
 import gzip
 import os
+import pymongo
 from collections import defaultdict as dd
 from codecs import open
 from utils import red_assert, red_print
+from data import PAD_TOKEN, UNKNOWN_TOKEN, START_DECODING, STOP_DECODING
 
 
 def fopen(filename, mode='r'):
@@ -47,41 +49,35 @@ class Example(object):
     def __len__(self):
         return self.enc_len
 
-    def __init__(self, article, abstract, enc_vocab, dec_vocab, hps):
-        """Initializes the Example, performing tokenization and truncation to
-        produce the encoder, decoder and target sequences, which are stored in
-        self.
+    def __init__(self, sample, enc_vocab, dec_vocab, hps):
 
-        Args:
-          article: source text; a string. each token is separated by a single
-          space.
-          hps: hyperparameters
-        """
+        pos_tag_words = sample["pos_tag_words"]
+        pos_tags = sample["pos_tags"]
+        ner_tags = sample["ner_tags"]
+        lemma_stem = sample["lemma_stem"]
+        tfidf_scores = sample["tfidf_scores"]
+        phrase_indices = sample["phrase_indices"]
+        self.sent_indices = sample["sent_indices"]
+        title = sample["title"]
         self.hps = hps
 
         # Get ids of special tokens
-        start_decoding = dec_vocab.word2id(data.START_DECODING)
-        stop_decoding = dec_vocab.word2id(data.STOP_DECODING)
+        start_decoding = dec_vocab.word2id(START_DECODING)
+        stop_decoding = dec_vocab.word2id(STOP_DECODING)
 
-        # Process the article
-        article_words = article.split()
-        if len(article_words) > hps.max_enc_steps:
-            article_words = article_words[:hps.max_enc_steps]
-        # store the length after truncation but before padding
+        article_words = pos_tag_words
         self.enc_len = len(article_words)
-        # list of word ids; OOVs are represented by the id for UNK token
         self.enc_input = [enc_vocab.word2id(w) for w in article_words]
 
         # Process the abstract
-        abstract_words = abstract.split()  # list of strings
-        # list of word ids; OOVs are represented by the id for UNK token
-        if len(abstract_words) > hps.max_dec_steps:
-            abstract_words = abstract_words[:hps.max_dec_steps]
-        self.abs_ids = [dec_vocab.word2id(w) for w in abstract_words]
+        if title:
+            self.abs_ids = [dec_vocab.word2id(w) for w in title]
+        else:
+            self.abs_ids = None
 
         # Get the decoder input sequence and target sequence
         self.dec_input, self.target = self.get_dec_inp_targ_seqs(
-            self.abs_ids, hps.max_dec_steps, start_decoding, stop_decoding)
+            self.abs_ids, self.max_dec_len, start_decoding, stop_decoding)
         self.dec_len = len(self.dec_input)
 
         # Store the original strings ART:
@@ -92,23 +88,6 @@ class Example(object):
         # self.original_abstract_sents = abstract_sentences
 
     def get_dec_inp_targ_seqs(self, sequence, max_len, start_id, stop_id):
-        """Given the reference summary as a sequence of tokens, return the input
-        sequence for the decoder, and the target sequence which we will use to
-        calculate loss. The sequence will be truncated if it is longer than
-        max_len. The input sequence must start with the start_id and the target
-        sequence must end with the stop_id (but not if it's been truncated).
-
-        Args:
-          sequence: List of ids (integers)
-          max_len: integer
-          start_id: integer
-          stop_id: integer
-
-        Returns:
-          inp: sequence length <=max_len starting with start_id
-          target: sequence same length as input, ending with stop_id only if
-          there was no truncation
-        """
         inp = [start_id] + sequence[:]
         target = sequence[:]
         if len(inp) > max_len:  # truncate
@@ -132,6 +111,7 @@ class Example(object):
         """Pad the encoder input sequence with pad_id up to max_len."""
         while len(self.enc_input) < max_len:
             self.enc_input.append(pad_id)
+            self.sent_indices.append(pad_id)
 
 
 class Batch(object):
@@ -147,7 +127,7 @@ class Batch(object):
            vocab: Vocabulary object
         """
         self.pad_id = enc_vocab.word2id(
-            data.PAD_TOKEN)  # id of the PAD token used to pad sequences
+            PAD_TOKEN)  # id of the PAD token used to pad sequences
         # initialize the input to the encoder
         self.init_encoder_seq(example_list, hps)
         # initialize the input and targets for the decoder
@@ -170,7 +150,7 @@ class Batch(object):
             self.max_art_oovs:
               maximum number of in-article OOVs in the batch
             self.art_oovs:
-              list of list of in-article OOVs (strings), for each example in the
+              list of list of in-article O)OVs (strings), for each example in the
               batch
             self.enc_batch_extend_vocab:
               Same as self.enc_batch, but in-article OOVs are represented by
@@ -190,7 +170,7 @@ class Batch(object):
         # Note: our enc_batch can have different length (second dimension) for
         # each batch because we use dynamic_rnn for the encoder.
         self.enc_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
-        self.padded_enc_batch = np.zeros((hps.batch_size, hps.max_enc_steps), dtype=np.int32)
+        self.enc_sent_label = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
         self.padded_abs_ids = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
         self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
         self.enc_padding_mask = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.float32)
@@ -198,9 +178,10 @@ class Batch(object):
         # Fill in the numpy arrays
         for i, ex in enumerate(example_list):
             i_enc_input = ex.enc_input[:]
+            i_enc_sent_num = ex.sent_indices[:]
             i_abs_ids = ex.abs_ids[:]
             self.enc_batch[i, :] = i_enc_input
-            self.padded_enc_batch[i, :len(i_enc_input)] = i_enc_input
+            self.enc_sent_label[i, :] = i_enc_sent_num
             self.padded_abs_ids[i, :len(i_abs_ids)] = i_abs_ids
             self.enc_lens[i] = ex.enc_len
             for j in range(ex.enc_len):
@@ -255,6 +236,7 @@ class GenBatcher(object):
     # TODO: bucket can be added
 
     BATCH_QUEUE_MAX = 100  # max number of batches the batch_queue can hold
+    # BATCH_QUEUE_MAX = 1  # max number of batches the batch_queue can hold
 
     def __init__(self, file_name, mode, enc_vocab, dec_vocab, hps):
         """Initialize the batcher. Start threads that process the data into
@@ -360,16 +342,36 @@ class GenBatcher(object):
         return batch
 
     def fill_example_queue(self):
-        """Reads data from file and processes into Examples which are then
-        placed into the example queue."""
 
-        input_gen = self.text_generator()
+        myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+        mydb = myclient["mydatabase"]
+        mycol = mydb["bytecup2018"]
+
+        if self._mode == "val":
+            gt, lt = self.val_range
+        elif self._mode == 'test':
+            gt, lt = self.test_range
+
+        if "pretrain_gen":
+            gt, lt = self.train_range
+            while True:
+                try:
+                    sample = mycol.aggregate([
+                        {"$match": {"new_id": {"$gt": gt, "$lt": lt}}},
+                        {"$sample": {"size": 1}}
+                    ]).next()
+
+                except Exception as e:
+                    red_print("something wrong happened while generating a sample")
+                    print(e)
+                Example(sample, self._enc_vocab, self._dec_vocab, self._hps)
+
+        "train_gan", "decode"
 
         while True:
             try:
-                # read the next example from file. article and abstract are both
-                # strings.
-                (article, abstract) = input_gen.next()
+                pass
+
             except StopIteration:  # if there are no more examples:
                 red_print(
                     "The example generator for this example queue filling thread has exhausted data.")
@@ -383,28 +385,9 @@ class GenBatcher(object):
                         "single_pass mode is off but the example generator is\
                         out of data; error.")
 
-            # abstract_sentences = [
-            #     abstract
-                # sent.strip() for sent in data.abstract2sents(abstract)
-            # ]
-            # Use the <s> and </s> tags in abstract to get a list of sentences.
-            # Process into an Example.
             if article and abstract:
                 example = Example(
                     article, abstract, self._enc_vocab, self._dec_vocab, self._hps)
-                # what is the vocab here? the extended vocab?
-                # place the Example in the example queue.
-                # enc_len = len(example.enc_input)
-                # abs_len = len(example.abs_ids)
-                # if enc_len < 2 * abs_len and self.mode != 'val':
-                #     self._log_writer.write("total length of abstract %s, total length of the article %s" % (enc_len, abs_len))
-                #     self._log_writer.write("\n")
-                #     self._log_writer.write(example.original_article)
-                #     self._log_writer.write("\n")
-                #     self._log_writer.write(example.original_abstract)
-                #     self._log_writer.write("\n")
-                #     self._log_writer.write("\n")
-                # else:
                 self._example_queue.put(example)
             elif self._mode in ['val', 'test']:
                 self._example_queue.put(None)
@@ -480,64 +463,3 @@ class GenBatcher(object):
                 if len(b) != self._hps.batch_size:
                     continue
                 self._batch_queue.put(Batch(b, self._hps, self._enc_vocab, self._dec_vocab))
-
-    def watch_threads(self):
-        """Watch example queue and batch queue threads and restart if dead."""
-        while True:
-            time.sleep(60)
-            for idx, t in enumerate(self._example_q_threads):
-                if not t.is_alive():  # if the thread is dead
-                    print('Found example queue thread dead. Restarting.')
-                    new_t = Thread(target=self.fill_example_queue)
-                    self._example_q_threads[idx] = new_t
-                    new_t.daemon = True
-                    new_t.start()
-            for idx, t in enumerate(self._batch_q_threads):
-                if not t.is_alive():  # if the thread is dead
-                    print('Found batch queue thread dead. Restarting.')
-                    new_t = Thread(target=self.fill_batch_queue)
-                    self._batch_q_threads[idx] = new_t
-                    new_t.daemon = True
-                    new_t.start()
-
-    def text_generator(self):
-        """read abstract and article pairs directly from file"""
-        while True:
-            filelist = glob.glob(self._data_path)  # get the list of datafiles
-            if self._mode in ["val", 'test']:
-                assert len(filelist) == 1, \
-                    "in val mode the len should be 1 but %s given. the path is %s" % (len(filelist), self._data_path)
-            red_assert(filelist, 'Error: Empty filelist at %s' % self._data_path)
-            if self._mode == "train":
-                random.shuffle(filelist)
-            for ff in filelist:
-                f = open(ff, "r", 'utf-8')
-                while True:
-                    art_abs = f.readline().strip().split("\t")
-                    if len(art_abs) != 2:
-
-                        if self._mode == "val":
-                            f.seek(0)
-                            yield (None, None)
-                            continue
-                        elif self._mode == 'test':
-                            f.close()
-                            yield (None, None)
-                            break
-                        else:
-                            # for training
-                            f.close()
-                            # print("closing file %s" % ff)
-                            break
-                    article_text, abstract_text = art_abs
-                    if article_text and abstract_text:
-                        # self._files_name_dict[f.name] += 1
-                        yield (article_text, abstract_text)
-                    else:
-                        print('Found an example with empty article text. Skipping it.')
-
-                if self._mode == "train":
-                    break
-
-            if self._mode == "test":
-                break

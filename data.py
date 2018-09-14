@@ -21,12 +21,10 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 
-import csv
 from termcolor import colored
 import numpy as np
-from six.moves import xrange  # pylint: disable=redefined-builtin
 from cntk.tokenizer import text2charlist
-from codecs import open
+import pymongo
 
 # <s> and </s> are used in the data files to segment the abstracts into
 # sentences. They don't receive vocab ids.
@@ -37,7 +35,7 @@ SENTENCE_END = '</s>'
 # input and target sequence
 PAD_TOKEN = '[pad]'
 # This has a vocab id, which is used to represent out-of-vocabulary words
-UNKNOWN_TOKEN = '[unk]'
+UNKNOWN_TOKEN = 'u_n_k'
 # This has a vocab id, which is used at the start of every decoder input
 # sequence
 START_DECODING = '[start]'
@@ -49,50 +47,30 @@ NEGATIVE_LABEL = 0
 # Note: none of <s>, </s>, [PAD], [UNK], [START], [STOP] should appear in
 # the vocab file.
 
+myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+mydb = myclient["mydatabase"]
+mycol = mydb["bytecup2018"]
+
 
 class Vocab(object):
     """Vocabulary class for mapping between words and ids (integers)"""
 
-    def __init__(self, vocab_file, max_size):
-        """Creates a vocab of up to max_size words, reading from the vocab_file.
-        If max_size is 0, reads the entire vocab file.
-
-        Args:
-          vocab_file: path to the vocab file, which is assumed to contain
-          "<word> <frequency>" on each line, sorted with most frequent word
-          first. This code doesn't actually use the frequencies, though.
-          max_size: integer. The maximum size of the resulting Vocabulary."""
+    def __init__(self, _type):
         self._word_to_id = {}
         self._id_to_word = {}
         self._count = 0
 
-        # # [UNK], [PAD], [START] and [STOP] get the ids 0,1,2,3.
-        # for w in [PAD_TOKEN, UNKNOWN_TOKEN, START_DECODING, STOP_DECODING]:
-        #     self._word_to_id[w], self._id_to_word[len(self._id_to_word)] = len(self._word_to_id), w
+        vocab_list = mycol.find({"_id": 'vocab_freq_dict'}).next()[_type]
 
         # Read the vocab file and add words up to max_size
-        with open(vocab_file, 'r', 'utf-8') as vocab_f:
-            for line in vocab_f:
-                pieces = line.split()
-                if len(pieces) != 3:
-                    print('Warning: incorrectly formatted line in vocabulary file: %s\n' % line)
-                    continue
-                w = pieces[0]
-                if self._count == 0:
-                    assert w == PAD_TOKEN, "the first vocab should be PAD"
-                # if w in [SENTENCE_START, SENTENCE_END, UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING]:
-                #     continue
-                #   # raise Exception(
-                #   #     '<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t be in the vocab file, but %s is' % w)
-                if w in self._word_to_id:
-                    print(colored("%s already in the vocab, escape.." % w, "red"))
-                    continue
-                    # raise Exception('Duplicated word in vocabulary file: %s' % w)
-                self._word_to_id[w], self._id_to_word[len(self._id_to_word)] = len(self._word_to_id), w
-                self._count += 1
-                if max_size != 0 and len(self._word_to_id) >= max_size:
-                    print("max_size of vocab was specified as %i; we now have %i words. Stop reading." % (max_size, len(self._word_to_id)))
-                    break
+        for word in vocab_list:
+            if self._count == 0:
+                assert word == PAD_TOKEN, "the first vocab should be PAD"
+            if word in self._word_to_id:
+                print(colored("%s already in the vocab, escape.." % word, "red"))
+                continue
+            self._word_to_id[word], self._id_to_word[len(self._id_to_word)] = len(self._word_to_id), word
+            self._count += 1
 
         # print("Finished constructing vocabulary of %i total words. Last word added: %s" % (max_size, self._id_to_word[max_size-1]))
     @property
@@ -119,21 +97,6 @@ class Vocab(object):
     def size(self):
         """Returns the total size of the vocabulary"""
         return self._count
-
-    def write_metadata(self, fpath):
-        """Writes metadata file for Tensorboard word embedding visualizer as
-        described here:
-          https://www.tensorflow.org/get_started/embedding_viz
-
-        Args:
-          fpath: place to write the metadata file
-        """
-        print("Writing word embedding metadata file to %s..." % (fpath))
-        with open(fpath, "w", 'utf-8') as f:
-            fieldnames = ['word']
-            writer = csv.DictWriter(f, delimiter="\t", fieldnames=fieldnames)
-            for i in xrange(self.size()):
-                writer.writerow({"word": self._id_to_word[i]})
 
 
 def article2ids(article_words, vocab):

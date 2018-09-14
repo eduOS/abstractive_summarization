@@ -62,6 +62,7 @@ The unique sample size: 709540
   * in validation max_len can be ignored which are employed in training
   * TODO: find the unique corpus, many samples are duplicated [check]
   * TODO: train with the daily mail and cnn dataset
+  * TODO: validation and test set withoug out title to the mongodb
 
 ### unicode problem
   * abandon those lines of which the abstract contain non-English, because the non-english characters in validation set are only chinese puncs and some chars of non sense. 
@@ -76,3 +77,17 @@ The unique sample size: 709540
 ## steps
   * divide sentences
       \.[A-Z]|\\n|
+
+# knowledge representation
+1. embedding for the decoder
+  a 300 dimension matrix for a certain number of vocab which come from the titles
+2. embedding for the encoder
+  a 300 dimension matrix for the vocab from decoder + set(vocab from encoder + the lemmalized and stemed vocab)
+  first layer: the original word embedding + lemma_stem embedding. For those that don't have lemma_stem use itself plus itself
+  second layer: concat the embedding of pos and ner concatednate the tfidf score
+  enc_embedding share the dec_embedding part 
+3. generating
+  pos should be generated in each step
+
+# training
+1. TODO: the mean and standard variation of all losses should be kept for the clip value setting

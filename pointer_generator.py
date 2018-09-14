@@ -21,15 +21,19 @@ from __future__ import absolute_import
 from __future__ import division
 
 import time
+import numpy as np
 import tensorflow as tf
 from termcolor import colored
 from attention_decoder import conv_attention_decoder
 from utils import conv_encoder
 from utils import linear_mapping_weightnorm
 from codecs import open
-import data
+from data import PAD_TOKEN, UNKNOWN_TOKEN, START_DECODING, STOP_DECODING
 
 FLAGS = tf.app.flags.FLAGS
+# myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+# mydb = myclient["mydatabase"]
+# mycol = mydb["bytecup2018"]
 
 
 class PointerGenerator(object):
@@ -43,7 +47,7 @@ class PointerGenerator(object):
         self._log_writer = open("./pg_log", "a", "utf-8")
         vocab_ = tf.convert_to_tensor(self._dec_vocab.id_keys)
         self._unk_mask = tf.where(
-            tf.equal(vocab_, self._dec_vocab.word2id(data.UNKNOWN_TOKEN)),
+            tf.equal(vocab_, self._dec_vocab.word2id(UNKNOWN_TOKEN)),
             tf.zeros_like(vocab_, tf.float32), tf.ones_like(vocab_, tf.float32)
         )
 
@@ -96,6 +100,12 @@ class PointerGenerator(object):
             gan = True
         feed_dict = {}
         feed_dict[self.enc_batch] = batch.enc_batch
+        feed_dict[self.enc_stem] = batch.enc_stem
+        feed_dict[self.enc_pos] = batch.enc_pos
+        feed_dict[self.enc_ner] = batch.enc_ner
+        feed_dict[self.enc_tfidf] = batch.enc_tfidf
+        feed_dict[self.enc_phrase_idx] = batch.enc_phrase_idx
+        feed_dict[self.enc_sent_idx] = batch.enc_sent_idx
         feed_dict[self.enc_lens] = batch.enc_lens
         feed_dict[self.enc_padding_mask] = batch.enc_padding_mask
         if not just_enc:
@@ -122,15 +132,28 @@ class PointerGenerator(object):
             k_rewards_ls = tf.unstack(self.k_rewards, axis=0)
 
             with tf.variable_scope('embeddings'):
+
                 self.shared_embeddings = tf.get_variable(
-                    'enc_embeddings', [self._enc_vocab.size(), hps.word_emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
-                self.enc_embeddings = tf.get_variable(
-                    'enc_embeddings', [self._enc_vocab.size(), hps.word_emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
-                self.dec_embeddings = tf.get_variable(
-                    'dec_embeddings', [self._dec_vocab.size(), hps.char_emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
-                self.enc_emb_saver = tf.train.Saver({"enc_embeddings": self.enc_embeddings})
-                self.dec_emb_saver = tf.train.Saver({"dec_embeddings": self.dec_embeddings})
-                self.emb_enc_inputs = tf.nn.embedding_lookup(self.enc_embeddings, self.enc_batch)
+                    'shared_part_emb', dtype=tf.float32, initializer=np.load('./data/shared_part_embeddings.npy'))
+                self.enc_part_embeddings = tf.get_variable(
+                    'enc_part_emb', dtype=tf.float32, initializer=np.load('./data/enc_part_embeddings.npy'))
+                self.dec_part_embeddings = tf.get_variable(
+                    'dec_part_emb', dtype=tf.float32, initializer=np.load('./data/dec_part_embeddings.npy'))
+
+                self.enc_embeddings = tf.concatenate([self.shared_embeddings, self.enc_part_embeddings], 0)
+                self.dec_embeddings = tf.concatenate([self.shared_embeddings, self.dec_part_embeddings], 0)
+
+                self.pos_embeddings = tf.get_variable(
+                    'pos_embeddings', [46, 10], dtype=tf.float32, initializer=self.trunc_norm_init)
+                self.ner_embeddings = tf.get_variable(
+                    'ner_embeddings', [25, 10], dtype=tf.float32, initializer=self.trunc_norm_init)
+
+                emb_enc_inputs = tf.nn.embedding_lookup(self.enc_embeddings, self.enc_batch) + \
+                    tf.nn.embedding_lookup(self.enc_embeddings, self.enc_stem)
+                emb_enc_pos = tf.nn.embedding_lookup(self.pos_embeddings, self.enc_pos)
+                emb_enc_ner = tf.nn.embedding_lookup(self.ner_embeddings, self.enc_ner)
+                self.emb_enc_inputs = tf.concat([emb_enc_inputs, emb_enc_pos, emb_enc_ner, tf.expand_dim(self.enc_tfidf, axis=-1)], axis=-1)
+
                 self.temp_embedded_seq = tf.nn.embedding_lookup(self.enc_embeddings, self.temp_batch)
                 emb_dec_inputs = tf.nn.embedding_lookup(self.dec_embeddings, self._dec_batch)
                 emb_eval_dec_inputs = tf.nn.embedding_lookup(self.dec_embeddings, self._eval_dec_batch)
@@ -288,7 +311,7 @@ class PointerGenerator(object):
                     beam_symbols[j-1] = tf.gather(beam_symbols[j-1], real_path)
                     log_beam_probs[j-1] = tf.gather(log_beam_probs[j-1], real_path)
 
-        start_token = tf.fill([batch_size, 1], self._dec_vocab.word2id(data.START_DECODING))
+        start_token = tf.fill([batch_size, 1], self._dec_vocab.word2id(START_DECODING))
         start_token = tf.nn.embedding_lookup(self.dec_embeddings, start_token)
         dec_input = start_token
         start_token = tf.tile(start_token, [beam_size, 1, 1])

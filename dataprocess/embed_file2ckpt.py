@@ -7,88 +7,123 @@ from __future__ import division
 import tensorflow as tf
 from codecs import open
 from collections import defaultdict as dd
+from collections import Counter
+from operator import itemgetter
 import random
-import sys
+import numpy as np
+import pymongo
+from ..data import PAD_TOKEN, UNKNOWN_TOKEN, START_DECODING, STOP_DECODING
 
-# generate checkpoint from vocab and embeddings
-# python embed_file2ckpt.py vocab_file embed_file vocab_size out_dir
-# python dataprocess/embed_file2ckpt.py data/vocab ../../data/zh_emb/emb_wd/embedding.300 100000 ./temp/
+myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+mydb = myclient["mydatabase"]
+mycol = mydb["bytecup2018"]
 
 
-def read_from_file(vocab_path, embed_path, vocab_size):
-    count = 0
-    emb_dim = 0
-    old_embed_dic = {}
-    new_embed_l = []
+def most_common(_dict, num):
+        return [w for w, _ in Counter(_dict).most_common(num)]
+
+
+def make_vocab(enc_vocab_size, dec_vocab_size):
+    whole_vocab = list(mycol.find({"_id": 'vocab_freq_dict'}))[0]
+    enc_words = whole_vocab['enc_vocab_freq_dict']
+    dec_words = whole_vocab['dec_vocab_freq_dict']
+    lemma_words = whole_vocab['lemma_vocab_freq_dict']
+
+    shared_part = most_common(dict(dec_words + [[PAD_TOKEN, float('inf')], [UNKNOWN_TOKEN, 10**6]]), dec_vocab_size-2)
+    dec_part = [START_DECODING, STOP_DECODING]
+    dec_vocab = shared_part + dec_part
+    assert len(dec_vocab) == dec_vocab_size, 'dec_vocab should be of length %s but %s' % (dec_vocab_size, len(dec_vocab))
+
+    enc_words = dict(enc_words + lemma_words)
+    for s in shared_part:
+        if s in enc_words:
+            del enc_words[s]
+
+    enc_part = most_common(enc_words, enc_vocab_size - len(shared_part))
+    enc_vocab = shared_part + enc_part
+    assert len(enc_vocab) == enc_vocab_size, 'enc_vocab should be of length %s but %s' % (enc_vocab_size, len(enc_vocab))
+    mycol.update_many(
+        {"_id": "vocab_freq_dict"},
+        {"$set": {
+            "shared_vocab_size": dec_vocab_size-2,
+            "enc_vocab_size": enc_vocab_size,
+            "dec_vocab_size": dec_vocab_size,
+            "enc_vocab": enc_vocab,
+            "dec_vocab": dec_vocab,
+        }
+        }, upsert=False)
+    return shared_part, enc_part, dec_part
+
+
+def check_emb(embed_path, enc_vocab_size, dec_vocab_size):
+    shared_part, enc_part, dec_part = make_vocab(enc_vocab_size, dec_vocab_size)
+    glove_embed_dic = {}
     max_ = 0
     min_ = 0
     embed_f = open(embed_path, 'r', 'utf-8')
     for embed in embed_f:
         try:
-            v, emb = embed.strip().split("\t")
+            s_embed = embed.split()
+            w, emb = s_embed[:1].strp(), list(map(float, s_embed[1:]))
         except:
             print(embed)
-        v = v.strip()
-        if v in old_embed_dic:
-            continue
-        emb_l = [float(e) for e in emb.split()]
-        if max(emb_l) > max_:
-            max_ = max(emb_l)
-        if min(emb_l) < min_:
-            min_ = min(emb_l)
+        if max(emb) > max_:
+            max_ = max(emb)
+        if min(emb) < min_:
+            min_ = min(emb)
 
-        if emb_dim == 0:
-            emb_dim = len(emb_l)
-        else:
-            assert emb_dim == len(emb_l)
-        old_embed_dic[v] = emb_l
+        # ensure the equal length
+        assert 300 == len(emb)
+        glove_embed_dic[w] = emb
 
     def df():
-        return [round(random.uniform(min_, max_), 6) for i in range(emb_dim)]
+        return [round(random.uniform(min_, max_), 6) for i in range(300)]
 
-    doed = dd(df, old_embed_dic)
+    doed = dd(df, glove_embed_dic)
 
-    vocab_f = open(vocab_path, 'r', 'utf-8')
-    v_l = []
-    while(count < vocab_size):
-        v, c, _ = vocab_f.readline().strip().split()
-        v = v.strip()
-        if v in v_l:
-            raise "%s is seen previously" % v
-        new_embed_l.append(doed[v])
-        v_l.append(v)
-        count += 1
-        if count % 2000 == 0:
-            print(count)
+    shared_emb = itemgetter(*shared_part)(doed)
+    enc_emb = itemgetter(*enc_part)(doed)
+    dec_emb = itemgetter(*dec_part)(doed)
 
-    return new_embed_l, emb_dim
+    return shared_emb, enc_emb, dec_emb
 
-enc_vocab_path, enc_embed_path, enc_vocab_size = "./data/enc_vocab", "../../data/zh_emb/emb_wd/embedding.300", 500000
-dec_vocab_path, dec_embed_path, dec_vocab_size = "./data/dec_vocab", "../../data/zh_emb/emb_ch/embedding.300", 7500
-enc_emb_l, enc_emb_dim = read_from_file(enc_vocab_path, enc_embed_path, enc_vocab_size)
-dec_emb_l, dec_emb_dim = read_from_file(dec_vocab_path, dec_embed_path, dec_vocab_size)
-# vocab_size = 100000
-# emb_dim = 300
-# emb_l = [[1.0] * emb_dim] * vocab_size
+embed_path, enc_vocab_size, dec_vocab_size = "./data/glove.txt", 7500, 7500
+shared_emb, enc_emb, dec_emb = check_emb(embed_path, enc_vocab_size, dec_vocab_size)
 
-assert enc_emb_dim == dec_emb_dim
-emb_dim = enc_emb_dim
+np.save('./data/shared_part_embeddings.npy', np.array(shared_emb))
+np.save('./data/enc_part_embeddings.npy', np.array(enc_emb))
+np.save('./data/dec_part_embeddings.npy', np.array(dec_emb))
 
-enc_emb_ph = tf.placeholder(
-    tf.float32, [enc_vocab_size, emb_dim], name='enc_embeddings')
-dec_emb_ph = tf.placeholder(
-    tf.float32, [dec_vocab_size, emb_dim], name='dec_embeddings')
-enc_embeddings = tf.get_variable(
-    "enc_embeddings", [enc_vocab_size, emb_dim], dtype=tf.float32)
-dec_embeddings = tf.get_variable(
-    "dec_embeddings", [dec_vocab_size, emb_dim], dtype=tf.float32)
-saver = tf.train.Saver({"enc_embeddings": enc_embeddings, "dec_embeddings": dec_embeddings})
-enc_as_op = enc_embeddings.assign(enc_emb_ph)
-dec_as_op = dec_embeddings.assign(dec_emb_ph)
+# shared_part_emb_len = len(shared_emb)
+# enc_part_emb_len = len(enc_emb)
+# dec_part_emb_len = len(dec_emb)
 
-sess = tf.Session()
-sess.run(enc_as_op, feed_dict={enc_emb_ph: enc_emb_l})
-sess.run(dec_as_op, feed_dict={dec_emb_ph: dec_emb_l})
-save_path = sys.argv[-1]  # this should be file path not directory path
+# shared_part_emb_ph = tf.placeholder(
+#     tf.float32, [shared_part_emb_len, 300], name='shared_embeddings')
+# enc_part_emb_ph = tf.placeholder(
+#     tf.float32, [enc_part_emb_len, 300], name='enc_embeddings')
+# dec_part_emb_ph = tf.placeholder(
+#     tf.float32, [dec_part_emb_len, 300], name='dec_embeddings')
 
-saver.save(sess, save_path)
+# shared_part_embeddings = tf.get_variable(
+#     "shared_part_embeddings", [shared_part_emb_len, 300], dtype=tf.float32)
+# enc_part_embeddings = tf.get_variable(
+#     "enc_part_embeddings", [enc_part_emb_len, 300], dtype=tf.float32)
+# dec_part_embeddings = tf.get_variable(
+#     "dec_part_embeddings", [dec_part_emb_len, 300], dtype=tf.float32)
+# saver = tf.train.Saver({
+#     "shared_part_embeddings": shared_part_embeddings,
+#     "enc_part_embeddings": enc_part_embeddings,
+#     "dec_part_embeddings": dec_part_embeddings})
+
+# shared_as_op = shared_part_embeddings.assign(shared_part_emb_ph)
+# enc_as_op = enc_part_embeddings.assign(enc_part_emb_ph)
+# dec_as_op = dec_part_embeddings.assign(dec_part_emb_ph)
+
+# sess = tf.Session()
+# sess.run(shared_as_op, feed_dict={shared_part_emb_ph: shared_emb})
+# sess.run(enc_as_op, feed_dict={enc_part_emb_ph: enc_emb})
+# sess.run(dec_as_op, feed_dict={dec_part_emb_ph: dec_emb})
+# save_path = sys.argv[-1]  # this should be file path not directory path
+
+# saver.save(sess, save_path)
