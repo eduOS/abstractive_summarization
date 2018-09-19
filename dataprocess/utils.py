@@ -46,7 +46,7 @@ def timeit(method):
         te = time.time()
         if 'log_time' in kw and kw['log_time'] == 2 and count_s % 200 == 0:
             speed = count_s/(te-t_time)
-            print(colored('%r  %2.2f samples per second on everage, time left: %2.2f hours' % (method.__name__, speed, (int(702484/40) - count_s)/(speed * 3600)), 'green'))
+            print(colored('%r  %2.2f samples per second on everage, time left: %2.2f hours' % (method.__name__, speed, (int(702484/4) - count_s)/(speed * 3600)), 'green'))
 
         elif 'log_time' in kw and kw['log_time'] == 1:
             if te - ts > 1:
@@ -90,10 +90,14 @@ def debug_line(tag, line, color="green"):
 
 def load_json(line, is_debug=False):
     _json = json.loads(line, strict=False)
-    return _json['id'], _json['title'], _json['content']
+    try:
+        title = _json['title']
+    except:
+        title = None
+    return _json['id'], title, _json['content']
 
 
-def prep_cut_sent(line, max_sent_words=60, max_sents=90, is_debug=False, log_time=0):
+def prep_cut_sent(line, max_sent_words=60, max_sents=70, is_debug=False, log_time=0):
     """
     TODO: combining the existing tools may be better
     """

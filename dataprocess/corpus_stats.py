@@ -59,6 +59,8 @@ def analyze(infile, is_debug=0):
         line = bytes2unicode(ori_line)
         try:
             old_id, title, content = load_json(line)
+            if new_id == 0 and title is None:
+                new_id = 10 ** 8
         except:
             json_illegal_num += 1
             json_illegal_file.write(str(ori_line.decode('utf-8')))
@@ -66,7 +68,7 @@ def analyze(infile, is_debug=0):
             json_illegal_file.flush()
             continue
 
-        if 'u_n_k' in title:
+        if title is not None and 'u_n_k' in title:
             title_illegal_file.write(ori_line.decode('utf-8'))
             title_illegal_file.write('\n+++++\n\n')
             title_illegal_num += 1
@@ -74,9 +76,10 @@ def analyze(infile, is_debug=0):
             continue
 
         pas_len.append(len(content.split()))
-        title_len.append(len(title.split()))
+        if title is not None:
+            title_len.append(len(title.split()))
         sents = prep_cut_sent(content, is_debug=0, log_time=0)
-        if not sents:
+        if not sents or not title:
             continue
         sent_len.extend(list(map(lambda x: len(x.split()), sents)))
         pas_sen_len.append(len(sents))
@@ -84,8 +87,13 @@ def analyze(infile, is_debug=0):
         if len(content_sents) < len(content) / 2:
             illegal_length_file.write("\n\n---" + str(old_id) + "---" + title + "\n" + content + "\n" + content_sents + "------\n\n")
             illegal_length += 1
+            continue
         # debug_line('content_sents', content_sents)
-        _id = hash(title + content)
+        if title is None:
+            _title = "None"
+        else:
+            _title = title
+        _id = hash(_title + content)
         try:
             mycol.insert_one(
                 {

@@ -19,6 +19,12 @@
 * noise should be injected to the labels 
 
 # data processing
+## vocab
+new_id
+  * train_id range:  bytecup: 0 - 1,000,000; cnn_mail: 1,000,000 - 3,000,000
+  * val_id range: 3,000,000 - 4,000,000
+  * test_id: 4,000,000 - 5,000,000
+
 ## data stats:
 558 words per passage on average, the std variation is 405
 33 sentences per passage on average, the std variation is 28
@@ -63,6 +69,7 @@ The unique sample size: 709540
   * TODO: find the unique corpus, many samples are duplicated [check]
   * TODO: train with the daily mail and cnn dataset
   * TODO: validation and test set withoug out title to the mongodb
+  * max_len of contnet: 60 words * 70 sents; max_len of title: 18
 
 ### unicode problem
   * abandon those lines of which the abstract contain non-English, because the non-english characters in validation set are only chinese puncs and some chars of non sense. 

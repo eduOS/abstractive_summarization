@@ -100,14 +100,14 @@ class PointerGenerator(object):
             gan = True
         feed_dict = {}
         feed_dict[self.enc_batch] = batch.enc_batch
-        feed_dict[self.enc_stem] = batch.enc_stem
-        feed_dict[self.enc_pos] = batch.enc_pos
-        feed_dict[self.enc_ner] = batch.enc_ner
-        feed_dict[self.enc_tfidf] = batch.enc_tfidf
-        feed_dict[self.enc_phrase_idx] = batch.enc_phrase_idx
-        feed_dict[self.enc_sent_idx] = batch.enc_sent_idx
-        feed_dict[self.enc_lens] = batch.enc_lens
-        feed_dict[self.enc_padding_mask] = batch.enc_padding_mask
+        feed_dict[self.enc_stem] = batch.stem_batch
+        feed_dict[self.enc_pos] = batch.pos_batch
+        feed_dict[self.enc_ner] = batch.ner_batch
+        feed_dict[self.enc_tfidf] = batch.tfidf_batch
+        feed_dict[self.enc_phrase_idx] = batch.phrase_label_batch
+        feed_dict[self.enc_sent_idx] = batch.sent_label_batch
+        feed_dict[self.enc_lens] = batch.lens_batch
+        feed_dict[self.enc_padding_mask] = batch.padding_mask_batch
         if not just_enc:
             feed_dict[self.target_batch] = batch.target_batch
             feed_dict[self.dec_padding_mask] = batch.dec_padding_mask

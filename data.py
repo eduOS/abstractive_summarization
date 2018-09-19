@@ -60,6 +60,7 @@ class Vocab(object):
         self._id_to_word = {}
         self._count = 0
 
+        assert _type in ['enc_vocab', 'dec_vocab', 'stem_vocab', 'pos_vocab', 'ner_vocab']
         vocab_list = mycol.find({"_id": 'vocab_freq_dict'}).next()[_type]
 
         # Read the vocab file and add words up to max_size

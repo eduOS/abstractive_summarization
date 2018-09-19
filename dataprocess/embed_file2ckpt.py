@@ -4,7 +4,6 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 
-import tensorflow as tf
 from codecs import open
 from collections import defaultdict as dd
 from collections import Counter
@@ -13,6 +12,7 @@ import random
 import numpy as np
 import pymongo
 from ..data import PAD_TOKEN, UNKNOWN_TOKEN, START_DECODING, STOP_DECODING
+from ..settings import enc_vocab_size, dec_vocab_size
 
 myclient = pymongo.MongoClient("mongodb://localhost:27017/")
 mydb = myclient["mydatabase"]
@@ -27,14 +27,14 @@ def make_vocab(enc_vocab_size, dec_vocab_size):
     whole_vocab = list(mycol.find({"_id": 'vocab_freq_dict'}))[0]
     enc_words = whole_vocab['enc_vocab_freq_dict']
     dec_words = whole_vocab['dec_vocab_freq_dict']
-    lemma_words = whole_vocab['lemma_vocab_freq_dict']
+    stem_words = whole_vocab['stem_vocab_freq_dict']
 
     shared_part = most_common(dict(dec_words + [[PAD_TOKEN, float('inf')], [UNKNOWN_TOKEN, 10**6]]), dec_vocab_size-2)
     dec_part = [START_DECODING, STOP_DECODING]
     dec_vocab = shared_part + dec_part
     assert len(dec_vocab) == dec_vocab_size, 'dec_vocab should be of length %s but %s' % (dec_vocab_size, len(dec_vocab))
 
-    enc_words = dict(enc_words + lemma_words)
+    enc_words = dict(enc_words + stem_words)
     for s in shared_part:
         if s in enc_words:
             del enc_words[s]
@@ -87,7 +87,7 @@ def check_emb(embed_path, enc_vocab_size, dec_vocab_size):
 
     return shared_emb, enc_emb, dec_emb
 
-embed_path, enc_vocab_size, dec_vocab_size = "./data/glove.txt", 7500, 7500
+embed_path = "./data/glove.txt"
 shared_emb, enc_emb, dec_emb = check_emb(embed_path, enc_vocab_size, dec_vocab_size)
 
 np.save('./data/shared_part_embeddings.npy', np.array(shared_emb))

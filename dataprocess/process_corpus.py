@@ -41,7 +41,9 @@ NUM_WORKERS = int(multiprocessing.cpu_count() / 2)
 enc_queue = Queue.Queue()
 dec_queue = Queue.Queue()
 enc_vocab_counter = Counter()
-lemma_counter = Counter()
+stem_counter = Counter()
+# pos_tag_vocab = []
+# ner_tag_vocab = []
 dec_vocab_counter = Counter()
 
 
@@ -191,7 +193,7 @@ def count_words(log_time=0):
         if not enc_queue.empty():
             e_words = enc_queue.get()
             enc_vocab_counter.update(e_words[0])
-            lemma_counter.update(e_words[1])
+            stem_counter.update(e_words[1])
             l = 0
             time.sleep(0.5)
         else:
@@ -221,38 +223,43 @@ def list_duplicates(seq):
 
 
 @timeit
-def make_whole_vocab(log_time=0):
+def make_whole_vocab(machine_num, log_time=0):
     myclient = pymongo.MongoClient("mongodb://localhost:27017/")
     mydb = myclient["mydatabase"]
+    mycol = mydb["bytecup2018"]
     enc_dict = dict(enc_vocab_counter)
     dec_dict = dict(dec_vocab_counter)
-    lemma_dict = dict(lemma_counter)
-    if list(mydb.bytecup2018.find({"_id": "vocab_freq_dict"})):
-        mydb.bytecup2018.remove({"_id": "vocab_freq_dict"})
+    stem_dict = dict(stem_counter)
+    vocab_name = "vocab_freq_dict_" + str(machine_num)
+    if list(mycol.find({"_id": vocab_name})):
+        try:
+            mycol.remove({"_id": vocab_name})
+        except:
+            mycol.delete_one({"_id": vocab_name})
 
     enc_vocab = sorted(list(zip(enc_dict.keys(), enc_dict.values())), key=lambda x: x[1], reverse=True)
     dec_vocab = sorted(list(zip(dec_dict.keys(), dec_dict.values())), key=lambda x: x[1], reverse=True)
-    lemma_vocab = sorted(list(zip(lemma_dict.keys(), lemma_dict.values())), key=lambda x: x[1], reverse=True)
+    stem_vocab = sorted(list(zip(stem_dict.keys(), stem_dict.values())), key=lambda x: x[1], reverse=True)
 
     try:
-        mydb.bytecup2018.insert_one(
+        mycol.insert_one(
             {
-                "_id": "vocab_freq_dict",
+                "_id": vocab_name,
                 "enc_vocab_freq_dict": enc_vocab,
                 "dec_vocab_freq_dict": dec_vocab,
-                "lemma_vocab_freq_dict": lemma_vocab,
+                "stem_vocab_freq_dict": stem_vocab,
             }
         )
     except Exception as e:
         enc_f = open('enc_vocab_fre_dict,pkl', 'w')
         dec_f = open('dec_vocab_fre_dict,pkl', 'w')
-        lemma_f = open('lemma_vocab_fre_dict,pkl', 'w')
+        stem_f = open('stem_vocab_fre_dict,pkl', 'w')
         pickle.dump(enc_vocab, enc_f)
         pickle.dump(dec_vocab, dec_f)
-        pickle.dump(lemma_vocab, lemma_f)
+        pickle.dump(stem_vocab, stem_f)
         enc_f.close()
         dec_f.close()
-        lemma_f.close()
+        stem_f.close()
         print(e)
         print('enc and dec vocab freq has been dumped as pickle')
 
@@ -289,7 +296,7 @@ def word_normalize(tagged_sents, port, wnl, is_debug=False, log_time=0):
             debug_line("tagged sent", str(tagged_sent))
             # debug_line("sent_stem ported", str(ported))
             # debug_line("sent_stem lancester", str(lsed))
-            debug_line("sent_lemma wnled", str(wnled))
+            debug_line("sent_stem wnled", str(wnled))
             input('\n')
     return normalized_sents
 
@@ -327,12 +334,11 @@ def tokenize_add_prio(sents, tokenize, pos_tagger, ner_tagger, is_debug=False, l
     return sents_pos, tagged_sents
 
 
-def process_title(title, tokenize, pos_tagger, ner_tagger, uppercased, makevocab=0, is_debug=False, log_time=0, max_len=18):
+def process_title(title, tokenize, pos_tagger, ner_tagger, makevocab=0, is_debug=False, log_time=0, max_len=18):
     title = title.replace("''", '"')
     tokenized_title = list(tokenize(title))
     if is_debug:
         debug_line("tokenized title", tokenized_title)
-        debug_line("uppercased", uppercased)
 
     title_pos = pos_tagger.tag(tokenized_title)
 
@@ -358,7 +364,7 @@ def sent_filter(sents, debug=False):
 
 
 @timeit
-def process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, wnl, tfidf, NPChunker, makevocab=0, log_time=0):
+def process_one_sample(generator, mycol, tokenize, pos_tagger, ner_tagger, port, wnl, tfidf, NPChunker, makevocab=0, log_time=0):
     try:
         triple = generator.next()
     except TypeError:
@@ -384,16 +390,12 @@ def process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, 
     sents_pos, tagged_sents = tokenize_add_prio(sents, tokenize, pos_tagger, ner_tagger, is_debug=0, log_time=1)
     # tagged_sents: pos_tag_word, pos_tag, named entity
 
-    uppercased = set(filter(
-        lambda x: x[0].isupper(),
-        map(
-            lambda x: x[1], chain.from_iterable(tagged_sents)
-        )))
-    title = process_title(title, tokenize, pos_tagger, ner_tagger, list(uppercased), makevocab=1, is_debug=0, log_time=1)
+    if title is not None:
+        title = process_title(title, tokenize, pos_tagger, ner_tagger, makevocab=1, is_debug=0, log_time=1)
 
     # normalized words only for tfidf scores
     normalized_sents = word_normalize(tagged_sents, port, wnl, is_debug=0, log_time=1)
-    # lemmatized and stemmed word, all lowered, stopwords
+    # stemtized and stemmed word, all lowered, stopwords
     # are kept
 
     # debug_line('the origin sent changed?', str(tagged_sents))
@@ -412,23 +414,22 @@ def process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, 
     # pos_tag, named entity, stem&lemmed, tfidf, phrase_index, sentence_index
 
     infor_content = list(chain.from_iterable(indexed_sents))
-    pos_tag_words, pos_tags, ner_tags, lemma_stem, tfidf_scores, phrase_indices, sent_indices = zip(*infor_content)
+    pos_tag_words, pos_tags, ner_tags, stem, tfidf_scores, phrase_indices, sent_indices = zip(*infor_content)
     if makevocab:
         enc_queue.put(
             (
                 dict(Counter(pos_tag_words)),
-                dict(Counter(lemma_stem))
+                dict(Counter(stem))
             )
         )
-    mydb.bytecup2018.update_many(
+    mycol.update_many(
         {"new_id": _id},
         {
             "$set": {
-                "title": title,
                 "pos_tag_words": pos_tag_words,
                 "pos_tags": pos_tags,
                 "ner_tags": ner_tags,
-                "lemma_stem": lemma_stem,
+                "stem": stem,
                 "tfidf_scores": tfidf_scores,
                 "phrase_indices": phrase_indices,
                 "sent_indices": sent_indices,
@@ -450,19 +451,20 @@ def processor(st=0, ed=0, makevocab=0, is_debug=0, log_time=0, _continue=False):
 
     myclient = pymongo.MongoClient("mongodb://localhost:27017/")
     mydb = myclient["mydatabase"]
+    mycol = mydb["bytecup2018"]
     if _continue:
-        generator = mydb.bytecup2018.find({
+        generator = mycol.find({
             "new_id": {"$gt": st, "$lt": ed},
             "pos_tags": {"$exists": False}
         }, no_cursor_timeout=True)
     else:
-        generator = mydb.bytecup2018.find({
+        generator = mycol.find({
             "new_id": {"$gt": st, "$lt": ed},
         }, no_cursor_timeout=True)
     count = 0
 
     while(True):
-        state = process_one_sample(generator, mydb, tokenize, pos_tagger, ner_tagger, port, wnl, tfidf, NPChunker, makevocab=makevocab, log_time=2)
+        state = process_one_sample(generator, mycol, tokenize, pos_tagger, ner_tagger, port, wnl, tfidf, NPChunker, makevocab=makevocab, log_time=2)
         if not state:
             print(count)
             generator.close()
@@ -472,17 +474,21 @@ def processor(st=0, ed=0, makevocab=0, is_debug=0, log_time=0, _continue=False):
 
 
 def multi_process_corpus(makevocab=0, is_debug=0):
+    # 95:0, 96:1, 160:2, 243:3
+    machine_num = 0
+    # https://stackoverflow.com/a/11554877/3552975
+
     myclient = pymongo.MongoClient("mongodb://localhost:27017/")
     mydb = myclient["mydatabase"]
     generator = mydb.bytecup2018.find({})
     total_sample = len(list(map(lambda x: x['_id'], generator)))
     print("the total number of samples is %s" % str(total_sample))
-    total_sample = int(total_sample / 40)
+    total_sample = int(total_sample / 4)
     width = int(total_sample/NUM_WORKERS)
     print("%s threads, %s samples for each" % (NUM_WORKERS, width))
     generator.close()
 
-    channels = list(range(total_sample*20, total_sample*21, width))
+    channels = list(range(total_sample*machine_num, total_sample*(machine_num+1), width))
     wn.ensure_loaded()
     threads = []
     for i, st in enumerate(channels):
@@ -493,15 +499,23 @@ def multi_process_corpus(makevocab=0, is_debug=0):
         threads.append(new_t)
         threads[-1].start()
         print(str(threads[-1]) + ' starts for sample %s-%s' % (st, st+width))
-    print('start counting words')
-    count_words()
-    print('start making vocabulary')
-    make_whole_vocab()
-    print('vocab make thread starts')
+
+    if makevocab:
+        print('start counting words')
+        count_words()
+        print('start making vocabulary')
+        make_whole_vocab(machine_num)
+        print('vocab make thread starts')
 
 
 if __name__ == '__main__':
     in_file = './data/bytecup.corpus.train.txt'
-    multi_process_corpus(makevocab=1)
+    makevocab = 1
+    if "train" not in in_file and makevocab:
+        raise("not train corpus do not make vocab")
+
+    # if makevocab:
+    #     input("are you sure to make vocab?")
+    multi_process_corpus(makevocab=makevocab)
     # write_to_text(in_file, "temp", is_debug=0, log_time=0)
     # 702484
