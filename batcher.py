@@ -81,8 +81,11 @@ class Example(object):
         else:
             self.abs_ids, self.dec_input, self.target, self.dec_len = None
 
+        if hps.pointer_gen:
+            self.enc
+
         # Store the original strings ART:
-        self.original_article = pos_tag_words
+        self.original_article = ' '.join(pos_tag_words)
         self.original_abstract = title
 
     def get_dec_inp_targ_seqs(self, sequence, max_len, start_id, stop_id):
