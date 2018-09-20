@@ -4,10 +4,12 @@ from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
 from termcolor import colored
+from itertools import chain
 
 # from cntk.tokenizer import JiebaTokenizer
 # from cntk.cleanser import Cleanser
 # from cntk.standardizer import Standardizer
+from nltk.tree import Tree
 import time
 import re
 import unicodedata
@@ -186,3 +188,100 @@ def bytes2unicode(line, is_debug=False):
     if is_debug:
         debug_line('unidecoded', line)
     return line
+
+
+def tokenize_add_prio(sents, tokenize, pos_tagger, ner_tagger, is_debug=False, log_time=0):
+
+    tagged_sents = []
+    # these three cost most of the time
+
+    tokenized_sents = [list(tokenize(sent)) for sent in sents]
+    sents_pos = [pos_tagger.tag(sent) for sent in tokenized_sents]
+    # TODO: only a limited ner classes to speed up the process
+    sents_ner = [ner_tagger.tag(sent) for sent in tokenized_sents]
+
+    if is_debug:
+        for sent in tokenized_sents:
+            if len(sent) > 70:
+                debug_line('len longer than 70', " ".join(sent), 'red')
+
+    for sp, sn, st in zip(sents_pos, sents_ner, tokenized_sents):
+        assert len(sp) == len(sn), (
+            "tokenize_add_prio: pos, ner and tokenized words length should be the same, but %s, %s, \n%s\n%s" % (len(sp), len(sn), str(sp), str(sn))
+        )
+        mapped = []
+        for p, n, t in zip(sp, sn, st):
+            mapped.append((p[0].lower(), p[1], n[1]))
+
+        # original word, pos_tag, ner_tag
+        tagged_sents.append(mapped)
+        if is_debug:
+            debug_line("sent pos", str(sp))
+            debug_line("sent ner", str(sn))
+            debug_line("sent combined", str(mapped))
+            input('\n')
+    return sents_pos, tagged_sents
+
+
+def pos_repos_tag(tagged_sents, is_debug=0, log_time=0):
+    """
+    pos retag according to the ner tag, the named entity are tagged as <NE>
+    """
+
+    pos_retagged_sents = []
+    for tagged_sent in tagged_sents:
+        length = 0
+        current_sent = []
+        continuous_chunk = []
+
+        for (pos_token, p_tag, n_tag) in tagged_sent:
+            if n_tag != "O":
+                continuous_chunk.append(pos_token)
+            else:
+                if continuous_chunk:  # if the current chunk is not empty
+                    if is_debug:
+                        retagged = ("_".join(continuous_chunk), "_NE_")
+                        length += len(continuous_chunk)
+                    else:
+                        retagged = (" ".join(continuous_chunk), "NE")
+                        length += len(continuous_chunk)
+                    current_sent.append(retagged)
+                    continuous_chunk = []
+                current_sent.append((pos_token, p_tag))
+                length += 1
+
+        # add the last continuous tokens
+        if continuous_chunk:
+            if is_debug:
+                retagged = ("_".join(continuous_chunk), "_NE_")
+                length += len(continuous_chunk)
+            else:
+                retagged = (" ".join(continuous_chunk), "NE")
+                length += len(continuous_chunk)
+            current_sent.append(retagged)
+
+        if is_debug:
+            debug_line("is in debug mode, no steps can be followed, error may occur by _", '', "red")
+            debug_line("origial sent", str(tagged_sent))
+            debug_line("retagged sent", str(current_sent), 'red')
+        assert len(tagged_sent) == length, "length of tagged_sent and current_sent should be the same, but %s and %s\n%s\n%s" % (len(tagged_sent), length, str(tagged_sent), str(current_sent))
+        pos_retagged_sents.append(current_sent)
+
+    return pos_retagged_sents
+
+
+def traverse_tree(tree, depth=float('inf'), is_debug=0):
+    """
+    Traversing the Tree depth-first,
+    yield leaves up to `depth` level.
+    """
+    for subtree in tree:
+        if type(subtree) == Tree:
+            if subtree.height() <= depth:
+                leaves = subtree.leaves()
+                yield list(chain.from_iterable(list(map(lambda x: x[0].split(" "), leaves))))
+                traverse_tree(subtree)
+        else:
+            # the named entity should be separated
+            leaves = subtree[0].split(" ")
+            yield leaves
