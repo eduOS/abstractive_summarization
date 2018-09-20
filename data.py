@@ -24,7 +24,9 @@ from __future__ import division
 from termcolor import colored
 import numpy as np
 from cntk.tokenizer import text2charlist
+from utils import get_phrase_oovs
 import pymongo
+from settings import oov_size
 
 # <s> and </s> are used in the data files to segment the abstracts into
 # sentences. They don't receive vocab ids.
@@ -55,10 +57,11 @@ mycol = mydb["bytecup2018"]
 class Vocab(object):
     """Vocabulary class for mapping between words and ids (integers)"""
 
-    def __init__(self, _type):
+    def __init__(self, _type, shared_vocab_size):
         self._word_to_id = {}
         self._id_to_word = {}
         self._count = 0
+        self._shared_vocab_size = shared_vocab_size
 
         assert _type in ['enc_vocab', 'dec_vocab', 'stem_vocab', 'pos_vocab', 'ner_vocab']
         vocab_list = mycol.find({"_id": 'vocab_freq_dict'}).next()[_type]
@@ -95,67 +98,50 @@ class Vocab(object):
             raise ValueError('Id not found in vocab: %d' % word_id)
         return self._id_to_word[word_id]
 
+    @property
     def size(self):
         """Returns the total size of the vocabulary"""
         return self._count
 
+    @property
+    def shared_vocab_size(self):
+        """the shared len of the enc and dec"""
+        return self._shared_vocab_size
 
-def article2ids(article_words, vocab):
-    """Map the article words to their ids. Also return a list of OOVs in the
-    article.
 
-    Args:
-      article_words: list of words (strings)
-      vocab: Vocabulary object
-
-    Returns:
-      ids:
-        A list of word ids (integers); OOVs are represented by their temporary
-        article OOV number. If the vocabulary size is 50k and the article has 3
-        OOVs, then these temporary OOV numbers will be 50000, 50001, 50002.
-      oovs:
-        A list of the OOV words in the article (strings), in the order
-        corresponding to their temporary article OOV numbers."""
+def article2ids(article_words, phrase_indices, vocab):
     ids = []
     oovs = []
     unk_id = vocab.word2id(UNKNOWN_TOKEN)
-    for w in article_words:
+    phrase_oovs = get_phrase_oovs(article_words, phrase_indices)
+    article_words_phrases = list(set(article_words)) + phrase_oovs
+    for w in article_words_phrases:
         i = vocab.word2id(w)
-        if i == unk_id:  # If w is OOV
-            if w not in oovs:  # Add to list of OOVs
+        if i == unk_id:
+            if len(oovs) > oov_size:
+                continue
+            if w not in oovs:
                 oovs.append(w)
-            # This is 0 for the first article OOV, 1 for the second article
-            # OOV...
             oov_num = oovs.index(w)
-            # This is e.g. 50000 for the first article OOV, 50001 for the
-            # second...
-            ids.append(vocab.size() + oov_num)
-            # so those words whose ids are bigger than the vocab size are oovs.
-            # soo
-            # amazing
+            ids.append(vocab.shared_vocab_size + oov_num)
         else:
             ids.append(i)
     return ids, oovs
 
 
 def abstract2ids(abstract_words, vocab, article_oovs):
-    """Map the abstract words to their ids. In-article OOVs are mapped to their
-    temporary OOV numbers.
-
-    Args:
-      abstract_words: list of words (strings)
-      vocab: Vocabulary object
-      article_oovs: list of in-article OOV words (strings), in the order
-      corresponding to their temporary article OOV numbers
-
-    Returns:
-      ids: List of ids (integers). In-article OOV words are mapped to their
-      temporary OOV numbers. Out-of-article OOV words are mapped to the UNK
-      token id."""
     ids = []
+    unk_id = vocab.word2id(UNKNOWN_TOKEN)
     for w in abstract_words:
         i = vocab.word2id(w)
-        ids.append(i)
+        if i == unk_id:
+            if w in article_oovs:
+                vocab_idx = vocab.size() + article_oovs.index(w)
+                ids.append(vocab_idx)
+            else:
+                ids.append(unk_id)
+        else:
+            ids.append(i)
     return ids
 
 

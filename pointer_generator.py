@@ -69,6 +69,9 @@ class PointerGenerator(object):
         self._dec_batch = tf.placeholder(tf.int32, [batch_size, max_dec_steps], name='dec_batch')
         self.target_batch = tf.placeholder(tf.int32, [batch_size, hps.max_dec_steps], name='target_batch')
         self.dec_padding_mask = tf.placeholder(tf.float32, [batch_size, hps.max_dec_steps], name='decoder_padding_mask')
+        if FLAGS.pointer_gen:
+            self._enc_batch_extend_vocab = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch_extend_vocab')
+            self._max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
 
         self.cell_c = tf.placeholder(
             tf.float32, shape=[batch_size, self.hps.hidden_dim])
@@ -86,16 +89,6 @@ class PointerGenerator(object):
             self.prev_coverage = tf.placeholder(tf.float32, [None, None], name='prev_coverage')
 
     def _make_feed_dict(self, batch, just_enc=False, gan_eval=False, gan=False):
-        """Make a feed dictionary mapping parts of the batch to the appropriate
-        placeholders.
-
-        Args:
-          batch: Batch object
-          just_enc: Boolean. If True, only feed the parts needed for the
-          encoder.
-          update: only for the evaluation and training of the generator in gan training
-        """
-
         if gan_eval:
             gan = True
         feed_dict = {}
@@ -104,10 +97,15 @@ class PointerGenerator(object):
         feed_dict[self.enc_pos] = batch.pos_batch
         feed_dict[self.enc_ner] = batch.ner_batch
         feed_dict[self.enc_tfidf] = batch.tfidf_batch
-        feed_dict[self.enc_phrase_idx] = batch.phrase_label_batch
-        feed_dict[self.enc_sent_idx] = batch.sent_label_batch
+        if FLAGS.hierarchical_enc:
+            feed_dict[self.enc_phrase_idx] = batch.phrase_label_batch
+            feed_dict[self.enc_sent_idx] = batch.sent_label_batch
         feed_dict[self.enc_lens] = batch.lens_batch
         feed_dict[self.enc_padding_mask] = batch.padding_mask_batch
+        if FLAGS.pointer_gen:
+            feed_dict[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
+            feed_dict[self._max_art_oovs] = batch.max_art_oovs
+
         if not just_enc:
             feed_dict[self.target_batch] = batch.target_batch
             feed_dict[self.dec_padding_mask] = batch.dec_padding_mask
@@ -165,7 +163,7 @@ class PointerGenerator(object):
 
             attention_keys, dec_in_state = conv_encoder(
                 self.emb_enc_inputs,
-                self.enc_lens, hps.mode in ["pretrain_gen", "train_gan"])
+                self.enc_lens, hps.mode in ["pretrain_gen", "train_gan"], indices={"phrase": self.enc_phrase_idx, "sent": self.enc_sent_idx} if FLAGS.hierarchical_enc else None)
 
             self.attention_keys = attention_keys
             self.attention_values = (
@@ -176,6 +174,8 @@ class PointerGenerator(object):
             with tf.variable_scope('decoder') as decoder_scope:
                 is_training = False if self.hps.mode in ["train_gan", 'decode'] else True
                 final_dists = self._conv_decoder(emb_dec_inputs, is_training=is_training)
+                if FLAGS.pointer_gen:
+                    final_dists = self._calc_final_dist(final_dists, self.attn_dists)
                 decoder_scope.reuse_variables()
                 self.final_dists = final_dists
                 self.topk_log_probs, self.indices = tf.nn.top_k(tf.log(self.final_dists[0]), self.hps.beam_size * 2)

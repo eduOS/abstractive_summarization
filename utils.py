@@ -270,7 +270,7 @@ def lstm_encoder(encoder_inputs, seq_len, hidden_dim,
 def conv_encoder(inputs, seq_len, is_training,
                  keep_prob=0.9, cnn_layers=4,
                  nhids_list=[256, 256, 256, 256],
-                 kwidths_list=[3, 3, 3, 3]):
+                 kwidths_list=[3, 3, 3, 3], indices=None):
     embed_size = inputs.get_shape().as_list()[-1]
     batch_size = tf.shape(inputs)[0]
     enc_len = tf.shape(inputs)[1]
@@ -286,7 +286,7 @@ def conv_encoder(inputs, seq_len, is_training,
         if cnn_layers > 0:
             # mapping emb dim to hid dim
             next_layer = linear_mapping_weightnorm(next_layer, nhids_list[0], dropout=keep_prob, var_scope_name="linear_mapping_before_cnn")
-            next_layer = conv_encoder_stack(next_layer, nhids_list, kwidths_list, {'src': keep_prob, 'hid': keep_prob}, is_training=is_training)
+            next_layer = conv_encoder_stack(next_layer, nhids_list, kwidths_list, {'src': keep_prob, 'hid': keep_prob}, is_training=is_training, indices=indices)
 
             next_layer = linear_mapping_weightnorm(next_layer, embed_size, var_scope_name="linear_mapping_after_cnn")
             #  The encoder stack will receive gradients *twice* for each attention pass: dot product and weighted sum.
@@ -298,11 +298,16 @@ def conv_encoder(inputs, seq_len, is_training,
     return attention_keys, final_state
 
 
-def conv_encoder_stack(inputs, nhids_list, kwidths_list, dropout_dict, is_training):
+def conv_encoder_stack(inputs, nhids_list, kwidths_list, dropout_dict, is_training, indices=None):
     next_layer = inputs
     for layer_idx in range(len(nhids_list)):
         nin = nhids_list[layer_idx] if layer_idx == 0 else nhids_list[layer_idx-1]
         nout = nhids_list[layer_idx]
+
+        # for the value and key of phrase attention
+        if layer_idx == 0:
+            phrase_values = tf.next_layer
+
         if nin != nout:
             # mapping for res add
             res_inputs = linear_mapping_weightnorm(next_layer, nout, dropout=dropout_dict['src'], var_scope_name="linear_mapping_cnn_" + str(layer_idx))

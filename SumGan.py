@@ -15,6 +15,7 @@ from pointer_generator import PointerGenerator
 from rollout import Rollout
 from os.path import join as join_path
 from utils import ensure_exists
+from setting import shared_vocab_size
 from gen_utils import calc_running_avg_loss
 from gen_utils import get_best_loss_from_chpt
 from gen_utils import save_ckpt as gen_save_ckpt
@@ -82,6 +83,8 @@ tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be sa
 
 # Hyperparameters
 tf.app.flags.DEFINE_boolean("pointer_gen", True, "If make the model as pointer generator")
+tf.app.flags.DEFINE_boolean("enc_phrase_idx", True, "If make the encoder as hierarchical encoder")
+
 tf.app.flags.DEFINE_integer('hidden_dim', 500, 'Dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 300, 'Dimension of word embeddings.')
 # if batch_size is one and beam size is not one in the decode mode then the beam
@@ -278,11 +281,11 @@ def main(argv):
     hps_gen = namedtuple("HParams4Gen", hps_dict.keys())(**hps_dict)
 
     print("Building vocabulary for generator ...")
-    enc_vocab = Vocab("enc_vocab")
+    enc_vocab = Vocab("enc_vocab", shared_vocab_size)
     stem_vocab = Vocab("stem_vocab")
     pos_vocab = Vocab("pos_vocab")
     ner_vocab = Vocab("ner_vocab")
-    dec_vocab = Vocab("dec_vocab")
+    dec_vocab = Vocab("dec_vocab", shared_vocab_size)
 
     hparam_dis = [
         'mode',

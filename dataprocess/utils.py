@@ -10,6 +10,7 @@ from itertools import chain
 # from cntk.cleanser import Cleanser
 # from cntk.standardizer import Standardizer
 from nltk.tree import Tree
+from collections import defaultdict as dd
 import time
 import re
 import unicodedata
@@ -285,3 +286,9 @@ def traverse_tree(tree, depth=float('inf'), is_debug=0):
             # the named entity should be separated
             leaves = subtree[0].split(" ")
             yield leaves
+
+
+def get_phrase_oovs(words, phrase_indices):
+    df = dd(lambda: [], {})
+    [df[p].append(w) for w, p in zip(words, phrase_indices)]
+    return list(filter(lambda x: len(x) > 1, df.values()))

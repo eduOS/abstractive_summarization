@@ -76,4 +76,5 @@ def conv_attention_decoder(emb_dec_inputs, enc_padding_mask, attention_keys, att
     else:
         logits = tf.reshape(logits, [-1, vocab_size])
 
-    return logits
+    # TODO: get the p_gen and attn_dists
+    return logits, p_gens, attn_dists

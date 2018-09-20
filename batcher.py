@@ -82,11 +82,14 @@ class Example(object):
             self.abs_ids, self.dec_input, self.target, self.dec_len = None
 
         if hps.pointer_gen:
-            self.enc
+            self.enc_input_extend_vocab, self.article_oovs = data.article2ids(pos_tag_words, self.phrase_indices, enc_vocab)
+            if title:
+                abs_ids_extend_vocab = data.abstract2ids(title, dec_vocab, self.article_oovs)
+                _, self.target = self.get_dec_inp_targ_seqs(abs_ids_extend_vocab, hps.max_dec_steps, start_decoding, stop_decoding)
 
         # Store the original strings ART:
         self.original_article = ' '.join(pos_tag_words)
-        self.original_abstract = title
+        self.original_abstract = title if not title else ' '.join(title)
 
     def get_dec_inp_targ_seqs(self, sequence, max_len, start_id, stop_id):
         inp = [start_id] + sequence[:]
@@ -163,6 +166,13 @@ class Batch(object):
             self.lens_batch[i] = ex.enc_len[:]
             for j in range(ex.enc_len):
                 self.padding_mask_batch[i][j] = 1
+
+        if hps.pointer_gen:
+            self.max_art_oovs = max([len(ex.article_oovs) for ex in example_list])
+            self.art_oovs = [ex.article_oovs for ex in example_list]
+            self.enc_batch_extend_vocab = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
+            for i, ex in enumerate(example_list):
+                self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
 
     def init_decoder_seq(self, example_list, hps):
         for ex in example_list:

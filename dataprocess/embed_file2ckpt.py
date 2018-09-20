@@ -12,7 +12,7 @@ import random
 import numpy as np
 import pymongo
 from ..data import PAD_TOKEN, UNKNOWN_TOKEN, START_DECODING, STOP_DECODING
-from ..settings import enc_vocab_size, dec_vocab_size
+from ..settings import enc_vocab_size, dec_vocab_size, oov_size
 
 myclient = pymongo.MongoClient("mongodb://localhost:27017/")
 mydb = myclient["mydatabase"]
@@ -23,13 +23,15 @@ def most_common(_dict, num):
         return [w for w, _ in Counter(_dict).most_common(num)]
 
 
-def make_vocab(enc_vocab_size, dec_vocab_size):
+def make_vocab(enc_vocab_size, dec_vocab_size, unk_size):
+    unk_vocab = ["o_o_v_%s" % unk for unk in range(unk_size)]
     whole_vocab = list(mycol.find({"_id": 'vocab_freq_dict'}))[0]
     enc_words = whole_vocab['enc_vocab_freq_dict']
     dec_words = whole_vocab['dec_vocab_freq_dict']
     stem_words = whole_vocab['stem_vocab_freq_dict']
 
     shared_part = most_common(dict(dec_words + [[PAD_TOKEN, float('inf')], [UNKNOWN_TOKEN, 10**6]]), dec_vocab_size-2)
+    shared_part = shared_part + unk_vocab
     dec_part = [START_DECODING, STOP_DECODING]
     dec_vocab = shared_part + dec_part
     assert len(dec_vocab) == dec_vocab_size, 'dec_vocab should be of length %s but %s' % (dec_vocab_size, len(dec_vocab))
@@ -39,7 +41,7 @@ def make_vocab(enc_vocab_size, dec_vocab_size):
         if s in enc_words:
             del enc_words[s]
 
-    enc_part = most_common(enc_words, enc_vocab_size - len(shared_part))
+    enc_part = most_common(enc_words, enc_vocab_size - len(dec_vocab_size-2))
     enc_vocab = shared_part + enc_part
     assert len(enc_vocab) == enc_vocab_size, 'enc_vocab should be of length %s but %s' % (enc_vocab_size, len(enc_vocab))
     mycol.update_many(
@@ -56,7 +58,7 @@ def make_vocab(enc_vocab_size, dec_vocab_size):
 
 
 def check_emb(embed_path, enc_vocab_size, dec_vocab_size):
-    shared_part, enc_part, dec_part = make_vocab(enc_vocab_size, dec_vocab_size)
+    shared_part, enc_part, dec_part = make_vocab(enc_vocab_size, dec_vocab_size, oov_size)
     glove_embed_dic = {}
     max_ = 0
     min_ = 0
