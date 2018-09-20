@@ -223,33 +223,58 @@ def list_duplicates(seq):
 
 
 @timeit
-def make_whole_vocab(machine_num, log_time=0):
+def make_whole_vocab(machine_num, log_time=0, _continue=0):
     myclient = pymongo.MongoClient("mongodb://localhost:27017/")
     mydb = myclient["mydatabase"]
     mycol = mydb["bytecup2018"]
-    enc_dict = dict(enc_vocab_counter)
-    dec_dict = dict(dec_vocab_counter)
-    stem_dict = dict(stem_counter)
     vocab_name = "vocab_freq_dict_" + str(machine_num)
-    if list(mycol.find({"_id": vocab_name})):
+    if not _continue and list(mycol.find({"_id": vocab_name})):
         try:
             mycol.remove({"_id": vocab_name})
         except:
             mycol.delete_one({"_id": vocab_name})
 
-    enc_vocab = sorted(list(zip(enc_dict.keys(), enc_dict.values())), key=lambda x: x[1], reverse=True)
-    dec_vocab = sorted(list(zip(dec_dict.keys(), dec_dict.values())), key=lambda x: x[1], reverse=True)
-    stem_vocab = sorted(list(zip(stem_dict.keys(), stem_dict.values())), key=lambda x: x[1], reverse=True)
-
     try:
-        mycol.insert_one(
-            {
-                "_id": vocab_name,
-                "enc_vocab_freq_dict": enc_vocab,
-                "dec_vocab_freq_dict": dec_vocab,
-                "stem_vocab_freq_dict": stem_vocab,
-            }
-        )
+        if not _continue:
+            enc_dict = dict(enc_vocab_counter)
+            dec_dict = dict(dec_vocab_counter)
+            stem_dict = dict(stem_counter)
+            enc_vocab = sorted(list(zip(enc_dict.keys(), enc_dict.values())), key=lambda x: x[1], reverse=True)
+            dec_vocab = sorted(list(zip(dec_dict.keys(), dec_dict.values())), key=lambda x: x[1], reverse=True)
+            stem_vocab = sorted(list(zip(stem_dict.keys(), stem_dict.values())), key=lambda x: x[1], reverse=True)
+
+            mycol.insert_one(
+                {
+                    "_id": vocab_name,
+                    "enc_vocab_freq_dict": enc_vocab,
+                    "dec_vocab_freq_dict": dec_vocab,
+                    "stem_vocab_freq_dict": stem_vocab,
+                }
+            )
+        else:
+            v = mycol.find({"_id": vocab_name}).next()
+            enc_vocab_counter.update(dict(v["enc_vocab_freq_dict"]))
+            dec_vocab_counter.update(dict(v["dec_vocab_freq_dict"]))
+            stem_counter.update(dict(v["stem_vocab_freq_dict"]))
+            enc_dict = dict(enc_vocab_counter)
+            dec_dict = dict(dec_vocab_counter)
+            stem_dict = dict(stem_counter)
+            enc_vocab = sorted(list(zip(enc_dict.keys(), enc_dict.values())), key=lambda x: x[1], reverse=True)
+            dec_vocab = sorted(list(zip(dec_dict.keys(), dec_dict.values())), key=lambda x: x[1], reverse=True)
+            stem_vocab = sorted(list(zip(stem_dict.keys(), stem_dict.values())), key=lambda x: x[1], reverse=True)
+            try:
+                mycol.remove({"_id": vocab_name})
+            except:
+                mycol.delete_one({"_id": vocab_name})
+
+            mycol.insert_one(
+                {
+                    "_id": vocab_name,
+                    "enc_vocab_freq_dict": enc_vocab,
+                    "dec_vocab_freq_dict": dec_vocab,
+                    "stem_vocab_freq_dict": stem_vocab,
+                }
+            )
     except Exception as e:
         enc_f = open('enc_vocab_fre_dict,pkl', 'w')
         dec_f = open('dec_vocab_fre_dict,pkl', 'w')
@@ -370,8 +395,9 @@ def process_one_sample(generator, mycol, tokenize, pos_tagger, ner_tagger, port,
     except TypeError:
         print(colored('None object and break', 'red'))
         return False
-    except CursorNotFound:
+    except CursorNotFound as e:
         print(colored('cursor not found timeout error', 'red'))
+        print(e)
         return "error"
     except StopIteration:
         print(colored('stop iteration and break', 'red'))
@@ -476,6 +502,7 @@ def processor(st=0, ed=0, makevocab=0, is_debug=0, log_time=0, _continue=False):
 def multi_process_corpus(makevocab=0, is_debug=0):
     # 95:0, 96:1, 160:2, 243:3
     machine_num = 0
+    _continue = True
     # https://stackoverflow.com/a/11554877/3552975
 
     myclient = pymongo.MongoClient("mongodb://localhost:27017/")
@@ -495,7 +522,8 @@ def multi_process_corpus(makevocab=0, is_debug=0):
         time.sleep(3)
         if i == len(channels)-1:
             width = width + NUM_WORKERS
-        new_t = Thread(target=processor, kwargs={"st": st, 'ed': st+width, "makevocab": makevocab})
+
+        new_t = Thread(target=processor, kwargs={"st": st, 'ed': st+width, "makevocab": makevocab, "_continue": _continue})
         threads.append(new_t)
         threads[-1].start()
         print(str(threads[-1]) + ' starts for sample %s-%s' % (st, st+width))
@@ -504,7 +532,7 @@ def multi_process_corpus(makevocab=0, is_debug=0):
         print('start counting words')
         count_words()
         print('start making vocabulary')
-        make_whole_vocab(machine_num)
+        make_whole_vocab(machine_num, _continue=_continue)
         print('vocab make thread starts')
 
 
