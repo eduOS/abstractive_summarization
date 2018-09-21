@@ -188,7 +188,9 @@ def linear_mapping_weightnorm(inputs, out_dim, dropout=1.0, var_scope_name="line
     input_shape = inputs.get_shape().as_list()    # static shape. may has None
     input_shape_tensor = tf.shape(inputs)
     #  use weight normalization (Salimans & Kingma, 2016)  w = g* v/2-norm(v)
-    V = tf.get_variable('V', shape=[int(input_shape[-1]), out_dim], dtype=tf.float32, initializer=tf.random_normal_initializer(mean=0, stddev=tf.sqrt(dropout*1.0/int(input_shape[-1]))), trainable=True)
+    V = tf.get_variable('V', shape=[int(input_shape[-1]), out_dim], dtype=tf.float32,
+                        initializer=tf.random_normal_initializer(mean=0, stddev=tf.sqrt(dropout*1.0/int(input_shape[-1]))),
+                        trainable=True)
     V_norm = tf.norm(V.initialized_value(), axis=0)  # V shape is M*N,  V_norm shape is N
     # https://stackoverflow.com/a/34887370/3552975
     g = tf.get_variable('g', dtype=tf.float32, initializer=V_norm, trainable=True)
@@ -223,54 +225,10 @@ def red_print(message, color='red'):
     print(colored(message, color))
 
 
-def lstm_encoder(encoder_inputs, seq_len, hidden_dim,
-                 rand_unif_init=None, state_is_tuple=True,
-                 trunc_norm_init_std=1e-4,
-                 ):
-    """Add a single-layer bidirectional LSTM encoder to the graph.
-
-    Args:
-        encoder_inputs: A tensor of shape [batch_size, <=max_enc_steps,
-        emb_size].
-        seq_len: Lengths of encoder_inputs (before padding). A tensor of shape
-        [batch_size].
-
-    Returns:
-        encoder_outputs:
-        A tensor of shape [batch_size, <=max_enc_steps, 2*hidden_dim]. It's
-        2*hidden_dim because it's the concatenation of the forwards and
-        backwards states.
-        fw_state, bw_state:
-        Each are LSTMStateTuples of shape
-        ([batch_size,hidden_dim],[batch_size,hidden_dim])
-    """
-    with tf.variable_scope('encoder'):
-        cell_fw = tf.contrib.rnn.LSTMCell(
-            hidden_dim, initializer=rand_unif_init, state_is_tuple=state_is_tuple)
-        cell_bw = tf.contrib.rnn.LSTMCell(
-            hidden_dim, initializer=rand_unif_init, state_is_tuple=state_is_tuple)
-        (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
-            cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len)
-        # the sequence length of the encoder_inputs varies depending on the
-        # batch, which will make the second dimension of the
-        # encoder_outputs different in different batches
-
-        # concatenate the forwards and backwards states
-        encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
-        # encoder_outputs: [batch_size * beam_size, max_time, output_size*2]
-        # fw_st & bw_st: [batch_size * beam_size, num_hidden]
-
-    dec_in_state = reduce_states(
-        fw_st, bw_st, hidden_dim=hidden_dim,
-        activation_fn=tf.tanh, trunc_norm_init_std=trunc_norm_init_std)
-    attention_keys = encoder_outputs
-    return attention_keys, dec_in_state
-
-
-def conv_encoder(inputs, seq_len, is_training,
+def conv_encoder(inputs, is_training,
                  keep_prob=0.9, cnn_layers=4,
-                 nhids_list=[256, 256, 256, 256],
-                 kwidths_list=[3, 3, 3, 3], indices=None):
+                 nhids_list=[256, 256, 256, 256, 256, 256],
+                 kwidths_list=[3, 3, 3, 3, 3, 3], indices=None):
     embed_size = inputs.get_shape().as_list()[-1]
     batch_size = tf.shape(inputs)[0]
     enc_len = tf.shape(inputs)[1]
@@ -286,7 +244,7 @@ def conv_encoder(inputs, seq_len, is_training,
         if cnn_layers > 0:
             # mapping emb dim to hid dim
             next_layer = linear_mapping_weightnorm(next_layer, nhids_list[0], dropout=keep_prob, var_scope_name="linear_mapping_before_cnn")
-            next_layer = conv_encoder_stack(next_layer, nhids_list, kwidths_list, {'src': keep_prob, 'hid': keep_prob}, is_training=is_training, indices=indices)
+            next_layer, phrase_keys, sent_keys = conv_encoder_stack(next_layer, nhids_list, kwidths_list, {'src': keep_prob, 'hid': keep_prob}, is_training=is_training, indices=indices)
 
             next_layer = linear_mapping_weightnorm(next_layer, embed_size, var_scope_name="linear_mapping_after_cnn")
             #  The encoder stack will receive gradients *twice* for each attention pass: dot product and weighted sum.
@@ -295,18 +253,16 @@ def conv_encoder(inputs, seq_len, is_training,
 
         attention_keys = tf.reshape(next_layer, [batch_size, enc_len, embed_size])
     final_state = tf.reduce_mean(cnn_c_output, 1)
-    return attention_keys, final_state
+    return attention_keys, final_state, phrase_keys, sent_keys
 
 
 def conv_encoder_stack(inputs, nhids_list, kwidths_list, dropout_dict, is_training, indices=None):
     next_layer = inputs
+    phrase_keys = None
+    sent_keys = None
     for layer_idx in range(len(nhids_list)):
         nin = nhids_list[layer_idx] if layer_idx == 0 else nhids_list[layer_idx-1]
         nout = nhids_list[layer_idx]
-
-        # for the value and key of phrase attention
-        if layer_idx == 0:
-            phrase_values = tf.next_layer
 
         if nin != nout:
             # mapping for res add
@@ -322,7 +278,11 @@ def conv_encoder_stack(inputs, nhids_list, kwidths_list, dropout_dict, is_traini
         next_layer = conv1d_weightnorm(inputs=next_layer, layer_idx=layer_idx, out_dim=nout*2, kernel_size=kwidths_list[layer_idx], padding="SAME", dropout=dropout_dict['hid'], var_scope_name="conv_layer_"+str(layer_idx))
         next_layer = gated_linear_units(next_layer)
         next_layer = (next_layer + res_inputs) * tf.sqrt(0.5)
-    return next_layer
+        if indices and layer_idx == 1:
+            phrase_keys = my_gather(next_layer, indices['phrase'])
+        elif indices and layer_idx == list(range(len(nhids_list)))[-3]:
+            sent_keys = my_gather(next_layer, indices['sent'])
+    return next_layer, phrase_keys, sent_keys
 
 
 def gated_linear_units(inputs):
@@ -334,10 +294,10 @@ def gated_linear_units(inputs):
     return tf.multiply(input_pass, input_gate)
 
 
-def conv1d_weightnorm(inputs, layer_idx, out_dim, kernel_size, padding="SAME", dropout=1.0,  var_scope_name="conv_layer"):
+def conv1d_weightnorm(inputs, out_dim, kernel_size, padding="SAME", dropout=1.0,  var_scope_name=None, layer_idx=None):
     #  TODO: padding should take attention
 
-    with tf.variable_scope("conv_layer_"+str(layer_idx)):
+    with tf.variable_scope(var_scope_name if var_scope_name else "conv_layer_"+str(layer_idx)):
         in_dim = int(inputs.get_shape()[-1])
         V = tf.get_variable('V', shape=[kernel_size, in_dim, out_dim], dtype=tf.float32, initializer=tf.random_normal_initializer(mean=0, stddev=tf.sqrt(4.0*dropout/(kernel_size*in_dim))), trainable=True)
         V_norm = tf.norm(V.initialized_value(), axis=[0, 1])
@@ -349,79 +309,6 @@ def conv1d_weightnorm(inputs, layer_idx, out_dim, kernel_size, padding="SAME", d
         W = tf.reshape(g, [1, 1, out_dim])*tf.nn.l2_normalize(V, [0, 1])
         inputs = tf.nn.bias_add(tf.nn.conv1d(value=inputs, filters=W, stride=1, padding=padding), b)
         return inputs
-
-
-def reduce_states(fw_st, bw_st, hidden_dim, activation_fn=tf.tanh, trunc_norm_init_std=1e-4):
-    """Add to the graph a linear layer to reduce the encoder's final FW and
-    BW state into a single initial state for the decoder. This is needed
-    because the encoder is bidirectional but the decoder is not.
-
-    Args:
-        fw_st: LSTMStateTuple with hidden_dim units.
-        bw_st: LSTMStateTuple with hidden_dim units.
-
-    Returns:
-        state: LSTMStateTuple with hidden_dim units.
-    """
-    trunc_norm_init = tf.truncated_normal_initializer(stddev=trunc_norm_init_std)
-    alpha = 0.01
-
-    with tf.variable_scope('reduce_final_st'):
-
-        # Define weights and biases to reduce the cell and reduce the state
-        w_reduce_c = tf.get_variable(
-            'w_reduce_c', [hidden_dim * 2, hidden_dim],
-            dtype=tf.float32, initializer=trunc_norm_init)
-        w_reduce_h = tf.get_variable(
-            'w_reduce_h', [hidden_dim * 2, hidden_dim],
-            dtype=tf.float32, initializer=trunc_norm_init)
-        bias_reduce_c = tf.get_variable(
-            'bias_reduce_c', [hidden_dim],
-            dtype=tf.float32, initializer=trunc_norm_init)
-        bias_reduce_h = tf.get_variable(
-            'bias_reduce_h', [hidden_dim],
-            dtype=tf.float32, initializer=trunc_norm_init)
-
-        # Apply linear layer
-        # Concatenation of fw and bw cell
-        old_c = tf.concat(axis=1, values=[fw_st.c, bw_st.c])
-        # Concatenation of fw and bw state
-        old_h = tf.concat(axis=1, values=[fw_st.h, bw_st.h])
-        # [batch_size * beam_size, hidden_dim]
-        _c = tf.matmul(old_c, w_reduce_c) + bias_reduce_c
-        _h = tf.matmul(old_h, w_reduce_h) + bias_reduce_h
-        new_c = tf.nn.relu(_c) - alpha * tf.nn.relu(-_c)
-        new_h = tf.nn.relu(_h) - alpha * tf.nn.relu(-_h)
-        # new_c = activation_fn(tf.matmul(old_c, w_reduce_c) + bias_reduce_c)  # Get new cell from old cell
-        # new_h = activation_fn(tf.matmul(old_h, w_reduce_h) + bias_reduce_h)  # Get new state from old state
-        return tf.contrib.rnn.LSTMStateTuple(new_c, new_h)  # Return new cell and state
-
-
-def selective_fn(encoder_states, dec_in_state):
-    enc_states = tf.transpose(encoder_states, perm=[1, 0, 2])
-    dynamic_enc_steps = tf.shape(enc_states)[0]
-    output_dim = encoder_states.get_shape()[-1]
-    sele_ar = tf.TensorArray(dtype=tf.float32, size=dynamic_enc_steps)
-
-    with tf.variable_scope('selective'):
-
-        def cond(_e, i, _m):
-            return i < dynamic_enc_steps
-
-        def mask_fn(inputs, i, sele_ar):
-            sGate = tf.sigmoid(
-                linear(inputs[i], output_dim, True, scope="w") +
-                linear([dec_in_state.h, dec_in_state.c], output_dim, True, scope="u"))
-            _h = inputs[i] * sGate
-            sele_ar = sele_ar.write(i, _h)
-            if i == tf.constant(0, dtype=tf.int32):
-                tf.get_variable_scope().reuse_variables()
-            return inputs, i+1, sele_ar
-
-        _, _, sele_ar = tf.while_loop(
-            cond, mask_fn, (enc_outputs, tf.constant(0, dtype=tf.int32), sele_ar))
-        new_enc_outputs = tf.transpose(sele_ar.stack(), perm=[1, 0, 2])
-    return new_enc_outputs
 
 
 def sattolo_cycle(items):
@@ -527,7 +414,10 @@ def conv_decoder_stack(target_embed, attention_keys, attention_values, inputs, e
         # special process here, first padd then conv, because tf does not suport padding other than SAME and VALID
         next_layer = tf.pad(next_layer, [[0, 0], [kwidths_list[layer_idx]-1, kwidths_list[layer_idx]-1], [0, 0]], "CONSTANT")
 
-        next_layer = conv1d_weightnorm(inputs=next_layer, layer_idx=layer_idx, out_dim=nout*2, kernel_size=kwidths_list[layer_idx], padding="VALID", dropout=dropout_dict['hid'], var_scope_name="conv_layer_"+str(layer_idx))
+        next_layer = conv1d_weightnorm(
+            inputs=next_layer, layer_idx=layer_idx, out_dim=nout*2,
+            kernel_size=kwidths_list[layer_idx], padding="VALID",
+            dropout=dropout_dict['hid'], var_scope_name="conv_layer_"+str(layer_idx))
         layer_shape = next_layer.get_shape().as_list()
         assert len(layer_shape) == 3
         # to avoid using future information
@@ -638,3 +528,14 @@ def transpose_batch_time(x):
         tensor_shape.TensorShape(
             [x_static_shape[1].value, x_static_shape[0].value]).concatenate(x_static_shape[2:]))
     return x_t
+
+
+def my_gather(inputs, idx):
+    batch_size = inputs.get_shape().as_list()[0]
+    batch_idx = tf.range(0, limit=batch_size)
+    batch_idx = tf.expand_dims(batch_idx, 1)
+    input_len = tf.shape(inputs)[1]
+    batch_idx = tf.tile(batch_idx, [1, input_len])
+    indices = tf.stack((batch_idx, idx), axis=2)
+    gathered_inputs = tf.gather_nd(inputs, indices)
+    return gathered_inputs

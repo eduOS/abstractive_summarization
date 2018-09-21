@@ -152,7 +152,7 @@ class Batch(object):
         self.phrase_label_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
         self.sent_label_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
         self.tfidf_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.float32)
-        self.lens_batch = np.zeros((hps.batch_size), dtype=np.int32)
+        # self.lens_batch = np.zeros((hps.batch_size), dtype=np.int32)
         self.padding_mask_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.float32)
 
         for i, ex in enumerate(example_list):
@@ -163,7 +163,7 @@ class Batch(object):
             self.phrase_label_batch[i, :] = ex.phrase_indices[:]
             self.sent_label_batch[i, :] = ex.sent_indices[:]
             self.tfidf_batch[i, :] = ex.enc_tfidf[:]
-            self.lens_batch[i] = ex.enc_len[:]
+            # self.lens_batch[i] = ex.enc_len[:]
             for j in range(ex.enc_len):
                 self.padding_mask_batch[i][j] = 1
 

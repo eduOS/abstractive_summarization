@@ -26,6 +26,7 @@ import tensorflow as tf
 from termcolor import colored
 from attention_decoder import conv_attention_decoder
 from utils import conv_encoder
+from utils import my_gather
 from utils import linear_mapping_weightnorm
 from codecs import open
 from data import PAD_TOKEN, UNKNOWN_TOKEN, START_DECODING, STOP_DECODING
@@ -63,7 +64,7 @@ class PointerGenerator(object):
 
         self.enc_batch = tf.placeholder(tf.int32, [batch_size, None], name='enc_batch')
         self.temp_batch = tf.placeholder(tf.int32, [batch_size, None], name='temp_batch_for_embedding')
-        self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
+        # self.enc_lens = tf.placeholder(tf.int32, [batch_size], name='enc_lens')
         self.enc_padding_mask = tf.placeholder(tf.float32, [batch_size, None], name='enc_padding_mask')
 
         self._dec_batch = tf.placeholder(tf.int32, [batch_size, max_dec_steps], name='dec_batch')
@@ -100,7 +101,7 @@ class PointerGenerator(object):
         if FLAGS.hierarchical_enc:
             feed_dict[self.enc_phrase_idx] = batch.phrase_label_batch
             feed_dict[self.enc_sent_idx] = batch.sent_label_batch
-        feed_dict[self.enc_lens] = batch.lens_batch
+        # feed_dict[self.enc_lens] = batch.lens_batch
         feed_dict[self.enc_padding_mask] = batch.padding_mask_batch
         if FLAGS.pointer_gen:
             feed_dict[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
@@ -161,15 +162,28 @@ class PointerGenerator(object):
                     for samples in k_samples_ls
                 ]
 
-            attention_keys, dec_in_state = conv_encoder(
+            attention_keys, dec_in_state, phrase_keys, sent_keys = conv_encoder(
                 self.emb_enc_inputs,
-                self.enc_lens, hps.mode in ["pretrain_gen", "train_gan"], indices={"phrase": self.enc_phrase_idx, "sent": self.enc_sent_idx} if FLAGS.hierarchical_enc else None)
+                hps.mode in ["pretrain_gen", "train_gan"],
+                indices={"phrase": self.enc_phrase_idx, "sent": self.enc_sent_idx} if self.hierarchical_enc else None)
 
             self.attention_keys = attention_keys
             self.attention_values = (
                 linear_mapping_weightnorm(
                     self.attention_keys, self.emb_enc_inputs.get_shape()[-1].value, var_scope_name="attention_key2value"
                 ) + self.emb_enc_inputs) * tf.sqrt(0.5)
+
+            phrase_emb = my_gather(self.emb_enc_inputs, self.enc_phrase_idx)
+            self.phrase_values = (
+                linear_mapping_weightnorm(
+                    phrase_keys, phrase_emb.get_shape()[-1].value, var_scope_name="phrase_attention_key2value"
+                ) + phrase_emb) * tf.sqrt(0.5)
+
+            sent_emb = my_gather(self.emb_enc_inputs, self.enc_sent_idx)
+            self.phrase_values = (
+                linear_mapping_weightnorm(
+                    sent_keys, sent_emb.get_shape()[-1].value, var_scope_name="sent_attention_key2value"
+                ) + sent_emb) * tf.sqrt(0.5)
 
             with tf.variable_scope('decoder') as decoder_scope:
                 is_training = False if self.hps.mode in ["train_gan", 'decode'] else True
@@ -263,89 +277,9 @@ class PointerGenerator(object):
     def get_cur_lr(self, sess):
         return sess.run(self.learning_rate)
 
-    def beam_search(self):
-        beam_size = self.hps.beam_size
-        batch_size = self.hps.batch_size
-        vocab_size = self._dec_vocab.size()
-        num_steps = self.hps.max_dec_steps
-
-        log_beam_probs, beam_symbols = [], []
-        output_projection = None
-
-        _attention_keys = tf.tile(tf.expand_dims(self.attention_keys, axis=1), [1, beam_size, 1, 1])
-        _attention_keys = tf.reshape(_attention_keys, [batch_size*beam_size, tf.shape(self.attention_keys)[1], self.attention_keys.get_shape().as_list()[-1]])
-        _attention_values = tf.tile(tf.expand_dims(self.attention_values, axis=1), [1, beam_size, 1, 1])
-        _attention_values = tf.reshape(_attention_values, [batch_size*beam_size, tf.shape(self.attention_values)[1], self.attention_values.get_shape().as_list()[-1]])
-        _enc_padding_mask = tf.tile(tf.expand_dims(self.enc_padding_mask, axis=1), [1, beam_size, 1])
-        _enc_padding_mask = tf.reshape(_enc_padding_mask, [batch_size*beam_size, tf.shape(self.enc_padding_mask)[1]])
-
-        def beam_search(prev, i, log_fn):
-            if output_projection is not None:
-                prev = tf.nn.xw_plus_b(prev, output_projection[0], output_projection[1])
-
-            log_probs = log_fn(prev)
-
-            if i > 1:
-                log_probs = tf.reshape(tf.expand_dims(tf.reduce_sum(tf.stack(log_beam_probs, axis=1), axis=1), axis=1) + log_probs,
-                                       [-1, beam_size * vocab_size])
-            best_probs, indices = tf.nn.top_k(log_probs, beam_size)
-            indices = tf.squeeze(tf.reshape(indices, [-1, 1]))
-            best_probs = tf.reshape(best_probs, [batch_size*beam_size])
-
-            symbols = indices % vocab_size       # which word in vocabulary
-            beam_parent = indices // vocab_size  # which hypothesis it came from
-
-            beam_symbols.append(symbols)
-
-            index_base = tf.reshape(
-                tf.tile(tf.expand_dims(tf.range(batch_size) * beam_size, axis=1), [1, beam_size]), [-1])
-            real_path = beam_parent + index_base
-            if i > 1:
-                pre_sum = tf.reduce_sum(tf.stack(log_beam_probs, axis=1), axis=1)
-                pre_sum = tf.gather(pre_sum, real_path)
-            else:
-                pre_sum = 0
-            log_beam_probs.append(best_probs-pre_sum)
-            if i > 1:
-                for j in range(i)[:0:-1]:
-                    beam_symbols[j-1] = tf.gather(beam_symbols[j-1], real_path)
-                    log_beam_probs[j-1] = tf.gather(log_beam_probs[j-1], real_path)
-
-        start_token = tf.fill([batch_size, 1], self._dec_vocab.word2id(START_DECODING))
-        start_token = tf.nn.embedding_lookup(self.dec_embeddings, start_token)
-        dec_input = start_token
-        start_token = tf.tile(start_token, [beam_size, 1, 1])
-
-        for i in range(num_steps):
-            if i == 0:
-                attention_keys = self.attention_keys
-                attention_values = self.attention_values
-                enc_padding_mask = self.enc_padding_mask
-            else:
-                attention_keys = _attention_keys
-                attention_values = _attention_values
-                enc_padding_mask = _enc_padding_mask
-            vocab_dists = self._conv_decoder(dec_input, attention_keys, attention_values, enc_padding_mask, is_training=False)
-            beam_search(vocab_dists[0], i+1, tf.log)
-            dec_input = tf.nn.embedding_lookup(self.dec_embeddings, tf.stack(values=beam_symbols, axis=1))
-            dec_input = tf.concat([start_token, dec_input], axis=1)
-            dec_input = tf.reshape(dec_input, [batch_size*beam_size, len(beam_symbols)+1, self.hps.char_emb_dim])
-
-        best_seq = tf.stack(values=beam_symbols, axis=1)
-        self.best_seq = tf.reshape(best_seq, [batch_size, beam_size, num_steps])
-
-    def run_beam_search(self, sess, batch):
-        feed_dict = self._make_feed_dict(batch, just_enc=True)
-        best_seq = sess.run(self.best_seq, feed_dict)  # run the encoder
-        return best_seq
-
     def _conv_decoder(self, emb_dec_inputs,
                       attention_keys=None, attention_values=None, enc_padding_mask=None, is_training=True, mask=True):
 
-        if attention_keys is None:
-            enc_padding_mask = self.enc_padding_mask
-            attention_keys = self.attention_keys
-            attention_values = self.attention_values
         vsize = self.hps.dec_vocab_size
         logits = conv_attention_decoder(
             emb_dec_inputs, enc_padding_mask, attention_keys, attention_values, vsize, is_training)

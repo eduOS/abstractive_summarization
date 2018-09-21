@@ -170,7 +170,10 @@ def make_whole_vocab(machine_num, log_time=0, _continue=0):
         try:
             mycol.remove({"_id": vocab_name})
         except:
-            mycol.delete_one({"_id": vocab_name})
+            try:
+                mycol.delete_one({"_id": vocab_name})
+            except:
+                pass
 
     try:
         if not _continue:
@@ -203,7 +206,10 @@ def make_whole_vocab(machine_num, log_time=0, _continue=0):
             try:
                 mycol.remove({"_id": vocab_name})
             except:
-                mycol.delete_one({"_id": vocab_name})
+                try:
+                    mycol.delete_one({"_id": vocab_name})
+                except:
+                    pass
 
             mycol.insert_one(
                 {
@@ -214,6 +220,13 @@ def make_whole_vocab(machine_num, log_time=0, _continue=0):
                 }
             )
     except Exception as e:
+        enc_dict = dict(enc_vocab_counter)
+        dec_dict = dict(dec_vocab_counter)
+        stem_dict = dict(stem_counter)
+        enc_vocab = sorted(list(zip(enc_dict.keys(), enc_dict.values())), key=lambda x: x[1], reverse=True)
+        dec_vocab = sorted(list(zip(dec_dict.keys(), dec_dict.values())), key=lambda x: x[1], reverse=True)
+        stem_vocab = sorted(list(zip(stem_dict.keys(), stem_dict.values())), key=lambda x: x[1], reverse=True)
+
         enc_f = open('enc_vocab_fre_dict,pkl', 'w')
         dec_f = open('dec_vocab_fre_dict,pkl', 'w')
         stem_f = open('stem_vocab_fre_dict,pkl', 'w')
