@@ -46,6 +46,7 @@ def phrase_title(ori_title, debug=0):
         [len(c)*[j+start+1]
             for j, c in enumerate(chunked)]))
 
+    assert len(sents_pos[0]) == len(phrase_mark), "sent_pos not equal to phrase mark len"
     info_title = [(p, s[0].lower(), s[1]) for p, s in zip(phrase_mark, sents_pos[0])]
 
     if debug:

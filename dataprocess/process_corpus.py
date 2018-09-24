@@ -26,6 +26,7 @@ from utils import timeit
 from utils import tokenize_add_prio
 from utils import pos_repos_tag
 from utils import traverse_tree
+from utils import process_title
 from nltk.corpus import wordnet as wn
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 # from nltk.stem import LancasterStemmer
@@ -227,9 +228,9 @@ def make_whole_vocab(machine_num, log_time=0, _continue=0):
         dec_vocab = sorted(list(zip(dec_dict.keys(), dec_dict.values())), key=lambda x: x[1], reverse=True)
         stem_vocab = sorted(list(zip(stem_dict.keys(), stem_dict.values())), key=lambda x: x[1], reverse=True)
 
-        enc_f = open('enc_vocab_fre_dict,pkl', 'w')
-        dec_f = open('dec_vocab_fre_dict,pkl', 'w')
-        stem_f = open('stem_vocab_fre_dict,pkl', 'w')
+        enc_f = open('enc_vocab_fre_dict.pkl', 'w')
+        dec_f = open('dec_vocab_fre_dict.pkl', 'w')
+        stem_f = open('stem_vocab_fre_dict.pkl', 'w')
         pickle.dump(enc_vocab, enc_f)
         pickle.dump(dec_vocab, dec_f)
         pickle.dump(stem_vocab, stem_f)
@@ -277,24 +278,6 @@ def word_normalize(tagged_sents, port, wnl, is_debug=False, log_time=0):
     return normalized_sents
 
 
-def process_title(title, tokenize, pos_tagger, ner_tagger, makevocab=0, is_debug=False, log_time=0, max_len=18):
-    title = title.replace("''", '"')
-    tokenized_title = list(tokenize(title))
-    if is_debug:
-        debug_line("tokenized title", tokenized_title)
-
-    title_pos = pos_tagger.tag(tokenized_title)
-
-    lowercased = list(map(lambda x: x[0].lower(), title_pos))
-    if makevocab:
-        dec_queue.put(dict(Counter(lowercased)))
-
-    if is_debug:
-        debug_line("lower cased title", str(lowercased))
-    lowercased = lowercased[:max_len]
-    return lowercased
-
-
 def delete_unk_sents(sents):
     """
     delete by hand, if too many unks
@@ -335,7 +318,7 @@ def process_one_sample(generator, mycol, tokenize, pos_tagger, ner_tagger, port,
     # tagged_sents: pos_tag_word, pos_tag, named entity
 
     if title is not None:
-        title = process_title(title, tokenize, pos_tagger, ner_tagger, makevocab=1, is_debug=0, log_time=1)
+        title = process_title(title, tokenize, pos_tagger, dec_queue, makevocab=1, is_debug=0, log_time=1)
 
     # normalized words only for tfidf scores
     normalized_sents = word_normalize(tagged_sents, port, wnl, is_debug=0, log_time=1)
@@ -370,6 +353,7 @@ def process_one_sample(generator, mycol, tokenize, pos_tagger, ner_tagger, port,
         {"new_id": _id},
         {
             "$set": {
+                # the title should be added here
                 "pos_tag_words": pos_tag_words,
                 "pos_tags": pos_tags,
                 "ner_tags": ner_tags,

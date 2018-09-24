@@ -57,8 +57,9 @@ class Example(object):
         stem = sample["stem"]
         self.enc_tfidf = sample["tfidf_scores"]
         self.phrase_indices = sample["phrase_indices"]
+        self.title_phrase_indices = sample["title_phrase_indices"]
         self.sent_indices = sample["sent_indices"]
-        title = sample["title"]
+        title = sample["pos_tag_title"]
         self.hps = hps
 
         # Get ids of special tokens
@@ -84,7 +85,7 @@ class Example(object):
         if hps.pointer_gen:
             self.enc_input_extend_vocab, self.article_oovs = data.article2ids(pos_tag_words, self.phrase_indices, enc_vocab)
             if title:
-                abs_ids_extend_vocab = data.abstract2ids(title, dec_vocab, self.article_oovs)
+                abs_ids_extend_vocab = data.abstract2ids(title, dec_vocab, self.article_oovs, self.title_phrase_indices)
                 _, self.target = self.get_dec_inp_targ_seqs(abs_ids_extend_vocab, hps.max_dec_steps, start_decoding, stop_decoding)
 
         # Store the original strings ART:

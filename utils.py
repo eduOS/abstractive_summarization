@@ -3,23 +3,25 @@
 from __future__ import unicode_literals, print_function
 from __future__ import absolute_import
 from __future__ import division
+
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import gen_array_ops
-
-from tensorflow.python.layers import base
-
-import os
-from termcolor import colored
 from tensorflow.python import pywrap_tensorflow
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.ops import array_ops
-import datetime
+from tensorflow.python.layers import base
 import tensorflow as tf
-from random import randrange
-import time
+from termcolor import colored
 import numpy as np
 import data
+
+import os
+from collections import defaultdict as dd
+from collections import OrderedDict as OD
+import datetime
+from random import randrange
+import time
 
 
 def ensure_exists(dire):
@@ -539,3 +541,10 @@ def my_gather(inputs, idx):
     indices = tf.stack((batch_idx, idx), axis=2)
     gathered_inputs = tf.gather_nd(inputs, indices)
     return gathered_inputs
+
+
+def get_phrase_oovs(words, phrase_indices):
+    df = dd(lambda: [], {})
+    [df[p].append(w) for w, p in zip(words, phrase_indices)]
+    df = OD(sorted(df.items()))
+    return list(filter(lambda x: len(x) > 1, df.values()))

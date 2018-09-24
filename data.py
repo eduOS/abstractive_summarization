@@ -112,10 +112,11 @@ class Vocab(object):
 def article2ids(article_words, phrase_indices, vocab):
     ids = []
     oovs = []
+    phrase_ids = []
     unk_id = vocab.word2id(UNKNOWN_TOKEN)
     phrase_oovs = get_phrase_oovs(article_words, phrase_indices)
-    article_words_phrases = list(set(article_words)) + phrase_oovs
-    for w in article_words_phrases:
+    # article_words_phrases = list(set(article_words)) + phrase_oovs
+    for w in article_words:
         i = vocab.word2id(w)
         if i == unk_id:
             if len(oovs) > oov_size:
@@ -126,11 +127,25 @@ def article2ids(article_words, phrase_indices, vocab):
             ids.append(vocab.shared_vocab_size + oov_num)
         else:
             ids.append(i)
-    return ids, oovs
+
+    # when doing attention the phrases are attended to the first layer words,
+    # because order is not important in attention mechanism
+    for po in phrase_oovs:
+        if len(oovs) > oov_size:
+            continue
+        if po not in oovs:
+            oovs.append(po)
+        oov_num = oovs.index(po)
+        phrase_ids.append(vocab.shared_vocab_size + oov_num)
+
+    return ids, phrase_oovs, phrase_ids, oovs
 
 
-def abstract2ids(abstract_words, vocab, article_oovs):
+def abstract2ids(abstract_words, vocab, article_oovs, title_phrase_indices):
     ids = []
+    phrase_oovs = get_phrase_oovs(abstract_words, title_phrase_indices)
+    shared_phrase_oovs = [po for po in phrase_oovs if po in article_oovs]
+
     unk_id = vocab.word2id(UNKNOWN_TOKEN)
     for w in abstract_words:
         i = vocab.word2id(w)

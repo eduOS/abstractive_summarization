@@ -84,6 +84,7 @@ tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be sa
 # Hyperparameters
 tf.app.flags.DEFINE_boolean("pointer_gen", True, "If make the model as pointer generator")
 tf.app.flags.DEFINE_boolean("enc_phrase_idx", True, "If make the encoder as hierarchical encoder")
+tf.app.flags.DEFINE_boolean("hybrid_decode", True, "if make the decoder a hybrid of word and phrase generator")
 
 tf.app.flags.DEFINE_integer('hidden_dim', 500, 'Dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 300, 'Dimension of word embeddings.')

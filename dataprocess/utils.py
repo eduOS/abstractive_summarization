@@ -10,7 +10,6 @@ from itertools import chain
 # from cntk.cleanser import Cleanser
 # from cntk.standardizer import Standardizer
 from nltk.tree import Tree
-from collections import defaultdict as dd
 import time
 import re
 import unicodedata
@@ -288,7 +287,20 @@ def traverse_tree(tree, depth=float('inf'), is_debug=0):
             yield leaves
 
 
-def get_phrase_oovs(words, phrase_indices):
-    df = dd(lambda: [], {})
-    [df[p].append(w) for w, p in zip(words, phrase_indices)]
-    return list(filter(lambda x: len(x) > 1, df.values()))
+
+def process_title(title, tokenize, pos_tagger, dec_queue=None, makevocab=0, is_debug=False, log_time=0, max_len=18):
+    title = title.replace("''", '"')
+    tokenized_title = list(tokenize(title))
+    if is_debug:
+        debug_line("tokenized title", tokenized_title)
+
+    title_pos = pos_tagger.tag(tokenized_title)
+
+    lowercased = list(map(lambda x: x[0].lower(), title_pos))
+    if makevocab:
+        dec_queue.put(dict(Counter(lowercased)))
+
+    if is_debug:
+        debug_line("lower cased title", str(lowercased))
+    lowercased = lowercased[:max_len]
+    return lowercased
