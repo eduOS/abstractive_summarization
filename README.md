@@ -1,4 +1,4 @@
 # generative_summarization
 Some work on generative summarization I did one year ago
 
-If you spot some bugs please let me know. Thanks. 
+If you spot any bugs please kindly let me know. Thanks. 
